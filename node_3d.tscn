@@ -1,0 +1,36 @@
+[gd_scene load_steps=8 format=3 uid="uid://d1ogrjskrl6tx"]
+
+[ext_resource type="Texture2D" uid="uid://ce2cfyegxnmd" path="res://jupitervector.png" id="1_a202f"]
+[ext_resource type="Texture2D" uid="uid://c3p2sw74vy8l5" path="res://ChatGPT Image Sep 8, 2025, 02_52_42 AM.png" id="2_noarx"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_a202f"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_a0tk4"]
+albedo_texture = ExtResource("1_a202f")
+
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_a0tk4"]
+panorama = ExtResource("2_noarx")
+
+[sub_resource type="Sky" id="Sky_r3fl7"]
+sky_material = SubResource("PanoramaSkyMaterial_a0tk4")
+
+[sub_resource type="Environment" id="Environment_jka67"]
+background_mode = 2
+sky = SubResource("Sky_r3fl7")
+
+[node name="Node3D" type="Node3D"]
+
+[node name="jupiter" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, 0, 0, -2.50965)
+mesh = SubResource("SphereMesh_a202f")
+surface_material_override/0 = SubResource("StandardMaterial3D_a0tk4")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.68849, 0.268337, -1.17134)
+light_energy = 16.0
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.999845, 0.0176269, 0, -0.0176269, 0.999845, 0, 0, 0, 1, 0, 0, -0.000509799)
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_jka67")
