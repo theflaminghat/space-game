@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c3p2sw74vy8l5"
-path.s3tc="res://.godot/imported/ChatGPT Image Sep 8, 2025, 02_52_42 AM.png-0018f1834c5b2c6b6d81d34eb9f38473.s3tc.ctex"
+uid="uid://cbaupxlckd4sl"
+path.s3tc="res://.godot/imported/skybox.png-eace0dd4ad45fb6d481d45258d1ed7fd.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -11,8 +11,8 @@ metadata={
 
 [deps]
 
-source_file="res://ChatGPT Image Sep 8, 2025, 02_52_42 AM.png"
-dest_files=["res://.godot/imported/ChatGPT Image Sep 8, 2025, 02_52_42 AM.png-0018f1834c5b2c6b6d81d34eb9f38473.s3tc.ctex"]
+source_file="res://skybox.png"
+dest_files=["res://.godot/imported/skybox.png-eace0dd4ad45fb6d481d45258d1ed7fd.s3tc.ctex"]
 
 [params]
 
