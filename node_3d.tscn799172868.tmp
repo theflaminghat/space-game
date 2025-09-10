@@ -1,0 +1,52 @@
+[gd_scene load_steps=11 format=3 uid="uid://d1ogrjskrl6tx"]
+
+[ext_resource type="Texture2D" uid="uid://ce2cfyegxnmd" path="res://jupitervector.png" id="1_a202f"]
+[ext_resource type="Script" uid="uid://bwixcgejmawaf" path="res://planet.gd" id="2_a0tk4"]
+[ext_resource type="Texture2D" uid="uid://d3els1phlgod2" path="res://my_image.png" id="2_noarx"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_a202f"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_a0tk4"]
+diffuse_mode = 3
+albedo_texture = ExtResource("1_a202f")
+roughness = 0.0
+
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_noarx"]
+panorama = ExtResource("2_noarx")
+
+[sub_resource type="Sky" id="Sky_r3fl7"]
+sky_material = SubResource("PanoramaSkyMaterial_noarx")
+
+[sub_resource type="Environment" id="Environment_jka67"]
+background_mode = 2
+sky = SubResource("Sky_r3fl7")
+
+[sub_resource type="Texture2DRD" id="Texture2DRD_a0tk4"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_r3fl7"]
+albedo_texture = SubResource("Texture2DRD_a0tk4")
+
+[node name="Node3D" type="Node3D"]
+
+[node name="jupiter" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, 0, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+surface_material_override/0 = SubResource("StandardMaterial3D_a0tk4")
+script = ExtResource("2_a0tk4")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13.8506, 1.17533, -1.99501)
+light_energy = 16.0
+omni_range = 4096.0
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.999845, 0.0176269, 0, -0.0176269, 0.999845, 0, 0, 0, 1, 0, 0, -0.000509799)
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_jka67")
+
+[node name="earth" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, 1.1789, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+surface_material_override/0 = SubResource("StandardMaterial3D_r3fl7")
+script = ExtResource("2_a0tk4")
