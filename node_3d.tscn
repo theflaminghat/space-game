@@ -1,9 +1,12 @@
-[gd_scene load_steps=12 format=3 uid="uid://d1ogrjskrl6tx"]
+[gd_scene load_steps=15 format=3 uid="uid://d1ogrjskrl6tx"]
 
 [ext_resource type="Texture2D" uid="uid://ce2cfyegxnmd" path="res://jupitervector.png" id="1_a202f"]
 [ext_resource type="Script" uid="uid://bwixcgejmawaf" path="res://planet.gd" id="2_a0tk4"]
 [ext_resource type="Texture2D" uid="uid://d3els1phlgod2" path="res://my_image.png" id="2_noarx"]
+[ext_resource type="Script" uid="uid://bxnd1yr1e3jyy" path="res://quit.gd" id="3_wc5p8"]
+[ext_resource type="Script" uid="uid://qebj276misa1" path="res://handler.gd" id="4_jka67"]
 [ext_resource type="Script" uid="uid://c7lo3nfyub1l0" path="res://saver_loader.gd" id="4_r3fl7"]
+[ext_resource type="Script" uid="uid://bumnblklwqp5m" path="res://player.gd" id="6_i5arm"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_noarx"]
 panorama = ExtResource("2_noarx")
@@ -30,16 +33,13 @@ roughness = 0.0
 
 [node name="Node3D" type="Node3D"]
 
-[node name="SaverLoader" type="Node" parent="."]
-script = ExtResource("4_r3fl7")
-
 [node name="WorldRoot" type="Node3D" parent="."]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="WorldRoot"]
 environment = SubResource("Environment_jka67")
 
 [node name="Camera3D" type="Camera3D" parent="WorldRoot"]
-transform = Transform3D(0.520243, 0.0091717, -0.853969, -0.0176269, 0.999845, 2.30213e-10, 0.853836, 0.0150528, 0.520324, -2.63043, 0, -0.000509799)
+transform = Transform3D(0.520243, 0.00917171, -0.853969, -0.0176269, 0.999845, 1.28608e-08, 0.853836, 0.0150528, 0.520324, -21.6366, 0, 15.8778)
 
 [node name="OmniLight3D" type="OmniLight3D" parent="WorldRoot"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.30658, -0.729421, 25.849)
@@ -54,26 +54,46 @@ skeleton = NodePath("../..")
 surface_material_override/0 = SubResource("StandardMaterial3D_r3fl7")
 script = ExtResource("2_a0tk4")
 
-[node name="RigidBody3D" type="RigidBody3D" parent="WorldRoot"]
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="save" type="Button" parent="CanvasLayer"]
+offset_right = 220.0
+offset_bottom = 59.0
+text = "SAVE"
+
+[node name="quit" type="Button" parent="CanvasLayer"]
+offset_left = 228.0
+offset_top = 1.0
+offset_right = 236.0
+offset_bottom = 9.0
+scale = Vector2(4.46842, 2.02171)
+text = "Quit"
+script = ExtResource("3_wc5p8")
+
+[node name="util" type="Node" parent="."]
+
+[node name="handler" type="Node" parent="util"]
+script = ExtResource("4_jka67")
+
+[node name="SaverLoader" type="Node" parent="util"]
+script = ExtResource("4_r3fl7")
+
+[node name="classes" type="Node" parent="."]
+
+[node name="planet" type="RigidBody3D" parent="classes"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.98871, 0, 0)
 gravity_scale = 0.0
-angular_velocity = Vector3(0, 0.174533, 0)
 
-[node name="jupiter" type="MeshInstance3D" parent="WorldRoot/RigidBody3D"]
+[node name="planetmesh" type="MeshInstance3D" parent="classes/planet"]
 transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, 0, 0, 0)
 mesh = SubResource("SphereMesh_a202f")
 skeleton = NodePath("../../..")
 surface_material_override/0 = SubResource("StandardMaterial3D_a0tk4")
 
-[node name="CanvasLayer" type="CanvasLayer" parent="."]
+[node name="player" type="Node" parent="classes"]
+script = ExtResource("6_i5arm")
 
-[node name="MarginContainer" type="MarginContainer" parent="CanvasLayer"]
-offset_right = 1152.0
-offset_bottom = 650.0
+[node name="sattelite" type="RigidBody3D" parent="classes"]
 
-[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/MarginContainer"]
-layout_mode = 2
-
-[node name="Button" type="Button" parent="CanvasLayer"]
-offset_right = 220.0
-offset_bottom = 59.0
+[connection signal="pressed" from="CanvasLayer/save" to="util/SaverLoader" method="save_game"]
+[connection signal="pressed" from="CanvasLayer/quit" to="CanvasLayer/quit" method="_on_pressed"]
