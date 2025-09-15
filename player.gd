@@ -1,11 +1,24 @@
-extends Node
+class_name player extends Node
 
-class_name sattelite
+var playerName:String
 
-var inventory:Array
-var position:String
+var inventory = {
+	"mercury": [],
+	"venus": [],
+	"earth": [],
+	"mars": [],
+	"jupiter": [],
+	"saturn": [],
+	"uranus": [],
+	"neptune": [],
+}
 
-func _init(initposition: String = "earth"):
-	var inventory = []
-	var position = initposition
-	
+func _init(playerName_:String = ""):
+	playerName = playerName_
+
+func addItem(planet:String,itemID:int,amount:float):
+	for i in inventory[planet]:
+		if i[0] == itemID:
+			i[1] = i[1] + amount
+			return
+	inventory[planet].append([itemID,amount])
