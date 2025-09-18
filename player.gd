@@ -1,6 +1,7 @@
 class_name player extends Node
 
 var playerName:String
+var money:float
 
 var inventory = {
 	"mercury": [],
