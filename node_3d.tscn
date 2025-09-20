@@ -196,8 +196,14 @@ offset_bottom = 23.0
 script = ExtResource("6_4arys")
 
 [node name="VBoxContainer2" type="VBoxContainer" parent="CanvasLayer2"]
-offset_right = 40.0
-offset_bottom = 40.0
+offset_left = 203.0
+offset_top = 100.0
+offset_right = 404.0
+offset_bottom = 348.0
+
+[node name="Button" type="Button" parent="CanvasLayer2/VBoxContainer2"]
+layout_mode = 2
+text = "Mercury"
 
 [node name="util" type="Node" parent="."]
 
