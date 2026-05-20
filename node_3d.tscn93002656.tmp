@@ -1,0 +1,224 @@
+[gd_scene format=3 uid="uid://d1ogrjskrl6tx"]
+
+[ext_resource type="Texture2D" uid="uid://ce2cfyegxnmd" path="res://jupitervector.png" id="1_a202f"]
+[ext_resource type="Script" uid="uid://cee8q3xh7034x" path="res://camera_3d.gd" id="2_6iypd"]
+[ext_resource type="Script" uid="uid://bwixcgejmawaf" path="res://planet.gd" id="2_a0tk4"]
+[ext_resource type="Texture2D" uid="uid://d3els1phlgod2" path="res://my_image.png" id="2_noarx"]
+[ext_resource type="Script" uid="uid://621s2gy68mxp" path="res://pausemenu.gd" id="3_jsk3o"]
+[ext_resource type="Script" uid="uid://bxnd1yr1e3jyy" path="res://quit.gd" id="3_wc5p8"]
+[ext_resource type="Script" uid="uid://qebj276misa1" path="res://handler.gd" id="4_jka67"]
+[ext_resource type="Script" uid="uid://c7lo3nfyub1l0" path="res://saver_loader.gd" id="4_r3fl7"]
+[ext_resource type="Script" uid="uid://dm61vl6t5cx1s" path="res://MoneyLabel.gd" id="6_4arys"]
+[ext_resource type="Script" uid="uid://bumnblklwqp5m" path="res://player.gd" id="6_i5arm"]
+
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_noarx"]
+panorama = ExtResource("2_noarx")
+
+[sub_resource type="Sky" id="Sky_r3fl7"]
+sky_material = SubResource("PanoramaSkyMaterial_noarx")
+
+[sub_resource type="Environment" id="Environment_jka67"]
+background_mode = 2
+sky = SubResource("Sky_r3fl7")
+
+[sub_resource type="SphereMesh" id="SphereMesh_a202f"]
+
+[sub_resource type="CanvasTexture" id="CanvasTexture_a0tk4"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_r3fl7"]
+albedo_color = Color(0.901961, 0.768627, 0, 1)
+albedo_texture = SubResource("CanvasTexture_a0tk4")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jsk3o"]
+albedo_color = Color(0.362829, 0.362829, 0.362829, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_4arys"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6iypd"]
+albedo_color = Color(1, 1, 0.615686, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wc5p8"]
+albedo_color = Color(0, 0, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wlxy5"]
+albedo_color = Color(0.874281, 0.342513, 0.0604839, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_4arys"]
+albedo_texture = ExtResource("1_a202f")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tereu"]
+albedo_color = Color(1, 0.731753, 0.42935, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cdqbm"]
+albedo_color = Color(0.69682, 1, 0.995453, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_imku0"]
+albedo_color = Color(0, 0, 1, 1)
+
+[node name="Node3D" type="Node3D" unique_id=294279539]
+
+[node name="WorldRoot" type="Node3D" parent="." unique_id=952714700]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="WorldRoot" unique_id=183274374]
+environment = SubResource("Environment_jka67")
+
+[node name="Camera3D" type="Camera3D" parent="WorldRoot" unique_id=175015565]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 11.489, 16.9747)
+script = ExtResource("2_6iypd")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="WorldRoot" unique_id=1663640782]
+light_energy = 1.3
+omni_range = 4096.0
+omni_attenuation = 0.0
+
+[node name="Plantets" type="Node3D" parent="WorldRoot" unique_id=1063116004]
+
+[node name="sun" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=105580425]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, 0, 0, 0)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_r3fl7")
+
+[node name="mercury" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=1248564427]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_jsk3o")
+script = ExtResource("2_a0tk4")
+radius = 2
+
+[node name="venus" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=321310597]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_4arys")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_6iypd")
+script = ExtResource("2_a0tk4")
+radius = 4
+speed = 0.8
+
+[node name="earth" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=1101851214]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_wc5p8")
+script = ExtResource("2_a0tk4")
+radius = 6
+speed = 0.65
+
+[node name="mars" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=891556420]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_wlxy5")
+script = ExtResource("2_a0tk4")
+radius = 8
+speed = 0.5
+
+[node name="jupiter" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=278445413]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_4arys")
+script = ExtResource("2_a0tk4")
+radius = 11
+speed = 0.25
+
+[node name="saturn" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=2019273582]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_tereu")
+script = ExtResource("2_a0tk4")
+radius = 14
+speed = 0.2
+
+[node name="uranus" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=1543945727]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_cdqbm")
+script = ExtResource("2_a0tk4")
+radius = 17
+speed = 0.17
+
+[node name="neptune" type="MeshInstance3D" parent="WorldRoot/Plantets" unique_id=1708553731]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -3.48319)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_imku0")
+script = ExtResource("2_a0tk4")
+radius = 20
+speed = 0.15
+
+[node name="pauseMenu" type="CanvasLayer" parent="." unique_id=967328902]
+visible = false
+script = ExtResource("3_jsk3o")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="pauseMenu" unique_id=1446786996]
+offset_left = 368.0
+offset_top = 178.0
+offset_right = 767.0
+offset_bottom = 629.0
+
+[node name="save" type="Button" parent="pauseMenu/VBoxContainer" unique_id=330244754]
+layout_mode = 2
+text = "Save"
+
+[node name="quit" type="Button" parent="pauseMenu/VBoxContainer" unique_id=1904729339]
+layout_mode = 2
+text = "Quit"
+script = ExtResource("3_wc5p8")
+
+[node name="CanvasLayer2" type="CanvasLayer" parent="." unique_id=1953739577]
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer2" unique_id=34069350]
+offset_top = 62.0
+offset_right = 198.0
+offset_bottom = 646.0
+
+[node name="planets" type="Button" parent="CanvasLayer2/VBoxContainer" unique_id=2086720103]
+layout_mode = 2
+text = "Planets
+"
+
+[node name="research" type="Button" parent="CanvasLayer2/VBoxContainer" unique_id=1647123332]
+layout_mode = 2
+text = "Research
+"
+
+[node name="launches" type="Button" parent="CanvasLayer2/VBoxContainer" unique_id=1145124479]
+layout_mode = 2
+text = "Launches"
+
+[node name="Label" type="Label" parent="CanvasLayer2" unique_id=2010095131]
+offset_right = 40.0
+offset_bottom = 23.0
+script = ExtResource("6_4arys")
+
+[node name="VBoxContainer2" type="VBoxContainer" parent="CanvasLayer2" unique_id=211001903]
+offset_left = 203.0
+offset_top = 100.0
+offset_right = 404.0
+offset_bottom = 348.0
+
+[node name="Button" type="Button" parent="CanvasLayer2/VBoxContainer2" unique_id=1003806176]
+layout_mode = 2
+text = "Mercury"
+
+[node name="util" type="Node" parent="." unique_id=942856469]
+
+[node name="handler" type="Node" parent="util" unique_id=1294348709]
+script = ExtResource("4_jka67")
+
+[node name="SaverLoader" type="Node" parent="util" unique_id=1489104399]
+script = ExtResource("4_r3fl7")
+
+[node name="classes" type="Node" parent="." unique_id=1128799648]
+
+[node name="player" type="Node" parent="classes" unique_id=869227068]
+script = ExtResource("6_i5arm")
+
+[node name="sattelite" type="RigidBody3D" parent="classes" unique_id=504893430]
+
+[connection signal="pressed" from="pauseMenu/VBoxContainer/save" to="util/SaverLoader" method="save_game"]
+[connection signal="pressed" from="pauseMenu/VBoxContainer/quit" to="pauseMenu/VBoxContainer/quit" method="_on_pressed"]

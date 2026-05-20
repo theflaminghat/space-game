@@ -1,0 +1,56 @@
+[gd_scene format=3 uid="uid://drkthahjaeho7"]
+
+[ext_resource type="Script" uid="uid://ddl2wdyq5abkt" path="res://StartMenu.gd" id="1_jwbto"]
+
+[node name="StartMenu" type="Control" unique_id=347533475]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_jwbto")
+
+[node name="Panel" type="Panel" parent="." unique_id=1008423970]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel" unique_id=2005022964]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 0
+offset_left = -1.0
+offset_right = 1919.0
+offset_bottom = 1080.0
+
+[node name="Label" type="Label" parent="Panel/VBoxContainer" unique_id=844896301]
+layout_mode = 2
+
+[node name="SaveNameInput" type="LineEdit" parent="Panel/VBoxContainer" unique_id=1471657729]
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Panel/VBoxContainer" unique_id=1790667570]
+layout_mode = 2
+
+[node name="NewGameButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1165866225]
+layout_mode = 2
+text = "New Game"
+
+[node name="LoadGameButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=335279312]
+layout_mode = 2
+text = "Load Game"
+
+[node name="Label2" type="Label" parent="Panel/VBoxContainer" unique_id=812987678]
+layout_mode = 2
+
+[node name="SaveList" type="ItemList" parent="Panel/VBoxContainer" unique_id=1277137842]
+layout_mode = 2
+auto_height = true
+item_count = 1
+item_0/text = "save 1"
+
+[node name="RefreshButton" type="Button" parent="Panel/VBoxContainer" unique_id=670421692]
+layout_mode = 2
+
+[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/NewGameButton" to="." method="_on_new_game_button_pressed"]
+[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/LoadGameButton" to="." method="_on_load_game_button_pressed"]

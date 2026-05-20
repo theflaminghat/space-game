@@ -1,21 +1,14 @@
 extends Camera3D
+var n=1.3
+func set_radius(radius:float):
+	n=1
+	position = Vector3(0,0,1)
 
-var x_pos
-var y_pos
-var time
-var radius = 5
-var offset = 0
-var speed = 0.65
-
-func move_to_planet(planet_name:String):
-	var planet = get_node("Planets/"+planet_name)
-	radius = planet.radius - 0.75
-	offset = planet.offset
-	speed = planet.speed
-
-func _process(delta):
-	time = Time.get_ticks_msec()/1000.0
-	x_pos = radius*sin(time*speed+offset)
-	y_pos = radius*cos(time*speed+offset)
-	position = Vector3(x_pos, 0, y_pos)
-	rotation_degrees.y = (time*speed+offset)*(180/3.1415)+180
+func _process(_delta):
+	if Input.is_action_just_released("zoom in"):
+		if n>1.3:
+			position -= Vector3(0,0,n)
+			n-=0.3
+	if Input.is_action_just_released("zoom out"):
+		n+=0.3
+		position += Vector3(0,0,n)
