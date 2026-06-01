@@ -10,6 +10,7 @@ var display_name: String
 var description: String
 var prerequisites: Array = []
 var cost: Dictionary = {}
+var boosts: Dictionary = {}   # e.g. {"research_speed": 0.10, "energy_production": 0.15}
 var research_time: float = 0.0
 var position: Vector2 = Vector2.ZERO
 

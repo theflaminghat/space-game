@@ -30,12 +30,16 @@ func move_to_planet(planet_name: String) -> void:
 		new_planet.add_child(self)
 		global_transform = old_global
 
-	# Put pivot at the planet origin
+	# Put pivot at the planet origin.
+	# Scale must be ONE — the planet's world scale is already inherited through
+	# the parent chain.  Setting scale = planet.scale here would make the pivot's
+	# world scale = planet_scale², shrinking small planets' camera distance to s²
+	# (< visual radius for any planet with s < 0.5, e.g. Mercury at 0.38).
 	position = Vector3.ZERO
 	rotation_degrees = Vector3.ZERO
-	scale = current_planet.scale
+	scale = Vector3.ONE
 
-	child_node.set_radius(scale.x)
+	child_node.set_radius(current_planet.scale.x)
 
 
 func _ready() -> void:
@@ -62,6 +66,9 @@ func _process(delta: float) -> void:
 		elif Input.is_action_pressed("down") and rotation_degrees.x < 90:
 			rotation_degrees.x += 1
 
+
+func _on_sun_button_pressed() -> void:
+	move_to_planet("sun")
 
 func _on_mercury_button_pressed() -> void:
 	move_to_planet("mercury")

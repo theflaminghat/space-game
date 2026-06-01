@@ -1,266 +1,223 @@
+class_name Satellite
 extends Node3D
 
-@export var orbit_center: Node3D
-@export var auto_find_parent_as_center: bool = true
+## Animated transfer craft.
+##
+## Runs on the same game-day clock the planets use (delta / seconds_per_day), so
+## it respects pause and every timescale.  Three phases:
+##
+##   TRANSFER – follows a Hohmann-style ellipse whose endpoints are re-evaluated
+##              every frame against the target planet's *live* position, so the
+##              craft homes onto the planet even though it keeps orbiting during
+##              the flight.  Flight time equals the mission's duration in days.
+##   ORBIT    – ("orbit" arrival) settles into a tilted parking orbit around the
+##              target and follows it indefinitely.
+##   LANDING  – ("land" arrival) spirals down to the surface, then frees itself.
 
-@export_group("Body / Gravity")
-@export var gravitational_parameter: float = 1000.0
-# This is μ = G*M in your game's units.
-# Larger μ = faster orbits.
+signal arrived(mode: String)
 
-@export_group("Initial Orbit")
-@export var semi_major_axis: float = 5.0
-@export_range(0.0, 0.99, 0.001) var eccentricity: float = 0.5
-@export_range(0.0, 360.0, 0.1) var inclination_degrees: float = 0.0
-@export_range(0.0, 360.0, 0.1) var longitude_of_ascending_node_degrees: float = 0.0
-@export_range(0.0, 360.0, 0.1) var argument_of_periapsis_degrees: float = 0.0
-@export_range(0.0, 360.0, 0.1) var initial_true_anomaly_degrees: float = 0.0
+# ── Tuning ──────────────────────────────────────────────────────────────────────
+const DOT_RADIUS         := 0.10
+const PARKING_SCALE      := 2.5     # parking radius = target.scale.x × this
+const PARKING_MIN        := 0.6     # …but never smaller than this
+const ORBIT_PERIOD_DAYS  := 40.0    # game-days per revolution in parking orbit
+const ORBIT_TILT_DEG     := 18.0
+const LAND_DESCEND_DAYS  := 8.0
+const DEFAULT_FLIGHT_DAYS := 60.0
 
-@export_group("Runtime")
-@export var face_velocity_direction: bool = false
-@export var use_kepler_third_law: bool = true
-@export var draw_debug_prints: bool = false
+const DOT_COLOR  := Color(1.00, 1.00, 1.00, 1.00)
 
-@export_group("Transfer Orbit")
-@export var start_in_transfer: bool = false
-@export var transfer_target_radius: float = 40.0
+enum State { TRANSFER, ORBIT, LANDING, DONE }
 
-var current_orbit_a: float = 20.0
-var current_orbit_e: float = 0.0
+# ── Public config (set by spawner before begin_transfer) ─────────────────────────
+var arrival_mode: String = "orbit"
+var orbit_center: Node3D = null
 
-var true_anomaly: float = 0.0
-var angular_momentum: float = 0.0
+# ── Live planet references ───────────────────────────────────────────────────────
+var _origin: Planet = null
+var _target: Planet = null
 
-var transfer_active: bool = false
-var transfer_target_a: float = 0.0
-var transfer_target_e: float = 0.0
-var transfer_target_final_radius: float = 0.0
-var transfer_started_outward: bool = true
+# ── Departure geometry captured at launch (world-relative to the sun) ────────────
+var _depart_angle:  float = 0.0
+var _depart_radius: float = 0.0
+var _outward:       bool  = true
 
-var velocity_vector: Vector3 = Vector3.ZERO
-var acceleration_vector: Vector3 = Vector3.ZERO
-var previous_velocity_vector: Vector3 = Vector3.ZERO
+# ── Game-day timing ──────────────────────────────────────────────────────────────
+var _flight_days:  float = DEFAULT_FLIGHT_DAYS
+var _elapsed_days: float = 0.0
+var _state:        int   = State.TRANSFER
+var _started:      bool  = false   # false until begin_transfer() is called
 
-var scalar_speed: float = 0.0
-var scalar_acceleration: float = 0.0
-var orbital_period: float = 0.0
+# ── Orbit / landing phase ────────────────────────────────────────────────────────
+var _orbit_angle: float = 0.0
+var _park_radius: float = 1.0
+var _orbit_tilt:  float = 0.0
+var _land_days:   float = 0.0
+
+# ── Visual nodes ─────────────────────────────────────────────────────────────────
+var _dot: MeshInstance3D = null
+
+# ── Lifecycle ────────────────────────────────────────────────────────────────────
 
 func _ready() -> void:
-	if orbit_center == null and auto_find_parent_as_center:
-		orbit_center = get_parent() as Node3D
+	SolarSystem.active_changed.connect(_sync_visibility)
+	SolarSystem.paused_changed.connect(_sync_visibility)
+	_build_dot()
+	_sync_visibility()
 
-	current_orbit_a = semi_major_axis
-	current_orbit_e = clamp(eccentricity, 0.0, 0.99)
-	true_anomaly = deg_to_rad(initial_true_anomaly_degrees)
+## Begin the transfer.  flight_days should be the mission's duration so the
+## animation finishes exactly when the mission does.
+func begin_transfer(center: Node3D, origin: Planet, target: Planet,
+		flight_days: float = DEFAULT_FLIGHT_DAYS) -> void:
+	orbit_center = center
+	_origin      = origin
+	_target      = target
+	_flight_days = maxf(flight_days, 1.0)
 
-	_recompute_orbit_constants()
+	var sun: Vector3 = center.global_position
+	var rel: Vector3 = origin.global_position - sun
+	_depart_radius = rel.length()
+	_depart_angle  = atan2(rel.x, rel.z)
+	_outward       = target.get_visual_radius() >= _depart_radius
 
-	if start_in_transfer:
-		begin_hohmann_transfer(transfer_target_radius)
+	_park_radius = maxf(target.scale.x * PARKING_SCALE, PARKING_MIN)
+	_orbit_tilt  = deg_to_rad(ORBIT_TILT_DEG)
 
-	_force_update_state()
+	_elapsed_days = 0.0
+	_state        = State.TRANSFER
+	_started      = true
+	_set_craft_pos(_transfer_point(0.0))
 
-func _physics_process(delta: float) -> void:
+func _process(delta: float) -> void:
+	if not _started:
+		return   # template / not-yet-launched satellite stays idle
 	if SolarSystem.paused or SolarSystem.ui_paused:
 		return
-	if orbit_center == null:
+	if _state == State.DONE:
 		return
-	if gravitational_parameter <= 0.0:
+	# Frozen solar system → planets are hidden and motionless; hold position.
+	if not SolarSystem.solar_system_active:
 		return
-	if current_orbit_a <= 0.0:
+	if _target == null or not is_instance_valid(_target):
+		queue_free()
 		return
-
-	var old_velocity: Vector3 = velocity_vector
-
-	# Keplerian angular rate:
-	# dθ/dt = h / r^2
-	var radius: float = _radius_from_true_anomaly(current_orbit_a, current_orbit_e, true_anomaly)
-	if radius <= 0.0001:
+	var spd: float = SolarSystem.seconds_per_day
+	if spd <= 0.0:
 		return
+	var delta_days: float = delta / spd
 
-	var angular_rate: float = angular_momentum / (radius * radius)
-	true_anomaly += angular_rate * delta
+	match _state:
+		State.TRANSFER: _process_transfer(delta_days)
+		State.ORBIT:    _process_orbit(delta_days)
+		State.LANDING:  _process_landing(delta_days)
 
-	# Keep bounded
-	if true_anomaly > TAU:
-		true_anomaly -= TAU
-	elif true_anomaly < -TAU:
-		true_anomaly += TAU
+# ── Phase: transfer ──────────────────────────────────────────────────────────────
 
-	_force_update_state()
+func _process_transfer(delta_days: float) -> void:
+	_elapsed_days += delta_days
+	var p: float = clampf(_elapsed_days / _flight_days, 0.0, 1.0)
+	_set_craft_pos(_transfer_point(p))
 
-	acceleration_vector = (velocity_vector - old_velocity) / max(delta, 0.000001)
-	scalar_acceleration = acceleration_vector.length()
+	if p >= 1.0:
+		arrived.emit(arrival_mode)
+		if arrival_mode == "land":
+			_state    = State.LANDING
+			_land_days = 0.0
+		else:
+			_state       = State.ORBIT
+			_orbit_angle = 0.0
 
-	if face_velocity_direction and velocity_vector.length() > 0.0001:
-		look_at(global_position + velocity_vector.normalized(), Vector3.UP)
+## Hohmann half-ellipse whose far end is recomputed every frame from the target's
+## current radius & angle, so the craft homes onto the moving planet.
+func _transfer_point(p: float) -> Vector3:
+	var sun: Vector3  = orbit_center.global_position
+	var trel: Vector3 = _target.global_position - sun
+	var r2: float = trel.length()
+	var a2: float = atan2(trel.x, trel.z)
+	var r1: float = _depart_radius
 
-	if transfer_active:
-		_check_transfer_completion()
+	var a: float = (r1 + r2) * 0.5
+	var e: float = absf(r2 - r1) / maxf(r1 + r2, 1.0e-4)
+	# theta runs 0→π (outward: periapsis→apoapsis) or π→2π (inward), so the
+	# radius starts at r1 and ends exactly at r2 in either direction.
+	var theta: float = (0.0 if _outward else PI) + p * PI
+	var r: float = a * (1.0 - e * e) / (1.0 + e * cos(theta))
 
-	if draw_debug_prints:
-		print("r=", _current_radius(), " speed=", scalar_speed, " accel=", scalar_acceleration, " T=", orbital_period)
+	var ang: float = _depart_angle + _prograde_sweep(_depart_angle, a2) * p
+	return sun + Vector3(sin(ang) * r, 0.0, cos(ang) * r)
 
-func _force_update_state() -> void:
-	var pos_local: Vector3 = _orbital_plane_position(current_orbit_a, current_orbit_e, true_anomaly)
-	var vel_local: Vector3 = _orbital_plane_velocity(current_orbit_a, current_orbit_e, true_anomaly)
+# ── Phase: orbit ─────────────────────────────────────────────────────────────────
 
-	var orbit_basis: Basis = _orbit_basis()
+func _process_orbit(delta_days: float) -> void:
+	_orbit_angle += TAU * delta_days / ORBIT_PERIOD_DAYS
+	_set_craft_pos(_orbit_point(_park_radius))
 
-	global_position = orbit_center.global_position + orbit_basis * pos_local
-	velocity_vector = orbit_basis * vel_local
-	scalar_speed = velocity_vector.length()
-
-	if use_kepler_third_law:
-		orbital_period = TAU * sqrt(pow(current_orbit_a, 3.0) / gravitational_parameter)
-	else:
-		orbital_period = 0.0
-
-func _recompute_orbit_constants() -> void:
-	current_orbit_e = clamp(current_orbit_e, 0.0, 0.99)
-	current_orbit_a = max(current_orbit_a, 0.001)
-
-	# Specific angular momentum:
-	# h = sqrt(μ a (1 - e^2))
-	angular_momentum = sqrt(gravitational_parameter * current_orbit_a * (1.0 - current_orbit_e * current_orbit_e))
-
-	if use_kepler_third_law:
-		# T = 2π * sqrt(a^3 / μ)
-		orbital_period = TAU * sqrt(pow(current_orbit_a, 3.0) / gravitational_parameter)
-	else:
-		orbital_period = 0.0
-
-func _radius_from_true_anomaly(a: float, e: float, theta: float) -> float:
-	var numerator: float = a * (1.0 - e * e)
-	var denominator: float = 1.0 + e * cos(theta)
-	return numerator / denominator
-
-func _orbital_plane_position(a: float, e: float, theta: float) -> Vector3:
-	var r: float = _radius_from_true_anomaly(a, e, theta)
-	return Vector3(
-		r * cos(theta),
-		0.0,
-		r * sin(theta)
+## A circular orbit around the target, tilted about the X axis so it reads as an
+## ellipse rather than an edge-on line from the default camera.
+func _orbit_point(radius: float) -> Vector3:
+	var cx: float = cos(_orbit_angle) * radius
+	var cz: float = sin(_orbit_angle) * radius
+	return _target.global_position + Vector3(
+		cx,
+		cz * sin(_orbit_tilt),
+		cz * cos(_orbit_tilt)
 	)
 
-func _orbital_plane_velocity(a: float, e: float, theta: float) -> Vector3:
-	# Perifocal-frame velocity:
-	# v = (μ / h) * [ -sinθ, 0, e + cosθ ]
-	var factor: float = gravitational_parameter / max(angular_momentum, 0.000001)
-	return Vector3(
-		-factor * sin(theta),
-		0.0,
-		factor * (e + cos(theta))
-	)
+# ── Phase: landing ───────────────────────────────────────────────────────────────
 
-func _orbit_basis() -> Basis:
-	var inc: float = deg_to_rad(inclination_degrees)
-	var lan: float = deg_to_rad(longitude_of_ascending_node_degrees)
-	var argp: float = deg_to_rad(argument_of_periapsis_degrees)
+func _process_landing(delta_days: float) -> void:
+	_land_days += delta_days
+	var p: float = clampf(_land_days / LAND_DESCEND_DAYS, 0.0, 1.0)
+	_orbit_angle += TAU * delta_days / (ORBIT_PERIOD_DAYS * 0.5)
+	var radius: float = lerpf(_park_radius, _target.scale.x * 0.9, p)
+	_set_craft_pos(_orbit_point(radius))
+	if p >= 1.0:
+		_state = State.DONE
+		queue_free()
 
-	var basis_lan: Basis = Basis(Vector3.UP, lan)
-	var basis_inc: Basis = Basis(Vector3.RIGHT, inc)
-	var basis_argp: Basis = Basis(Vector3.UP, argp)
+# ── Craft + trail positioning ────────────────────────────────────────────────────
 
-	return basis_lan * basis_inc * basis_argp
+func _set_craft_pos(pos: Vector3) -> void:
+	if _dot:
+		_dot.global_position = pos
 
-func _current_radius() -> float:
-	return (global_position - orbit_center.global_position).length()
+# ── Visibility (mirror the planets: hidden when frozen unless paused) ─────────────
 
-func get_speed() -> float:
-	return scalar_speed
+func _sync_visibility() -> void:
+	visible = SolarSystem.solar_system_active \
+		or SolarSystem.paused or SolarSystem.ui_paused
 
-func get_acceleration() -> float:
-	return scalar_acceleration
+# ── Mesh builders ────────────────────────────────────────────────────────────────
 
-func get_velocity_vector() -> Vector3:
-	return velocity_vector
+func _build_dot() -> void:
+	_dot = _make_sphere(DOT_RADIUS, DOT_COLOR)
+	add_child(_dot)
 
-func get_acceleration_vector() -> Vector3:
-	return acceleration_vector
+func _make_sphere(radius: float, color: Color) -> MeshInstance3D:
+	var s := SphereMesh.new()
+	s.radius = radius
+	s.height = radius * 2.0
+	s.radial_segments = 6
+	s.rings = 4
+	var inst := MeshInstance3D.new()
+	inst.mesh             = s
+	inst.cast_shadow      = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	inst.material_override = _unlit_mat(color, color.a < 1.0)
+	return inst
 
-func get_orbital_period() -> float:
-	return orbital_period
+func _unlit_mat(color: Color, transparent: bool) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	if transparent:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return mat
 
-func get_current_semi_major_axis() -> float:
-	return current_orbit_a
+# ── Helpers ──────────────────────────────────────────────────────────────────────
 
-func get_current_eccentricity() -> float:
-	return current_orbit_e
-
-func set_circular_orbit(radius: float) -> void:
-	current_orbit_a = max(radius, 0.001)
-	current_orbit_e = 0.0
-	true_anomaly = 0.0
-	transfer_active = false
-	_recompute_orbit_constants()
-	_force_update_state()
-
-func set_elliptical_orbit(a: float, e: float, theta_degrees: float = 0.0) -> void:
-	current_orbit_a = max(a, 0.001)
-	current_orbit_e = clamp(e, 0.0, 0.99)
-	true_anomaly = deg_to_rad(theta_degrees)
-	transfer_active = false
-	_recompute_orbit_constants()
-	_force_update_state()
-
-func begin_hohmann_transfer(target_radius: float) -> void:
-	var r1: float = _current_radius()
-	var r2: float = max(target_radius, 0.001)
-
-	if r1 <= 0.0001:
-		return
-	if abs(r2 - r1) < 0.0001:
-		return
-
-	# Hohmann transfer ellipse:
-	# periapsis = min(r1, r2), apoapsis = max(r1, r2)
-	var rp: float
-	var ra: float
-
-	if r2 > r1:
-		rp = r1
-		ra = r2
-		transfer_started_outward = true
-		true_anomaly = 0.0
-	else:
-		rp = r2
-		ra = r1
-		transfer_started_outward = false
-		true_anomaly = PI
-
-	transfer_target_a = 0.5 * (rp + ra)
-	transfer_target_e = (ra - rp) / (ra + rp)
-	transfer_target_final_radius = r2
-
-	current_orbit_a = transfer_target_a
-	current_orbit_e = clamp(transfer_target_e, 0.0, 0.99)
-	transfer_active = true
-
-	_recompute_orbit_constants()
-	_force_update_state()
-
-func _check_transfer_completion() -> void:
-	var tolerance: float = 0.25
-	var radius_now: float = _current_radius()
-
-	if abs(radius_now - transfer_target_final_radius) > tolerance:
-		return
-
-	# outward transfer finishes near apoapsis (theta ≈ π)
-	# inward transfer finishes near periapsis (theta ≈ 0)
-	if transfer_started_outward:
-		if abs(wrapf(true_anomaly, 0.0, TAU) - PI) < 0.08:
-			_complete_transfer()
-	else:
-		var wrapped: float = wrapf(true_anomaly, 0.0, TAU)
-		if wrapped < 0.08 or wrapped > TAU - 0.08:
-			_complete_transfer()
-
-func _complete_transfer() -> void:
-	current_orbit_a = max(transfer_target_final_radius, 0.001)
-	current_orbit_e = 0.0
-	true_anomaly = 0.0
-	transfer_active = false
-	_recompute_orbit_constants()
-	_force_update_state()
+## Positive (prograde) angular distance from a to b in [0, TAU).
+func _prograde_sweep(a: float, b: float) -> float:
+	var d: float = fmod(b - a, TAU)
+	if d < 0.0:
+		d += TAU
+	return d

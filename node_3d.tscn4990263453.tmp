@@ -1,0 +1,671 @@
+[gd_scene format=4 uid="uid://b0jhti3oe1xq6"]
+
+[ext_resource type="Texture2D" uid="uid://ce2cfyegxnmd" path="res://jupitervector.png" id="1_a202f"]
+[ext_resource type="Script" uid="uid://1yr2gr3hwj45" path="res://Game.gd" id="1_s0gvp"]
+[ext_resource type="Script" uid="uid://cee8q3xh7034x" path="res://camera_3d.gd" id="2_6iypd"]
+[ext_resource type="Script" uid="uid://bwixcgejmawaf" path="res://planet.gd" id="2_a0tk4"]
+[ext_resource type="Texture2D" uid="uid://d3els1phlgod2" path="res://my_image.png" id="2_noarx"]
+[ext_resource type="Script" uid="uid://cyalbtwe5bu3w" path="res://init_planets.gd" id="2_wlxy5"]
+[ext_resource type="Script" uid="uid://621s2gy68mxp" path="res://pausemenu.gd" id="3_jsk3o"]
+[ext_resource type="Texture2D" uid="uid://5p34rrgmrs1g" path="res://mercury.jpg" id="3_tcnuu"]
+[ext_resource type="Script" uid="uid://bxnd1yr1e3jyy" path="res://quit.gd" id="3_wc5p8"]
+[ext_resource type="Texture2D" uid="uid://dyn54tyxkccua" path="res://venus.png" id="5_3v7ru"]
+[ext_resource type="Script" uid="uid://cvr7gn0ykrfxg" path="res://camera_pivot.gd" id="5_cdqbm"]
+[ext_resource type="Texture2D" uid="uid://b6wbyq5ik0uue" path="res://earth.jpg" id="6_ealrb"]
+[ext_resource type="Script" uid="uid://bumnblklwqp5m" path="res://player.gd" id="6_i5arm"]
+[ext_resource type="Texture2D" uid="uid://ij6cvj5l3rek" path="res://mars.svg" id="7_ealrb"]
+[ext_resource type="Texture2D" uid="uid://5qs0s4kob0ln" path="res://jupiter.jpg" id="7_tuemg"]
+[ext_resource type="Texture2D" uid="uid://y38b2p0sa6r" path="res://neptune.png" id="9_i0g27"]
+[ext_resource type="Script" uid="uid://dpowh6itxdbvx" path="res://Schwarztiling.gd" id="9_s0gvp"]
+[ext_resource type="Script" uid="uid://dhcbbcs25wqx8" path="res://satellite.gd" id="11_dhlwf"]
+[ext_resource type="Script" uid="uid://lsji46abucgy" path="res://planet_buttons_container.gd" id="11_wlxy5"]
+[ext_resource type="Script" uid="uid://8edrkrwy636o" path="res://sidebar_control.gd" id="15_vxd74"]
+[ext_resource type="Script" uid="uid://ckt8md7fnecwq" path="res://EvolutionTreeUI.gd" id="17_jsnrv"]
+[ext_resource type="Script" uid="uid://p0tptchfpdya" path="res://EvolutionTreeControl.gd" id="18_lggff"]
+[ext_resource type="Script" uid="uid://ne7je2gmrh5g" path="res://ResearchTreeUI.gd" id="19_lggff"]
+[ext_resource type="Script" uid="uid://dotil5bn3mheo" path="res://statistics_page.gd" id="19_s0gvp"]
+[ext_resource type="Script" uid="uid://benflbtiiehyu" path="res://PlanetInfoPage.gd" id="22_5t8nk"]
+[ext_resource type="Script" uid="uid://c4ju33cdx51et" path="res://BuildPanel.gd" id="30_bpnl"]
+[ext_resource type="Script" uid="uid://dnofsspqkbs72" path="res://LaunchPanel.gd" id="31_lpnl"]
+
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_noarx"]
+panorama = ExtResource("2_noarx")
+
+[sub_resource type="Sky" id="Sky_r3fl7"]
+sky_material = SubResource("PanoramaSkyMaterial_noarx")
+
+[sub_resource type="Environment" id="Environment_jka67"]
+background_mode = 2
+sky = SubResource("Sky_r3fl7")
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_imku0"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_a202f"]
+material = SubResource("ShaderMaterial_imku0")
+
+[sub_resource type="CanvasTexture" id="CanvasTexture_a0tk4"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_r3fl7"]
+albedo_color = Color(0.901961, 0.768627, 0, 1)
+albedo_texture = SubResource("CanvasTexture_a0tk4")
+emission_enabled = true
+emission = Color(1, 1, 0, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_i0g27"]
+albedo_texture = ExtResource("3_tcnuu")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jsk3o"]
+albedo_color = Color(0.362829, 0.362829, 0.362829, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tcnuu"]
+albedo_texture = ExtResource("5_3v7ru")
+
+[sub_resource type="SphereMesh" id="SphereMesh_4arys"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6iypd"]
+albedo_color = Color(1, 1, 0.615686, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_lggff"]
+albedo_texture = ExtResource("6_ealrb")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wc5p8"]
+albedo_color = Color(0, 0, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_nu31w"]
+transparency = 1
+cull_mode = 2
+shading_mode = 0
+vertex_color_use_as_albedo = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_obt1j"]
+shading_mode = 0
+vertex_color_use_as_albedo = true
+
+[sub_resource type="ArrayMesh" id="ArrayMesh_2yde8"]
+_surfaces = [{
+"aabb": AABB(-0.53, -0.53, -0.53, 1.06, 1.06, 1.06),
+"attribute_data": PackedByteArray("////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A"),
+"format": 34359738383,
+"material": SubResource("StandardMaterial3D_nu31w"),
+"primitive": 3,
+"uv_scale": Vector4(0, 0, 0, 0),
+"vertex_count": 360,
+"vertex_data": PackedByteArray("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OCziuY1n/79UVamq/3/jsI1n/59xmP+/5DD/v/9/ntw4LOK547Aaz/8/xtP/f57cOCziuXGY/7/kMP+/47Aaz/8/xtP/f///AAD/v/9/ntw4LOK5G08az/8/OKz/f57cOCziuf9///8AAP+/G08az/8/OKz/f///AAD/v2Cj//85DOKp47Aaz/8/xtNgo///OQziqf9///8AAP+/47Aaz/8/xtP/v4znAACNp2Cj//85DOKpGs////8/OIxgo///OQziqf+/jOcAAI2nGs////8/OIz/P4znjSf/n2Cj//85DOKpG08az/8/OKxgo///OQziqf8/jOeNJ/+fG08az/8/OKz/P4znjSf/n6oqVNX/P/+fGs////8/OIyqKlTV/z//n/8/jOeNJ/+fGs////8/OIxyGHHYG09xmKoqVNX/P/+fAADjsHFYxrOqKlTV/z//n3IYcdgbT3GYAADjsHFYxrONJ/+/VVWqqqoqVNX/P/+fG08az/8/OKyqKlTV/z//n40n/79VVaqqG08az/8/OKyNJ/+/VVWqqmAjYKPGc/+vAADjsHFYxrNgI2CjxnP/r40n/79VVaqqAADjsHFYxrMAAP9//3//v2AjYKPGc/+v5DD/f42nxrNgI2CjxnP/rwAA/3//f/+/5DD/f42nxrP/P42n/3+Np2AjYKPGc/+vG08az/8/OKxgI2CjxnP/r/8/jaf/f42n47Aaz/8/xtNxmP+/5DD/v6qqqqr/P/+//3/jsI1n/5+qqqqq/z//v3GY/7/kMP+//3/jsI1n/5+Np3GYVFWpqqqqqqr/P/+/Gs//f3FYxrOqqqqq/z//v42ncZhUVamqGs//f3FYxrP/v42ncVg4zKqqqqr/P/+/47Aaz/8/xtOqqqqq/z//v/+/jadxWDjM/3/jsI1n/59xWHGYcZj/n55c/3//nxuW5DD/f42nxrOeXP9//58blnFYcZhxmP+f5DD/f42nxrNxWI1n47BxmJ5c/3//nxuW/38bT/8/OIyeXP9//58blnFYjWfjsHGY/38bT/8/OIz/f/9//38AgJ5c/3//nxuW/3/jsI1n/5+eXP9//58blv9//3//fwCA5DD/f42nxrMAAP9//3//v2AjnlzGc//PAADjsHFYxrNgI55cxnP/zwAA/3//f/+/AADjsHFYxrONJ/8/cVg4zGAjnlzGc//PG0/kMP8/xtNgI55cxnP/z40n/z9xWDjMG0/kMP8/xtP/P3FY/39x2GAjnlzGc//P5DD/f42nxrNgI55cxnP/z/8/cVj/f3HYAADjsHFYxrNyGHHYG09xmAAAntz/XxuWGs////8/OIwAAJ7c/18blnIYcdgbT3GYGs////8/OIz//////38AgAAAntz/XxuWGs8AAI1n/58AAJ7c/18blv//////fwCAGs8AAI1n/59yGI0nVFWpqgAAntz/XxuWAADjsHFYxrMAAJ7c/18blnIYjSdUVamqGs////8/OIz/v4znAACNp1TVVNUAAACA47Aaz/8/xtNU1VTVAAAAgP+/jOcAAI2n47Aaz/8/xtNx2P+//39x2FTVVNUAAACA///jsI2nxrNU1VTVAAAAgHHY/7//f3HY///jsI2nxrOM53HY47BxmFTVVNUAAACAGs////8/OIxU1VTVAAAAgIzncdjjsHGY47DkMP8/OKz/v3FYVVWqqqqqVFX/P/+fGs//f3FYxrOqqlRV/z//n/+/cVhVVaqqGs//f3FYxrONp41nG09xmKqqVFX/P/+f/38bT/8/OIyqqlRV/z//n42njWcbT3GY/38bT/8/OIxxmP8/jSf/n6qqVFX/P/+f47DkMP8/OKyqqlRV/z//n3GY/z+NJ/+f47DkMP8/OKxxmP8/jSf/n/9/YCM5DOKp/38bT/8/OIz/f2AjOQziqXGY/z+NJ/+f/38bT/8/OIyNZ/8/AACNp/9/YCM5DOKpG0/kMP8/xtP/f2AjOQziqY1n/z8AAI2nG0/kMP8/xtP/fwAAAAD/v/9/YCM5DOKp47DkMP8/OKz/f2AjOQziqf9/AAAAAP+/47DkMP8/OKz/fwAAAAD/v2CjAAA4LOK5G0/kMP8/xtNgowAAOCziuf9/AAAAAP+/G0/kMP8/xtP/P3IY5DD/v2CjAAA4LOK5Gs8AAI1n/59gowAAOCziuf8/chjkMP+/Gs8AAI1n/5//v3IYVFWpqmCjAAA4LOK547DkMP8/OKxgowAAOCziuf+/chhUVamq47DkMP8/OKz/v3IYVFWpqlTVqir/f/+fGs8AAI1n/59U1aoq/3//n/+/chhUVamqGs8AAI1n/5+M540ncZj/n1TVqir/f/+f///jsI2nxrNU1aoq/3//n4znjSdxmP+f///jsI2nxrNx2P8//3+Np1TVqir/f/+f47DkMP8/OKxU1aoq/3//n3HY/z//f42n47DkMP8/OKxx2P8//3+Np57cnlzGc/+v///jsI2nxrOe3J5cxnP/r3HY/z//f42n///jsI2nxrP///9//3//v57cnlzGc/+vGs//f3FYxrOe3J5cxnP/r////3//f/+/Gs//f3FYxrP/v3FYVVWqqp7cnlzGc/+v47DkMP8/OKye3J5cxnP/r/+/cVhVVaqq/38bT/8/OIyNp41nG09xmGCj/3//XxuWGs//f3FYxrNgo/9//18blo2njWcbT3GYGs//f3FYxrONp3GYVFWpqmCj/3//XxuW/3/jsI1n/59go/9//18blo2ncZhUVamq/3/jsI1n/5//f/9//38AgGCj/3//XxuW/38bT/8/OIxgo/9//18blv9//3//fwCAG0/kMP8/xtONZ/8/AACNp1RVVFUAAACA/38bT/8/OIxUVVRVAAAAgI1n/z8AAI2n/38bT/8/OIxxWI1n47BxmFRVVFUAAACA5DD/f42nxrNUVVRVAAAAgHFYjWfjsHGY5DD/f42nxrP/P3FY/39x2FRVVFUAAACAG0/kMP8/xtNUVVRVAAAAgP8/cVj/f3HYGs8AAI1n/5//P3IY5DD/v6oqqir/P/+/G0/kMP8/xtOqKqoq/z//v/8/chjkMP+/G0/kMP8/xtONJ/8/cVg4zKoqqir/P/+/AADjsHFYxrOqKqoq/z//v40n/z9xWDjMAADjsHFYxrNyGI0nVFWpqqoqqir/P/+/Gs8AAI1n/5+qKqoq/z//v3IYjSdUVamq///jsI2nxrOM540ncZj/n///ntz/nxuWGs8AAI1n/5///57c/58bloznjSdxmP+fGs8AAI1n/5///////38AgP//ntz/nxuWGs////8/OIz//57c/58blv//////fwCAGs////8/OIyM53HY47BxmP//ntz/nxuW///jsI2nxrP//57c/58blozncdjjsHGYGs//f3FYxrP///9//3//v57cYKPGc//P///jsI2nxrOe3GCjxnP/z////3//f/+////jsI2nxrNx2P+//39x2J7cYKPGc//P47Aaz/8/xtOe3GCjxnP/z3HY/7//f3HY47Aaz/8/xtP/v42ncVg4zJ7cYKPGc//PGs//f3FYxrOe3GCjxnP/z/+/jadxWDjM")
+}, {
+"aabb": AABB(-0.53106, -0.53106, -0.53106, 1.06212, 1.06212, 1.06212),
+"attribute_data": PackedByteArray("////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////"),
+"format": 34359738377,
+"material": SubResource("StandardMaterial3D_obt1j"),
+"primitive": 1,
+"uv_scale": Vector4(0, 0, 0, 0),
+"vertex_count": 720,
+"vertex_data": PackedByteArray("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")
+}]
+
+[sub_resource type="SphereMesh" id="SphereMesh_dhlwf"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_s0gvp"]
+albedo_texture = ExtResource("7_ealrb")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wlxy5"]
+albedo_color = Color(0.874281, 0.342513, 0.0604839, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ealrb"]
+albedo_texture = ExtResource("7_tuemg")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_4arys"]
+albedo_texture = ExtResource("1_a202f")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tereu"]
+albedo_color = Color(1, 0.731753, 0.42935, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cdqbm"]
+albedo_color = Color(0.69682, 1, 0.995453, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jsnrv"]
+albedo_texture = ExtResource("9_i0g27")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_imku0"]
+albedo_color = Color(0, 0, 1, 1)
+
+[node name="Game" type="Node3D" unique_id=294279539]
+process_mode = 3
+script = ExtResource("1_s0gvp")
+
+[node name="WorldRoot" type="Node3D" parent="." unique_id=952714700]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="WorldRoot" unique_id=183274374]
+environment = SubResource("Environment_jka67")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="WorldRoot" unique_id=1663640782]
+light_energy = 1.3
+omni_range = 4096.0
+omni_attenuation = 0.0
+
+[node name="Planets" type="Node3D" parent="WorldRoot" unique_id=1063116004]
+script = ExtResource("2_wlxy5")
+
+[node name="sun" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=105580425]
+transform = Transform3D(0.8352039, 0, -4.6251955, 0, 4.7, 0, 4.6251955, 0, 0.8352039, 0, 0, 0)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_r3fl7")
+
+[node name="mercury" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=1248564427]
+transform = Transform3D(0.06752712, 0, -0.373952, 0, 0.38, 0, 0.373952, 0, 0.06752712, -0.0816691, 0, -3.48319)
+material_override = SubResource("StandardMaterial3D_i0g27")
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_jsk3o")
+script = ExtResource("2_a0tk4")
+orbit_radius = 0.39
+orbit_offset = 1.0
+
+[node name="venus" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=321310597]
+transform = Transform3D(0.16881782, 0, -0.93487996, 0, 0.95, 0, 0.93487996, 0, 0.16881782, -0.0816691, 0, -3.48319)
+material_override = SubResource("StandardMaterial3D_tcnuu")
+mesh = SubResource("SphereMesh_4arys")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_6iypd")
+script = ExtResource("2_a0tk4")
+orbit_radius = 0.72
+orbit_offset = 3.0
+speed = 0.8
+
+[node name="earth" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=1101851214]
+transform = Transform3D(0.177703, 0, -0.984084, 0, 1, 0, 0.984084, 0, 0.177703, -0.0816691, 0, -1486.8705)
+material_override = SubResource("StandardMaterial3D_lggff")
+mesh = SubResource("SphereMesh_a202f")
+surface_material_override/0 = SubResource("StandardMaterial3D_wc5p8")
+script = ExtResource("2_a0tk4")
+orbit_offset = 5.0
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="WorldRoot/Planets/earth" unique_id=1820347847]
+process_mode = 1
+visible = false
+mesh = SubResource("ArrayMesh_2yde8")
+script = ExtResource("9_s0gvp")
+show_schwarz_triangles = true
+radius = 0.53
+face_color = Color(1, 1, 1, 0)
+color_by_face = false
+tile_alpha = 0.131
+hover_color = Color(1, 1, 1, 0.69803923)
+
+[node name="CameraPivot" type="Node3D" parent="WorldRoot/Planets/earth" unique_id=1096407542]
+process_mode = 1
+transform = Transform3D(0.17770307, 0, 0.9840845, 0, 1, 0, -0.9840845, 0, 0.17770307, 1463.2207, 0, 264.14105)
+script = ExtResource("5_cdqbm")
+
+[node name="Camera3D" type="Camera3D" parent="WorldRoot/Planets/earth/CameraPivot" unique_id=175015565]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1)
+fov = 48.1
+script = ExtResource("2_6iypd")
+
+[node name="Node3D" type="Node3D" parent="WorldRoot/Planets/earth" unique_id=1388968638]
+script = ExtResource("11_dhlwf")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WorldRoot/Planets/earth/Node3D" unique_id=1001580809]
+transform = Transform3D(0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 0, 0, 0)
+mesh = SubResource("SphereMesh_dhlwf")
+
+[node name="mars" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=891556420]
+transform = Transform3D(0.094182566, 0, -0.5215646, 0, 0.53, 0, 0.5215646, 0, 0.094182566, -0.0816691, 0, -3.48319)
+material_override = SubResource("StandardMaterial3D_s0gvp")
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_wlxy5")
+script = ExtResource("2_a0tk4")
+orbit_radius = 1.52
+orbit_offset = 17.0
+speed = 0.5
+
+[node name="jupiter" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=278445413]
+transform = Transform3D(1.9547327, 0, -10.824926, 0, 11, 0, 10.824926, 0, 1.9547327, 1, -1.018, -88.792)
+material_override = SubResource("StandardMaterial3D_ealrb")
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_4arys")
+script = ExtResource("2_a0tk4")
+orbit_radius = 5.2
+orbit_offset = 13.0
+speed = 0.25
+
+[node name="saturn" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=2019273582]
+transform = Transform3D(1.6881782, 0, -9.3488, 0, 9.5, 0, 9.3488, 0, 1.6881782, 64.43952, -0.93029785, -48.40859)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_tereu")
+script = ExtResource("2_a0tk4")
+orbit_radius = 9.58
+orbit_offset = 7.0
+speed = 0.2
+
+[node name="uranus" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=1543945727]
+transform = Transform3D(0.71081185, 0, -3.9363368, 0, 4, 0, 3.9363368, 0, 0.71081185, 48.236965, 8.83794, -25.215597)
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_cdqbm")
+script = ExtResource("2_a0tk4")
+orbit_radius = 19.22
+orbit_offset = 11.0
+speed = 0.17
+
+[node name="neptune" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=1708553731]
+transform = Transform3D(0.69304156, 0, -3.8379285, 0, 3.9, 0, 3.8379285, 0, 0.69304156, 21.234634, -37.21237, -64.42986)
+material_override = SubResource("StandardMaterial3D_jsnrv")
+mesh = SubResource("SphereMesh_a202f")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_imku0")
+script = ExtResource("2_a0tk4")
+orbit_radius = 30.06
+speed = 0.15
+
+[node name="main_ui" type="CanvasLayer" parent="." unique_id=1953739577]
+process_mode = 1
+
+[node name="VBoxContainer3" type="VBoxContainer" parent="main_ui" unique_id=1648592252]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="main_ui/VBoxContainer3" unique_id=1638367119]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+
+[node name="time" type="Label" parent="main_ui/VBoxContainer3/HBoxContainer" unique_id=2056560030]
+process_mode = 3
+layout_mode = 2
+text = "2026 : 00"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="main_ui/VBoxContainer3/HBoxContainer" unique_id=84376571]
+layout_mode = 2
+
+[node name="low speed" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer" unique_id=1975969716]
+layout_mode = 2
+
+[node name="medium speed" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer" unique_id=950534775]
+layout_mode = 2
+
+[node name="high speed" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer" unique_id=892429898]
+layout_mode = 2
+
+[node name="ScienceLabel" type="Label" parent="main_ui/VBoxContainer3/HBoxContainer" unique_id=1471957785]
+layout_mode = 2
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="main_ui/VBoxContainer3" unique_id=1565835851]
+process_mode = 1
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("15_vxd74")
+
+[node name="sidebar" type="VBoxContainer" parent="main_ui/VBoxContainer3/HBoxContainer2" unique_id=34069350]
+custom_minimum_size = Vector2(150, 70)
+layout_mode = 2
+
+[node name="top view" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=2032532238]
+layout_mode = 2
+text = "Top View"
+
+[node name="planets" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=2086720103]
+layout_mode = 2
+text = "Planets
+"
+
+[node name="research" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=1647123332]
+layout_mode = 2
+text = "Research
+"
+
+[node name="launches" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=1145124479]
+layout_mode = 2
+text = "Launches"
+
+[node name="evolution" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=1833641534]
+layout_mode = 2
+text = "Evolution"
+
+[node name="statistics" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=101862014]
+layout_mode = 2
+text = "Statistics"
+
+[node name="planet_buttons_container" type="VBoxContainer" parent="main_ui/VBoxContainer3/HBoxContainer2" unique_id=211001903]
+visible = false
+layout_mode = 2
+script = ExtResource("11_wlxy5")
+
+[node name="mercury_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=1003806176]
+layout_mode = 2
+text = "Mercury"
+
+[node name="venus_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=1017978229]
+layout_mode = 2
+text = "Venus"
+
+[node name="earth_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=1778181887]
+layout_mode = 2
+text = "Earth"
+
+[node name="mars_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=1147239021]
+layout_mode = 2
+text = "Mars"
+
+[node name="jupiter_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=2092666954]
+layout_mode = 2
+text = "Jupiter"
+
+[node name="saturn_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=459438570]
+layout_mode = 2
+text = "Saturn"
+
+[node name="uranus_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=1085719257]
+layout_mode = 2
+text = "Uranus"
+
+[node name="neptune_button" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container" unique_id=2030703277]
+layout_mode = 2
+text = "Neptune"
+
+[node name="research_tree" type="Control" parent="main_ui/VBoxContainer3/HBoxContainer2" unique_id=629507370]
+process_mode = 1
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("19_lggff")
+
+[node name="EvolutionTreeUI" type="Control" parent="main_ui/VBoxContainer3/HBoxContainer2" unique_id=808248940]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("17_jsnrv")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/EvolutionTreeUI" unique_id=1088197803]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 262.0
+offset_bottom = -238.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="EvolutionTree" type="Control" parent="main_ui/VBoxContainer3/HBoxContainer2/EvolutionTreeUI/ScrollContainer" unique_id=304027609]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("18_lggff")
+
+[node name="StatisticsPage" type="Control" parent="main_ui/VBoxContainer3/HBoxContainer2" unique_id=1129188956]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("19_s0gvp")
+
+[node name="MarginContainer" type="MarginContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage" unique_id=7773241]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer" unique_id=907669731]
+layout_mode = 2
+
+[node name="HeaderBar" type="HBoxContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer" unique_id=1410837399]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer/HeaderBar" unique_id=1805704564]
+layout_mode = 2
+
+[node name="Spacer" type="Control" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer/HeaderBar" unique_id=1898155501]
+layout_mode = 2
+
+[node name="YearLabel" type="Label" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer/HeaderBar" unique_id=17737058]
+layout_mode = 2
+
+[node name="SummaryPanel" type="PanelContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer" unique_id=1048898908]
+layout_mode = 2
+
+[node name="SummaryGrid" type="GridContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer/SummaryPanel" unique_id=940765255]
+layout_mode = 2
+
+[node name="MainTabs" type="TabContainer" parent="main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage/MarginContainer/VBoxContainer" unique_id=1936505010]
+layout_mode = 2
+
+[node name="PlanetInfoPage" type="PanelContainer" parent="main_ui" unique_id=1975437636]
+visible = false
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -300.0
+grow_horizontal = 0
+script = ExtResource("22_5t8nk")
+
+[node name="MarginContainer" type="MarginContainer" parent="main_ui/PlanetInfoPage" unique_id=1120603928]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="main_ui/PlanetInfoPage/MarginContainer" unique_id=1451896717]
+layout_mode = 2
+
+[node name="PlanetName" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=862707191]
+layout_mode = 2
+text = "Planet"
+
+[node name="GridContainer" type="GridContainer" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=293874574]
+layout_mode = 2
+columns = 2
+
+[node name="EnergyLabel" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=2014918038]
+layout_mode = 2
+text = "Energy:"
+
+[node name="EnergyValue" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=1696925854]
+layout_mode = 2
+
+[node name="PopulationLabel" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=1597267245]
+layout_mode = 2
+text = "Population:"
+
+[node name="PopulationValue" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=309057453]
+layout_mode = 2
+
+[node name="ComputeLabel" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=2033097229]
+layout_mode = 2
+text = "Compute:"
+
+[node name="ComputeValue" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=137652594]
+layout_mode = 2
+
+[node name="ResourcesTitle" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=33976238]
+layout_mode = 2
+text = "Resources:"
+
+[node name="ResourcesList" type="ItemList" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=1933055307]
+layout_mode = 2
+
+[node name="BuildingsTitle" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=1894854691]
+layout_mode = 2
+text = "Buildings:"
+
+[node name="BuildingsList" type="ItemList" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=389667313]
+layout_mode = 2
+
+[node name="BuildPanel" type="PanelContainer" parent="main_ui" unique_id=100201]
+visible = false
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -643.0
+offset_top = -304.0
+grow_horizontal = 0
+grow_vertical = 0
+script = ExtResource("30_bpnl")
+
+[node name="MarginContainer" type="MarginContainer" parent="main_ui/BuildPanel" unique_id=100202]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="main_ui/BuildPanel/MarginContainer" unique_id=100203]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="main_ui/BuildPanel/MarginContainer/VBoxContainer" unique_id=100204]
+layout_mode = 2
+text = "Build Infrastructure"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="main_ui/BuildPanel/MarginContainer/VBoxContainer" unique_id=100205]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BuildList" type="VBoxContainer" parent="main_ui/BuildPanel/MarginContainer/VBoxContainer/ScrollContainer" unique_id=100206]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LaunchPanel" type="PanelContainer" parent="main_ui" unique_id=200001]
+visible = false
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -400.0
+grow_horizontal = 0
+script = ExtResource("31_lpnl")
+
+[node name="MarginContainer" type="MarginContainer" parent="main_ui/LaunchPanel" unique_id=200002]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="main_ui/LaunchPanel/MarginContainer" unique_id=200003]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer" unique_id=200004]
+layout_mode = 2
+text = "Launch Mission"
+
+[node name="FormGrid" type="GridContainer" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer" unique_id=200005]
+layout_mode = 2
+columns = 2
+
+[node name="TargetLabel" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200006]
+layout_mode = 2
+text = "Target:"
+
+[node name="PlanetOption" type="OptionButton" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200007]
+layout_mode = 2
+
+[node name="MissionLabel" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200008]
+layout_mode = 2
+text = "Mission:"
+
+[node name="MissionOption" type="OptionButton" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200009]
+layout_mode = 2
+
+[node name="StartLabel" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200010]
+layout_mode = 2
+text = "Start:"
+
+[node name="StartOption" type="OptionButton" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200011]
+layout_mode = 2
+
+[node name="DurationLabel" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200012]
+layout_mode = 2
+text = "Duration:"
+
+[node name="EndOption" type="OptionButton" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200013]
+layout_mode = 2
+
+[node name="CostTitle" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200014]
+layout_mode = 2
+text = "Cost:"
+
+[node name="CostValue" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/FormGrid" unique_id=200015]
+layout_mode = 2
+text = "-"
+
+[node name="LaunchButton" type="Button" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer" unique_id=200016]
+layout_mode = 2
+text = "Launch"
+
+[node name="HSeparator" type="HSeparator" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer" unique_id=200017]
+layout_mode = 2
+
+[node name="ActiveLabel" type="Label" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer" unique_id=200018]
+layout_mode = 2
+text = "Active Launches:"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer" unique_id=200019]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LaunchList" type="VBoxContainer" parent="main_ui/LaunchPanel/MarginContainer/VBoxContainer/ScrollContainer" unique_id=200020]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="pauseMenu" type="CanvasLayer" parent="." unique_id=967328902]
+process_mode = 3
+visible = false
+script = ExtResource("3_jsk3o")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="pauseMenu" unique_id=1446786996]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -199.5
+offset_top = -225.5
+offset_right = 199.5
+offset_bottom = 225.5
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="save" type="Button" parent="pauseMenu/VBoxContainer" unique_id=330244754]
+layout_mode = 2
+text = "Save"
+
+[node name="quit" type="Button" parent="pauseMenu/VBoxContainer" unique_id=1904729339]
+layout_mode = 2
+text = "Quit"
+script = ExtResource("3_wc5p8")
+
+[node name="classes" type="Node" parent="." unique_id=1128799648]
+
+[node name="player" type="Node" parent="classes" unique_id=869227068]
+script = ExtResource("6_i5arm")
+
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer/low speed" to="." method="_on_low_speed_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer/medium speed" to="." method="_on_medium_speed_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer/high speed" to="." method="_on_high_speed_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/top view" to="WorldRoot/Planets/earth/CameraPivot" method="_on_top_view_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/top view" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_top_view_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/planets" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_planets_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/research" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_research_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/launches" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_launches_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/evolution" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_evolution_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/statistics" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_statistics_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/mercury_button" to="." method="_on_mercury_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/mercury_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_mercury_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/mercury_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_mercury_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/venus_button" to="." method="_on_venus_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/venus_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_venus_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/venus_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_venus_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/earth_button" to="." method="_on_earth_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/earth_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_earth_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/earth_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_earth_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/mars_button" to="." method="_on_mars_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/mars_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_mars_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/mars_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_mars_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/jupiter_button" to="." method="_on_jupiter_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/jupiter_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_jupiter_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/jupiter_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_jupiter_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/saturn_button" to="." method="_on_saturn_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/saturn_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_saturn_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/uranus_button" to="." method="_on_uranus_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/uranus_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_uranus_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/neptune_button" to="." method="_on_neptune_button_pressed"]
+[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/planet_buttons_container/neptune_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_neptune_button_pressed"]
+[connection signal="pressed" from="pauseMenu/VBoxContainer/save" to="." method="_on_save_pressed"]
+[connection signal="pressed" from="pauseMenu/VBoxContainer/quit" to="pauseMenu/VBoxContainer/quit" method="_on_pressed"]

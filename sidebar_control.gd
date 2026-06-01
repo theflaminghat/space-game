@@ -2,15 +2,24 @@ extends HBoxContainer
 
 @onready var research_tree: Control = $research_tree
 @onready var evolution_tree: Control = $EvolutionTreeUI
-@onready var planet_info: PanelContainer = $PlanetInfoPage
 @onready var statistics: Control = $StatisticsPage
-@onready var planet_buttons: VBoxContainer = $planet_buttons_container
+@onready var timeline_panel: Control = $TimelinePanel
+@onready var politics_page: Control = $PoliticsPage
+@onready var planet_info_page: PanelContainer = $"../../PlanetInfoPage"
+@onready var build_panel: PanelContainer = $"../../BuildPanel"
+@onready var launch_panel: PanelContainer = $"../../LaunchPanel"
+@onready var production_panel: PanelContainer = $"../../ProductionPanel"
 
 func hide_all() -> void:
 	research_tree.hide()
 	evolution_tree.hide()
 	statistics.hide()
-	planet_buttons.hide()
+	timeline_panel.hide()
+	politics_page.hide()
+	planet_info_page.hide()
+	build_panel.hide()
+	launch_panel.hide()
+	production_panel.hide()
 
 func _on_top_view_pressed() -> void:
 	hide_all()
@@ -23,6 +32,7 @@ func _on_research_pressed() -> void:
 
 func _on_launches_pressed() -> void:
 	hide_all()
+	launch_panel.show()
 
 
 func _on_evolution_pressed() -> void:
@@ -34,8 +44,17 @@ func _on_statistics_pressed() -> void:
 	hide_all()
 	statistics.show()
 
-var planet_data = {"name":"earth"}
-func _on_planets_pressed() -> void:
+
+func _on_timeline_pressed() -> void:
 	hide_all()
-	planet_info.set_planet_info(planet_data)
-	planet_buttons.show()
+	timeline_panel.show()
+
+
+func _on_politics_pressed() -> void:
+	hide_all()
+	politics_page.show()
+
+
+func _on_production_pressed() -> void:
+	hide_all()
+	production_panel.show()

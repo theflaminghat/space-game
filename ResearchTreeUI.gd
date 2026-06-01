@@ -31,12 +31,17 @@ var _tooltip_cost: Label
 var _info_panel: PanelContainer
 var _info_title: Label
 var _info_desc: Label
+var _info_unlocks: Label
 var _info_cost: Label
+var _info_boosts: Label
 var _progress_bar: ProgressBar
 var _research_btn: Button
 
+var _tooltip_boosts: Label
+
 var _node_rects: Dictionary = {}
 var _node_controls: Dictionary = {}
+var _queue_labels: Dictionary = {}
 var _selected_id: String = ""
 var _tooltip_timer: Timer
 var _hovered_node_id: String = ""
@@ -54,6 +59,7 @@ func _ready() -> void:
 
 	ResearchTree.node_state_changed.connect(_on_node_state_changed)
 	ResearchTree.research_completed.connect(_on_research_completed)
+	ResearchTree.queue_changed.connect(_update_queue_labels)
 
 	if ResearchTree.nodes.is_empty():
 		ResearchTree.resources = {
@@ -162,9 +168,12 @@ func _build_scene() -> void:
 	_tooltip_title = _make_label("", true)
 	_tooltip_desc = _make_label("", false, true)
 	_tooltip_cost = _make_label("")
+	_tooltip_boosts = _make_label("")
+	_tooltip_boosts.add_theme_color_override("font_color", Color(1.0, 0.82, 0.22))
 	tt_box.add_child(_tooltip_title)
 	tt_box.add_child(_tooltip_desc)
 	tt_box.add_child(_tooltip_cost)
+	tt_box.add_child(_tooltip_boosts)
 
 	_tooltip_timer = Timer.new()
 	_tooltip_timer.wait_time = 0.08
@@ -191,6 +200,8 @@ func _build_scene() -> void:
 	_info_title = _make_label("", true)
 	_info_desc = _make_label("", false, true)
 	_info_cost = _make_label("")
+	_info_boosts = _make_label("")
+	_info_boosts.add_theme_color_override("font_color", Color(1.0, 0.82, 0.22))
 
 	_progress_bar = ProgressBar.new()
 	_progress_bar.min_value = 0
@@ -199,12 +210,18 @@ func _build_scene() -> void:
 	_progress_bar.custom_minimum_size = Vector2(0, 18)
 
 	_research_btn = Button.new()
-	_research_btn.text = "Research"
+	_research_btn.text = "Add to Queue"
 	_research_btn.pressed.connect(_on_research_button_pressed)
+
+	_info_unlocks = _make_label("", false, true)
+	_info_unlocks.add_theme_color_override("font_color", Color(0.70, 0.85, 1.00))
+	_info_unlocks.add_theme_font_size_override("font_size", 12)
 
 	info_box.add_child(_info_title)
 	info_box.add_child(_info_desc)
+	info_box.add_child(_info_unlocks)
 	info_box.add_child(_info_cost)
+	info_box.add_child(_info_boosts)
 	info_box.add_child(_progress_bar)
 	info_box.add_child(_research_btn)
 
@@ -226,6 +243,7 @@ func _populate_tree() -> void:
 
 	_node_rects.clear()
 	_node_controls.clear()
+	_queue_labels.clear()
 
 	var min_x: float = 999999.0
 	var min_y: float = 999999.0
@@ -297,6 +315,29 @@ func _create_node_button(node: ResearchNode, pos: Vector2) -> void:
 	btn.mouse_entered.connect(_on_node_hovered.bind(node.id, btn))
 	btn.mouse_exited.connect(_on_node_unhovered.bind(node.id, btn))
 
+	# Queue-position badge: small label anchored to top-right of the button
+	var queue_label := Label.new()
+	queue_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	queue_label.anchor_left  = 1.0
+	queue_label.anchor_right  = 1.0
+	queue_label.anchor_top    = 0.0
+	queue_label.anchor_bottom = 0.0
+	queue_label.offset_left   = -24.0
+	queue_label.offset_right  = -3.0
+	queue_label.offset_top    = 3.0
+	queue_label.offset_bottom = 21.0
+	queue_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	queue_label.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	queue_label.add_theme_font_size_override("font_size", 11)
+	queue_label.z_index = 10
+	queue_label.visible = false
+	var badge_bg := StyleBoxFlat.new()
+	badge_bg.bg_color = Color(0.0, 0.0, 0.0, 0.78)
+	badge_bg.set_corner_radius_all(4)
+	queue_label.add_theme_stylebox_override("normal", badge_bg)
+	btn.add_child(queue_label)
+	_queue_labels[node.id] = queue_label
+
 	_tree_container.add_child(btn)
 	_node_controls[node.id] = btn
 	_node_rects[node.id] = Rect2(pos, Vector2(NODE_W, NODE_H))
@@ -353,12 +394,18 @@ func _draw_connections() -> void:
 			var child_node: ResearchNode = ResearchTree.get_research_node(child_id)
 			var col: Color = Color(0.33, 0.33, 0.33)
 
-			if child_node.state == ResearchNode.State.AVAILABLE:
-				col = Color(0.45, 0.78, 1.0, 0.95)
+			if child_node.state == ResearchNode.State.UNLOCKED:
+				# Both ends done — full green
+				col = Color(0.35, 0.92, 0.50, 0.90)
 			elif child_node.state == ResearchNode.State.RESEARCHING:
 				col = Color(1.0, 0.78, 0.20, 0.95)
-			elif child_node.state == ResearchNode.State.UNLOCKED:
-				col = Color(0.35, 0.92, 0.50, 0.90)
+			elif child_node.state == ResearchNode.State.AVAILABLE:
+				col = Color(0.45, 0.78, 1.0, 0.95)
+			elif node.state == ResearchNode.State.UNLOCKED:
+				# Parent is done but child still needs other prerequisites —
+				# dim green so the line lights up along the numerical_methods
+				# path even when the child is waiting on a second prerequisite.
+				col = Color(0.25, 0.65, 0.35, 0.65)
 
 			_draw_elbow_connection(start, end, col, LINE_WIDTH)
 
@@ -395,23 +442,37 @@ func _on_node_pressed(node_id: String) -> void:
 
 	_info_title.text = node.display_name
 	_info_desc.text = node.description
+	var unlocks_text: String = _format_unlocks(node)
+	_info_unlocks.text = unlocks_text
+	_info_unlocks.visible = not unlocks_text.is_empty()
 	_info_cost.text = _format_cost(node.cost)
+	_info_boosts.text = _format_boosts(node.boosts)
+	_info_boosts.visible = not node.boosts.is_empty()
 	_progress_bar.value = node.progress * 100.0
 	_progress_bar.visible = node.state == ResearchNode.State.RESEARCHING
+
+	var is_active: bool = ResearchTree.active_research != null \
+		and ResearchTree.active_research.id == node_id
+	var queue_pos: int = ResearchTree.research_queue.find(node_id)
+	var in_queue: bool = queue_pos >= 0
 
 	match node.state:
 		ResearchNode.State.LOCKED:
 			_research_btn.text = "Locked"
 			_research_btn.disabled = true
 		ResearchNode.State.AVAILABLE:
-			_research_btn.text = "Research"
+			_research_btn.text = "Add to Queue"
 			_research_btn.disabled = false
 		ResearchNode.State.RESEARCHING:
-			_research_btn.text = "Cancel"
+			_research_btn.text = "Cancel Research"
 			_research_btn.disabled = false
 		ResearchNode.State.UNLOCKED:
 			_research_btn.text = "Unlocked ✓"
 			_research_btn.disabled = true
+
+	if in_queue:
+		_research_btn.text = "Remove from Queue (#%d)" % (queue_pos + 2)
+		_research_btn.disabled = false
 
 	_info_panel.show()
 
@@ -429,6 +490,8 @@ func _on_node_hovered(node_id: String, btn: Button) -> void:
 	_tooltip_title.text = node.display_name
 	_tooltip_desc.text = node.description
 	_tooltip_cost.text = _format_cost(node.cost)
+	_tooltip_boosts.text = _format_boosts(node.boosts)
+	_tooltip_boosts.visible = not node.boosts.is_empty()
 
 	_tooltip.position = Vector2(-10000, -10000)
 	_tooltip.visible = true
@@ -463,9 +526,15 @@ func _on_research_button_pressed() -> void:
 	if node == null:
 		return
 
-	if node.state == ResearchNode.State.RESEARCHING:
+	var is_active: bool = ResearchTree.active_research != null \
+		and ResearchTree.active_research.id == _selected_id
+	var in_queue: bool = ResearchTree.research_queue.has(_selected_id)
+
+	if is_active:
 		ResearchTree.cancel_research()
-	else:
+	elif in_queue:
+		ResearchTree.remove_from_queue(_selected_id)
+	elif node.state == ResearchNode.State.AVAILABLE:
 		ResearchTree.start_research(_selected_id)
 
 	_on_node_pressed(_selected_id)
@@ -481,6 +550,8 @@ func _on_node_state_changed(node: ResearchNode) -> void:
 
 	if _selected_id == node.id:
 		_on_node_pressed(node.id)
+
+	_update_queue_labels()
 
 	if node.state == ResearchNode.State.AVAILABLE and _node_controls.has(node.id):
 		var btn_available: Button = _node_controls[node.id] as Button
@@ -552,6 +623,73 @@ func _try_hide_tooltip() -> void:
 	_tooltip_ready = false
 	_tooltip.visible = false
 	_tooltip.position = Vector2(-10000, -10000)
+
+
+func _update_queue_labels() -> void:
+	for nid_v: Variant in _queue_labels.keys():
+		var lbl: Label = _queue_labels[nid_v as String] as Label
+		lbl.visible = false
+		lbl.text = ""
+
+	if ResearchTree.active_research != null:
+		var aid: String = ResearchTree.active_research.id
+		if _queue_labels.has(aid):
+			var lbl: Label = _queue_labels[aid] as Label
+			lbl.text = "1"
+			lbl.visible = true
+
+	for i: int in range(ResearchTree.research_queue.size()):
+		var qid: String = ResearchTree.research_queue[i] as String
+		if _queue_labels.has(qid):
+			var lbl: Label = _queue_labels[qid] as Label
+			lbl.text = str(i + 2)
+			lbl.visible = true
+
+
+func _format_boosts(boosts: Dictionary) -> String:
+	if boosts.is_empty():
+		return ""
+	var label_map: Dictionary = {
+		"research_speed":    "Research Speed",
+		"matter_production": "Matter Output",
+		"energy_production": "Energy Output",
+		"science_production":"Compute Output",
+	}
+	var parts: Array[String] = []
+	for key_v: Variant in boosts.keys():
+		var key: String = key_v as String
+		var label: String = label_map.get(key, key.capitalize())
+		parts.append("%s +%d%%" % [label, int(float(boosts[key]) * 100.0)])
+	return "Unlocks: " + "  |  ".join(parts)
+
+
+func _format_unlocks(node: ResearchNode) -> String:
+	var lines: Array[String] = []
+
+	# Child research nodes this node directly unlocks
+	if not node.unlocks.is_empty():
+		lines.append("Enables research:")
+		for child_id_v: Variant in node.unlocks:
+			var child_id: String = child_id_v as String
+			var child: ResearchNode = ResearchTree.get_research_node(child_id)
+			if child != null:
+				lines.append("  • " + child.display_name)
+
+	# Buildings gated behind this node
+	var buildings: Array[String] = []
+	for bname_v: Variant in BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS.keys():
+		var bname: String = bname_v as String
+		var req: String = BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS[bname] as String
+		if req == node.id:
+			buildings.append(bname)
+	if not buildings.is_empty():
+		if not lines.is_empty():
+			lines.append("")
+		lines.append("Enables buildings:")
+		for b: String in buildings:
+			lines.append("  • " + b)
+
+	return "\n".join(lines)
 
 
 func _format_cost(cost: Dictionary) -> String:

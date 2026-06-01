@@ -35,6 +35,15 @@ func load_tree(data: Dictionary, unlocked_map: Dictionary = {}) -> void:
 	_rebuild_bounds()
 	queue_redraw()
 
+## Dynamically append a node that wasn't present at load time.
+## No-op if the id already exists in the tree.
+func add_node(node_id: String, node_data: Dictionary) -> void:
+	if tree_data.has(node_id):
+		return
+	tree_data[node_id] = node_data.duplicate(true)
+	_rebuild_bounds()
+	queue_redraw()
+
 func set_unlocked_map(unlocked_map: Dictionary) -> void:
 	unlocked = unlocked_map.duplicate(true)
 	queue_redraw()

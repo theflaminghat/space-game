@@ -19,6 +19,9 @@ signal research_completed(node: ResearchNode)
 ## Emitted when a research job is cancelled.
 signal research_cancelled(node: ResearchNode)
 
+## Emitted whenever the queue array changes (add / remove / advance).
+signal queue_changed
+
 ## All nodes keyed by their id.
 var nodes: Dictionary = {}  # id -> ResearchNode
 
@@ -30,6 +33,9 @@ var research_queue: Array = []
 
 ## Resources available to spend, e.g. {"science": 100, "gold": 200}
 var resources: Dictionary = {}
+
+## Aggregated active boosts from all unlocked nodes.
+var active_boosts: Dictionary = {}
 
 var initialized: bool = false
 
@@ -112,6 +118,7 @@ func start_research(node_id: String, force: bool = false) -> bool:
 	if active_research != null:
 		if not research_queue.has(node_id):
 			research_queue.append(node_id)
+			queue_changed.emit()
 		return true
 
 	_spend_resources(node)
@@ -136,6 +143,13 @@ func cancel_research() -> void:
 	_advance_queue()
 
 
+## Remove a node from the queue (no-op if not queued).
+func remove_from_queue(node_id: String) -> void:
+	if research_queue.has(node_id):
+		research_queue.erase(node_id)
+		queue_changed.emit()
+
+
 ## Immediately unlock a node (cheat / debug / save-game restoration).
 func force_unlock(node_id: String) -> void:
 	if not nodes.has(node_id):
@@ -145,6 +159,7 @@ func force_unlock(node_id: String) -> void:
 	node.progress = 1.0
 	node_state_changed.emit(node)
 	_refresh_children_availability(node)
+	_recompute_boosts()
 
 
 ## Reset a node back to its computed availability state.
@@ -167,7 +182,8 @@ func tick(delta: float, research_speed: float = 1.0) -> void:
 	if active_research == null or SolarSystem.paused:
 		return
 
-	active_research.progress += (delta * research_speed) / active_research.research_time
+	var effective_speed := research_speed * (1.0 + get_boost("research_speed"))
+	active_research.progress += (delta * effective_speed) / active_research.research_time
 	active_research.progress = clampf(active_research.progress, 0.0, 1.0)
 
 	if active_research.progress >= 1.0:
@@ -248,6 +264,8 @@ func load_state(saved: Dictionary) -> void:
 	else:
 		active_research = null
 
+	_recompute_boosts()
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -260,6 +278,7 @@ func _complete_research(node: ResearchNode) -> void:
 	node_state_changed.emit(node)
 	research_completed.emit(node)
 	_refresh_children_availability(node)
+	_recompute_boosts()
 	_advance_queue()
 
 
@@ -268,6 +287,7 @@ func _advance_queue() -> void:
 		var next_id: String = research_queue.pop_front()
 		if start_research(next_id):
 			break
+	queue_changed.emit()
 
 
 func _refresh_all_availability() -> void:
@@ -288,6 +308,7 @@ func _refresh_single_availability(node: ResearchNode) -> void:
 	if node.state == ResearchNode.State.RESEARCHING:
 		return
 
+	var old_state: ResearchNode.State = node.state
 	var all_met := true
 	for prereq_id in node.prerequisites:
 		if not is_unlocked(prereq_id):
@@ -295,6 +316,24 @@ func _refresh_single_availability(node: ResearchNode) -> void:
 			break
 
 	node.state = ResearchNode.State.AVAILABLE if all_met else ResearchNode.State.LOCKED
+	if node.state != old_state:
+		node_state_changed.emit(node)
+
+
+func _recompute_boosts() -> void:
+	active_boosts.clear()
+	for n_v: Variant in nodes.values():
+		var n: ResearchNode = n_v as ResearchNode
+		if n.state != ResearchNode.State.UNLOCKED:
+			continue
+		for boost_type_v: Variant in n.boosts.keys():
+			var boost_type: String = boost_type_v as String
+			active_boosts[boost_type] = active_boosts.get(boost_type, 0.0) + float(n.boosts[boost_type])
+
+
+## Returns the total additive bonus for a boost type (0.0 if none active).
+func get_boost(boost_type: String) -> float:
+	return float(active_boosts.get(boost_type, 0.0))
 
 
 func _can_afford(node: ResearchNode) -> bool:

@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://drkthahjaeho7"]
 
 [ext_resource type="Script" uid="uid://ddl2wdyq5abkt" path="res://StartMenu.gd" id="1_jwbto"]
+[ext_resource type="Script" uid="uid://cx0f1a1o1ijdq" path="res://settings_menu.gd" id="2_settmn"]
 
 [node name="StartMenu" type="Control" unique_id=347533475]
 layout_mode = 3
@@ -11,47 +12,138 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_jwbto")
 
-[node name="Panel" type="Panel" parent="." unique_id=1008423970]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.05, 0.05, 0.1, 1)
 
-[node name="VBoxContainer" type="VBoxContainer" parent="Panel" unique_id=2005022964]
-custom_minimum_size = Vector2(0, 200)
-layout_mode = 0
-offset_left = -1.0
-offset_right = 1919.0
-offset_bottom = 1080.0
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Label" type="Label" parent="Panel/VBoxContainer" unique_id=844896301]
+[node name="MainPanel" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
 
-[node name="SaveNameInput" type="LineEdit" parent="Panel/VBoxContainer" unique_id=1471657729]
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/MainPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_bottom = 40
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/MainPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "SPACE GAME"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 42
+
+[node name="SubtitleLabel" type="Label" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "A civilisation simulator"
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.55, 0.65, 0.8, 1)
+
+[node name="HSeparator" type="HSeparator" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="Panel/VBoxContainer" unique_id=1790667570]
-layout_mode = 2
-alignment = 1
-
-[node name="NewGameButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1165866225]
+[node name="NewGameButton" type="Button" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(240, 48)
 layout_mode = 2
 text = "New Game"
 
-[node name="LoadGameButton" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=335279312]
+[node name="LoadGameButton" type="Button" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(240, 48)
 layout_mode = 2
 text = "Load Game"
 
-[node name="Label2" type="Label" parent="Panel/VBoxContainer" unique_id=812987678]
+[node name="SettingsButton" type="Button" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(240, 48)
+layout_mode = 2
+text = "Settings"
+
+[node name="QuitButton" type="Button" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(240, 48)
+layout_mode = 2
+text = "Quit"
+
+[node name="LoadPanel" type="PanelContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -230.0
+offset_top = -185.0
+offset_right = 230.0
+offset_bottom = 185.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="LoadPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="VBoxContainer" type="VBoxContainer" parent="LoadPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="LoadPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Load Game"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 20
+
+[node name="SaveNameInput" type="LineEdit" parent="LoadPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(380, 0)
+layout_mode = 2
+placeholder_text = "Save name..."
+
+[node name="SaveList" type="ItemList" parent="LoadPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 120)
 layout_mode = 2
 
-[node name="SaveList" type="ItemList" parent="Panel/VBoxContainer" unique_id=1277137842]
+[node name="ButtonRow" type="HBoxContainer" parent="LoadPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
-auto_height = true
-item_count = 1
-item_0/text = "save 1"
+alignment = 1
+theme_override_constants/separation = 10
 
-[node name="RefreshButton" type="Button" parent="Panel/VBoxContainer" unique_id=670421692]
+[node name="LoadConfirmButton" type="Button" parent="LoadPanel/MarginContainer/VBoxContainer/ButtonRow"]
+custom_minimum_size = Vector2(110, 38)
 layout_mode = 2
+text = "Load"
 
-[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/NewGameButton" to="." method="_on_new_game_button_pressed"]
-[connection signal="pressed" from="Panel/VBoxContainer/HBoxContainer/LoadGameButton" to="." method="_on_load_game_button_pressed"]
+[node name="CancelButton" type="Button" parent="LoadPanel/MarginContainer/VBoxContainer/ButtonRow"]
+custom_minimum_size = Vector2(110, 38)
+layout_mode = 2
+text = "Cancel"
+
+[node name="SettingsMenu" type="CanvasLayer" parent="."]
+process_mode = 3
+layer = 101
+script = ExtResource("2_settmn")
+
+[connection signal="pressed" from="CenterContainer/MainPanel/MarginContainer/VBoxContainer/NewGameButton" to="." method="_on_new_game_button_pressed"]
+[connection signal="pressed" from="CenterContainer/MainPanel/MarginContainer/VBoxContainer/LoadGameButton" to="." method="_on_load_game_button_pressed"]
+[connection signal="pressed" from="CenterContainer/MainPanel/MarginContainer/VBoxContainer/SettingsButton" to="." method="_on_settings_button_pressed"]
+[connection signal="pressed" from="CenterContainer/MainPanel/MarginContainer/VBoxContainer/QuitButton" to="." method="_on_quit_button_pressed"]
+[connection signal="pressed" from="LoadPanel/MarginContainer/VBoxContainer/ButtonRow/LoadConfirmButton" to="." method="_on_load_confirm_pressed"]
+[connection signal="pressed" from="LoadPanel/MarginContainer/VBoxContainer/ButtonRow/CancelButton" to="." method="_on_cancel_pressed"]
+[connection signal="item_selected" from="LoadPanel/MarginContainer/VBoxContainer/SaveList" to="." method="_on_save_selected"]

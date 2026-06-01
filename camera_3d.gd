@@ -1,14 +1,15 @@
 extends Camera3D
-var n=1.3
-func set_radius(radius:float):
-	n=1
-	position = Vector3(0,0,1)
+var n = 1.3
 
-func _process(_delta):
-	if Input.is_action_just_released("zoom in"):
-		if n>1.3:
-			position -= Vector3(0,0,n)
-			n-=0.3
-	if Input.is_action_just_released("zoom out"):
-		n+=0.3
-		position += Vector3(0,0,n)
+func set_radius(radius: float) -> void:
+	n = 1
+	position = Vector3(0, 0, 1)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_released("zoom in"):
+		if n > 1.3:
+			position -= Vector3(0, 0, n)
+			n -= 0.3
+	elif event.is_action_released("zoom out"):
+		n += 0.3
+		position += Vector3(0, 0, n)
