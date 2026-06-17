@@ -138,3 +138,53 @@ static func default_state() -> Dictionary:
 	for p: Dictionary in POLICIES:
 		d[p["id"]] = p["default"]
 	return d
+
+# ── Policy effect formulas ──────────────────────────────────────────────────
+# Single source of truth for how policies modify production.  Game.gd applies
+# these to the live economy; the politics screen displays them so the player
+# always sees the actual current multipliers.  Keep these in sync with the
+# per-policy descriptions above.
+
+## Science-output multiplier (applied to science accumulation rate).
+static func science_mult(s: Dictionary) -> float:
+	var m := 1.0
+	if bool(s.get("open_source", false)): m += 0.20
+	if bool(s.get("carbon_tax",  false)): m += 0.08
+	if bool(s.get("free_press",   true)): m += 0.05
+	# research_budget: 50% neutral, ±20% across the range.
+	m += (float(s.get("research_budget", 50.0)) - 50.0) / 50.0 * 0.20
+	# space_budget: +1% per 10% spent.
+	m += float(s.get("space_budget", 10.0)) / 10.0 * 0.01
+	return maxf(0.1, m)
+
+## Compute multiplier (applied to total compute, which feeds science).
+static func compute_mult(s: Dictionary) -> float:
+	var m := 1.0
+	if bool(s.get("ai_research", false)): m += 0.20
+	if bool(s.get("ubi",         false)): m += 0.10
+	return m
+
+## Minerals (matter) production multiplier.
+static func minerals_mult(s: Dictionary) -> float:
+	var m := 1.0
+	if bool(s.get("automation",      false)): m += 0.15
+	if bool(s.get("asteroid_mining", false)): m += 0.25
+	if bool(s.get("ubi",             false)): m -= 0.05
+	# tax_rate: 35% neutral; each 5% above/below shifts minerals ±2%.
+	m += (float(s.get("tax_rate", 35.0)) - 35.0) / 5.0 * 0.02
+	# military_spending drains minerals (−10% at the 50% maximum).
+	m -= float(s.get("military_spending", 10.0)) / 50.0 * 0.10
+	return maxf(0.05, m)
+
+## Energy production multiplier.
+static func energy_mult(s: Dictionary) -> float:
+	var m := 1.0
+	if bool(s.get("automation", false)): m -= 0.10
+	if bool(s.get("carbon_tax", false)): m -= 0.15
+	return maxf(0.05, m)
+
+## Mission-duration multiplier (lower is faster).
+static func mission_dur_mult(s: Dictionary) -> float:
+	if bool(s.get("nuclear_propulsion", false)):
+		return 0.80
+	return 1.0

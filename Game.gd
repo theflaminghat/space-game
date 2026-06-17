@@ -69,6 +69,25 @@ var active_launches: Array = []
 var _next_launch_id: int = 1
 var _launch_satellites: Dictionary = {}
 var colonized_planets: Array = []     # planets that have received a completed Colony Ship
+## Year each populated world's clock started — Earth at game start, each colony when
+## settled.  Used for the evolutionary divergence timer.
+var _colonized_year: Dictionary = {}
+## Per-world random threshold (500 000 – 1 000 000 years) before its population
+## diverges into a distinct planetary lineage in the evolution tree.
+var _split_thresholds: Dictionary = {}
+## world → the world it was settled from (its colony ship's origin).  Determines
+## which population a lineage descends from.  Earth has no parent.
+var _colony_parent: Dictionary = {}
+## world → parent world ("" = baseline), recorded when the world diverges.  Doubles
+## as the set of worlds that have already diverged; insertion order = lineage order,
+## which the save/load path replays to rebuild the tree.
+var _variant_parent: Dictionary = {}
+
+## Bodies whose planet-bar button is unlocked: Earth (home) plus any body a Survey
+## probe has been sent to.  Keyed by lower-case body name.
+var surveyed_planets: Array = ["earth"]
+## name → Button, populated in _ready from the PlanetBar.
+var _planet_buttons: Dictionary = {}
 
 ## Per-resource global storage caps (minerals, energy); recomputed whenever
 ## _prod_dirty is set.  Science is never capped (knowledge needs no tank).
@@ -89,6 +108,18 @@ var _person_years: float = 0.0
 ## Accumulated real seconds since the last autosave.
 var _autosave_accum: float = 0.0
 
+# ── Game events ───────────────────────────────────────────────────────────────
+## IDs of GameEvents.EVENTS that have already fired — prevents re-triggering.
+var _fired_events: Array = []
+## Maps event ID → game year it fired; used to place timeline cards correctly on load.
+var _fired_event_years: Dictionary = {}
+## Queue of event dicts waiting to be shown as notifications.
+var _pending_event_notifications: Array = []
+## The CanvasLayer that hosts notification cards.
+var _event_notif_layer: CanvasLayer = null
+## VBoxContainer inside the layer where cards are stacked.
+var _event_notif_vbox: VBoxContainer = null
+
 # ── Production cache ──────────────────────────────────────────────────────────
 ## True whenever buildings, research, or policies have changed and the cached
 ## production totals must be recomputed before next use.
@@ -98,6 +129,10 @@ var _cached_prod: Dictionary = {"science": 0.0, "minerals": 0.0, "energy": 0.0}
 
 ## Accumulated mass of each crust compound extracted by all mines, in grams.
 var compound_inventory: Dictionary = {}
+
+## Grams of CO₂ vented into each planet's atmosphere by combustion power plants,
+## on top of its natural baseline.  planet_name → grams.
+var atmospheric_co2: Dictionary = {}
 
 ## Active manufacturing jobs from the Production panel.
 ## Each entry: { "id": int, "recipe": String, "planet": String, "rate": float }
@@ -116,6 +151,8 @@ var _bdef_cache: Dictionary = {}
 @onready var build_panel: PanelContainer = $main_ui/BuildPanel
 @onready var launch_panel: PanelContainer = $main_ui/LaunchPanel
 @onready var sidebar: HBoxContainer      = $main_ui/VBoxContainer3/HBoxContainer2
+@onready var planet_bar: Control         = $main_ui/PlanetBar
+@onready var launches_button: Button     = $main_ui/VBoxContainer3/HBoxContainer2/sidebar/launches
 @onready var timeline_panel: Control    = $main_ui/VBoxContainer3/HBoxContainer2/TimelinePanel
 @onready var politics_page: Control     = $main_ui/VBoxContainer3/HBoxContainer2/PoliticsPage
 @onready var evolution_ui: Control      = $main_ui/VBoxContainer3/HBoxContainer2/EvolutionTreeUI
@@ -135,12 +172,24 @@ func _input(event: InputEvent) -> void:
 	if game_over:
 		return   # game over screen handles its own input
 	if event.is_action_pressed("escape"):
+		_prepare_snap_year()
 		SolarSystem.toggle_ui_pause()
 		get_tree().paused = SolarSystem.ui_paused
 
 	if event.is_action_pressed("pause"):
+		_prepare_snap_year()
 		SolarSystem.toggle_pause()
 		get_viewport().set_input_as_handled()
+
+## Choose the year the frozen planets snap to when a pause reveals them.  Anchored
+## to the planet the player is currently viewing so that body keeps its exact
+## position (no camera jump); the rest fall into their relative places for that year.
+func _prepare_snap_year() -> void:
+	if SolarSystem.solar_system_active:
+		SolarSystem.snap_year = float(year)
+		return
+	var p := get_node_or_null("WorldRoot/Planets/" + current_planet) as Planet
+	SolarSystem.snap_year = p.compute_anchor_year() if p else float(year)
 
 func start_new_game() -> void:
 	ResearchTree.load_tree(ResearchTreeData.build())
@@ -158,16 +207,33 @@ func start_new_game() -> void:
 	active_launches = []
 	_next_launch_id = 1
 	colonized_planets = []
+	# Earth's population starts diverging from the 1945 baseline immediately; after
+	# its random threshold it becomes "H. sapiens terran".
+	_colonized_year   = {"earth": year}
+	_split_thresholds = {"earth": int(randf_range(500_000.0, 1_000_000.0))}
+	_colony_parent    = {}
+	_variant_parent   = {}
 	compound_inventory = {}
-	_production_jobs   = []
-	planet_buildings = {
-		"earth": [
-			"Mine", "Mine", "Mine", "Mine",
-			"Coal Plant", "Coal Plant", "Coal Plant", "Coal Plant",
-			"Oil Plant", "Oil Plant", "Oil Plant", "Oil Plant",
-			"Solar Farm", "Research Lab",
-		]
-	}
+	atmospheric_co2 = {}
+	# Earth's 1945 starting infrastructure: a fleet of regional power stations
+	# (10 biomass + 10 coal + 5 oil ≈ 3.17 TW, a 40/40/20 split), fuel/ore mines,
+	# and a research lab.  Demolishable as the player modernises, except the
+	# Biomass Burner (min 1) which guarantees baseline power.
+	var earth_buildings: Array = []
+	for _i in range(6):  earth_buildings.append("Mine")
+	for _i in range(10): earth_buildings.append("Biomass Burner")
+	for _i in range(10): earth_buildings.append("Coal Plant")
+	for _i in range(5):  earth_buildings.append("Oil Plant")
+	earth_buildings.append("Research Lab")
+	planet_buildings = {"earth": earth_buildings}
+	# Starter production: a working industrial base in the production menu —
+	# quicklime → concrete, the foundation for expanding the operation.
+	_production_jobs = [
+		{"id": 1, "recipe": "Lime Production",     "planet": "earth", "rate": 2.0},
+		{"id": 2, "recipe": "Concrete Production", "planet": "earth", "rate": 1.0},
+	]
+	if production_panel:
+		production_panel.load_jobs(_production_jobs)
 	policies = PoliticsData.default_state()
 	game_over              = false
 	has_left_solar_system  = false
@@ -175,6 +241,11 @@ func start_new_game() -> void:
 	_autosave_accum        = 0.0
 	_last_snapshot_year    = 1945
 	_person_years          = 0.0
+	_fired_events          = []
+	_fired_event_years     = {}
+	_pending_event_notifications = []
+	surveyed_planets       = ["earth"]   # home world is always accessible
+	_refresh_planet_buttons()
 	_mark_prod_dirty()
 	_cached_storage_caps = _compute_storage_caps()   # set caps before first _process tick
 	SolarSystem.paused     = true
@@ -205,6 +276,9 @@ func _ready() -> void:
 	game_over_screen.restart_requested.connect(_on_restart_requested)
 	settings_menu.closed.connect(_on_settings_closed)
 
+	_setup_event_notifications()
+	_init_planet_buttons()
+
 	if GameSession.should_load_on_start and GameSession.current_save_path != "":
 		load_game(GameSession.current_save_path)
 	else:
@@ -212,14 +286,58 @@ func _ready() -> void:
 
 	politics_page.load_policies(policies)
 	_check_extinction_events()   # hides planets immediately if year ≥ ORBIT_FREEZE_YEAR
-	_check_evolution_triggers()
+	_check_population_splits()
 	production_panel.refresh_recipes(_completed_research_map())
+	_refresh_launch_access()   # hide Launches until Early Rocketry is researched
 	_refresh_stats()
 	_update_hud()
 	_setup_satellite()
 
 func _setup_satellite() -> void:
 	sattelite.visible = false
+
+# ── Planet-bar gating ─────────────────────────────────────────────────────────
+
+## Cache the planet-bar buttons by body name (run once in _ready).
+func _init_planet_buttons() -> void:
+	_planet_buttons.clear()
+	if planet_bar == null:
+		return
+	for pname: String in ["sun", "mercury", "venus", "earth", "mars",
+			"jupiter", "saturn", "uranus", "neptune"]:
+		var btn := planet_bar.get_node_or_null(pname + "_button") as Button
+		if btn:
+			_planet_buttons[pname] = btn
+
+## Enable a body's button only once a Survey probe has been sent there (Earth is
+## always available).  Locked buttons get an explanatory tooltip.
+func _refresh_planet_buttons() -> void:
+	for pname: String in _planet_buttons:
+		var unlocked: bool = pname == "earth" or surveyed_planets.has(pname)
+		var btn: Button = _planet_buttons[pname]
+		btn.disabled = not unlocked
+		btn.tooltip_text = "" if unlocked else "Send a Survey probe here to unlock"
+
+## Mark a body as surveyed (called when a Survey mission is launched to it) and
+## refresh the planet bar.  No-op if already surveyed.
+func _mark_surveyed(body: String) -> void:
+	if body == "" or surveyed_planets.has(body):
+		return
+	surveyed_planets.append(body)
+	_refresh_planet_buttons()
+
+## Research node that unlocks spaceflight; the Launches sidebar button (and panel)
+## stay hidden until it is researched.
+const LAUNCH_UNLOCK_RESEARCH: String = "early_rocketry"
+
+## Show the Launches button only once the player has reached Early Rocketry; keep
+## the panel hidden (and closed) before then.
+func _refresh_launch_access() -> void:
+	var unlocked: bool = ResearchTree.is_unlocked(LAUNCH_UNLOCK_RESEARCH)
+	if launches_button:
+		launches_button.visible = unlocked
+	if not unlocked and launch_panel and launch_panel.visible:
+		launch_panel.hide()
 
 func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: String, launch_id: int, flight_days: float = 60.0) -> void:
 	var sat := Satellite.new()
@@ -235,6 +353,10 @@ func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: Str
 	_launch_satellites[launch_id] = sat
 
 func _process(delta: float) -> void:
+	# ── Drain one pending event notification per frame ────────────────────────
+	if not _pending_event_notifications.is_empty():
+		_show_event_card(_pending_event_notifications.pop_front())
+
 	# ── Autosave timer (runs even while paused) ───────────────────────────────
 	if settings_menu and not game_over:
 		var autosave_interval: int = settings_menu.get_autosave_seconds()
@@ -268,24 +390,29 @@ func _process(delta: float) -> void:
 				_update_timescale()
 				_on_years_advanced_fast(years_to_add)
 
-	if not game_over:
+	if not game_over and spd > 0.0:
+		# Game-days elapsed this frame.  ALL accumulation is driven by this rather
+		# than real frame time, so production/consumption scale correctly with the
+		# timescale: the same number of game-days yields the same resources whether
+		# the player is at 1× or fast-forwarding through millions of years.
+		var delta_days: float = delta / spd
+
 		var production := _get_total_production()
 		for resource in production:
-			ResearchTree.resources[resource] = ResearchTree.resources.get(resource, 0.0) + production[resource] * delta
-		_accumulate_compounds(delta)
-		_process_production(delta)
+			ResearchTree.resources[resource] = ResearchTree.resources.get(resource, 0.0) + production[resource] * delta_days
+		_accumulate_compounds(delta_days)
+		_accumulate_emissions(delta_days)
+		_process_production(delta_days)
 		# Clamp minerals and energy to their storage caps; science is never capped.
 		for resource: String in _cached_storage_caps:
 			if ResearchTree.resources.has(resource):
 				ResearchTree.resources[resource] = minf(
 					ResearchTree.resources[resource], _cached_storage_caps[resource]
 				)
-		# Evolve population on the game-day clock so it tracks resources at any speed.
-		if spd > 0.0:
-			var delta_days: float = delta / spd
-			_update_population(delta_days)
-			# Accumulate person-days → convert to person-years for the final stat.
-			_person_years += float(stats.get("current_population", 0)) * delta_days / 365.25
+		# Evolve population on the same game-day clock.
+		_update_population(delta_days)
+		# Accumulate person-days → convert to person-years for the final stat.
+		_person_years += float(stats.get("current_population", 0)) * delta_days / 365.25
 		_refresh_stats()
 		statistics_page.set_stats(stats)
 		_update_hud()
@@ -308,12 +435,20 @@ func advance_day() -> void:
 			statistics_page.push_snapshot(year, stats)
 			_last_snapshot_year = year
 			_check_extinction_events()
-			_check_evolution_triggers()
+			_check_population_splits()
+			_check_game_events("year")
+			_check_game_events("population")
+			_check_game_events("compute")
 			if timeline_panel and timeline_panel.visible:
 				timeline_panel.set_current_year(year)
 
 	if current_planet != "" and planet_info_page.visible:
 		planet_info_page.set_planet_info(get_planet_data(current_planet))
+
+	# Live-update which build-cost items the player can currently afford (recolour
+	# only — no rebuild, so the menu's scroll position is preserved).
+	if build_panel.visible:
+		build_panel.refresh_affordability(_build_cost_stockpiles())
 
 	var today_abs := _to_abs_day(year, month, day)
 	var any_completed := false
@@ -325,15 +460,32 @@ func advance_day() -> void:
 			if today_abs >= end_abs:
 				launch["status"] = "completed"
 				any_completed = true
+				# Fire mission-type events.
+				var m_target: String = launch.get("target", "")
+				var m_arrival: String = launch.get("arrival", "")
+				if m_arrival == "orbit":
+					_check_game_events("orbit_mission")
+				if m_target == "mars":
+					_check_game_events("mission_mars")
+				if m_target in ["jupiter", "saturn", "uranus", "neptune"]:
+					_check_game_events("mission_outer")
 				if launch["mission"] == "Colony Ship":
-					var target: String = launch.get("target", "")
+					var target: String = m_target
 					if target != "" and not colonized_planets.has(target):
 						colonized_planets.append(target)
-						print("[Game] Colony established on %s" % target.capitalize())
+						_colonized_year[target]   = year
+						_split_thresholds[target] = int(randf_range(500_000.0, 1_000_000.0))
+						_colony_parent[target]    = str(launch.get("origin", "earth"))
+						_establish_colony_base(target)
+						print("[Game] Colony established on %s from %s (split in ~%d yrs)" % [
+							target.capitalize(), _colony_parent[target], _split_thresholds[target]
+						])
+						_check_game_events("colony_count")
 	if any_completed:
-		_check_evolution_triggers()
+		_check_population_splits()
 	if launch_panel.visible:
 		launch_panel.set_game_date(year, month + 1, day + 1)
+		launch_panel.set_orbital_state(_build_orbital_state())
 		launch_panel.refresh_launches(_compute_launch_display_data())
 
 ## Populate _bdef_cache from BuildingData.BUILDINGS (called once in _ready).
@@ -421,149 +573,71 @@ func _recompute_production_cache() -> void:
 	_prod_dirty = false
 
 # ── Policy multipliers ────────────────────────────────────────────────────────
+# The formulas live in PoliticsData so the politics screen can display the exact
+# same values it shows the player.  These thin wrappers apply them to live state.
 
 func _policy_science_mult() -> float:
-	var m := 1.0
-	if bool(policies.get("open_source",    false)): m += 0.20
-	if bool(policies.get("carbon_tax",     false)): m += 0.08
-	if bool(policies.get("free_press",     true)):  m += 0.05
-	# research_budget: 50% is neutral; range adds ±20 %
-	m += (float(policies.get("research_budget", 50.0)) - 50.0) / 50.0 * 0.20
-	# space_budget: +1 % per 10 % spent
-	m += float(policies.get("space_budget", 10.0)) / 10.0 * 0.01
-	return maxf(0.1, m)
+	return PoliticsData.science_mult(policies)
 
 func _policy_compute_mult() -> float:
-	var m := 1.0
-	if bool(policies.get("ai_research", false)): m += 0.20
-	if bool(policies.get("ubi",         false)): m += 0.10
-	return m
+	return PoliticsData.compute_mult(policies)
 
 func _policy_minerals_mult() -> float:
-	var m := 1.0
-	if bool(policies.get("automation",      false)): m += 0.15
-	if bool(policies.get("asteroid_mining", false)): m += 0.25
-	if bool(policies.get("ubi",             false)): m -= 0.05
-	# tax_rate: 35 % is neutral; each 5 % above/below shifts minerals ±2 %
-	m += (float(policies.get("tax_rate", 35.0)) - 35.0) / 5.0 * 0.02
-	# military_spending drains minerals (−10 % at max 50 %)
-	m -= float(policies.get("military_spending", 10.0)) / 50.0 * 0.10
-	return maxf(0.05, m)
+	return PoliticsData.minerals_mult(policies)
 
 func _policy_energy_mult() -> float:
-	var m := 1.0
-	if bool(policies.get("automation",  false)): m -= 0.10
-	if bool(policies.get("carbon_tax",  false)): m -= 0.15
-	return maxf(0.05, m)
+	return PoliticsData.energy_mult(policies)
 
 ## Returns a duration multiplier to apply to all new missions.
 func _policy_mission_dur_mult() -> float:
-	if bool(policies.get("nuclear_propulsion", false)):
-		return 0.80   # 20 % shorter transit
-	return 1.0
+	return PoliticsData.mission_dur_mult(policies)
 
 func _on_policy_changed(policy_id: String, value: Variant) -> void:
 	policies[policy_id] = value
 	_mark_prod_dirty()
 
-# ── Evolution triggers ────────────────────────────────────────────────────────
+# ── Evolution / population divergence ─────────────────────────────────────────
 
-## Inspects game state and adds/unlocks evolution nodes as conditions are met.
-## Safe to call repeatedly — all operations are idempotent.
-func _check_evolution_triggers() -> void:
+## Check every populated world (Earth plus each colony) and, once its population has
+## been sustained past its random divergence threshold, branch a new lineage off the
+## population it descends from.  Idempotent — safe to call every year / fast tick.
+func _check_population_splits() -> void:
 	if not evolution_ui:
 		return
+	for world: String in _colonized_year:
+		if _variant_parent.has(world):
+			continue   # already diverged
+		var threshold: int     = _split_thresholds.get(world, 500_000)
+		var years_elapsed: int = year - int(_colonized_year[world])
+		if years_elapsed < threshold:
+			continue
 
-	var compute := _get_compute_rate()
+		# Descend from the world this population came from — but only if that world
+		# has itself diverged; otherwise the colonists were still baseline stock.
+		var origin: String = str(_colony_parent.get(world, ""))
+		var parent_world: String = origin if (origin != "" and _variant_parent.has(origin)) else ""
 
-	# Pre-compute sets used by multiple checks
-	var planets_with_completed_mission: Dictionary = {}
-	var has_orbit_complete := false
-	for launch: Dictionary in active_launches:
-		if launch["status"] == "completed":
-			planets_with_completed_mission[launch.get("target", "")] = true
-			if launch.get("arrival", "") == "orbit":
-				has_orbit_complete = true
+		_variant_parent[world] = parent_world
+		if not evolution_ui.add_planet_variant(world, parent_world):
+			continue   # node already existed (e.g. replay) — no notification
 
-	var outer_planets := ["jupiter", "saturn", "uranus", "neptune"]
-	var outer_visited  := false
-	var outer_colonized := false
-	for p: String in outer_planets:
-		if planets_with_completed_mission.has(p): outer_visited  = true
-		if colonized_planets.has(p):              outer_colonized = true
-
-	# ── H. sapiens orbitalis ──────────────────────────────────────────────────
-	# Appears when any orbit mission completes; unlocks immediately on that same event.
-	if has_orbit_complete:
-		if evolution_ui.add_evolution_node("homo_sapiens_orbitalis"):
-			pass   # just added — fall through to unlock check
-		if not evolution_ui.is_node_unlocked("homo_sapiens_orbitalis"):
-			evolution_ui.unlock_evolution_node("homo_sapiens_orbitalis")
-
-	# ── H. sapiens martis ─────────────────────────────────────────────────────
-	# Appears when any mission reaches Mars; unlocks on Mars colony.
-	if planets_with_completed_mission.has("mars"):
-		evolution_ui.add_evolution_node("homo_sapiens_martis")
-	if evolution_ui.is_node_visible("homo_sapiens_martis") \
-			and not evolution_ui.is_node_unlocked("homo_sapiens_martis") \
-			and colonized_planets.has("mars"):
-		evolution_ui.unlock_evolution_node("homo_sapiens_martis")
-
-	# ── H. sapiens gravitus ───────────────────────────────────────────────────
-	# Appears when any mission reaches an outer planet; unlocks on outer-planet colony.
-	if outer_visited:
-		evolution_ui.add_evolution_node("homo_sapiens_gravitus")
-	if evolution_ui.is_node_visible("homo_sapiens_gravitus") \
-			and not evolution_ui.is_node_unlocked("homo_sapiens_gravitus") \
-			and outer_colonized:
-		evolution_ui.unlock_evolution_node("homo_sapiens_gravitus")
-
-	# ── H. astralis ───────────────────────────────────────────────────────────
-	# Appears once orbitalis is unlocked; unlocks at compute ≥ 50.
-	if evolution_ui.is_node_unlocked("homo_sapiens_orbitalis"):
-		evolution_ui.add_evolution_node("homo_astralis")
-	if evolution_ui.is_node_visible("homo_astralis") \
-			and not evolution_ui.is_node_unlocked("homo_astralis") \
-			and compute >= 50.0:
-		evolution_ui.unlock_evolution_node("homo_astralis")
-
-	# ── H. pelagicus ─────────────────────────────────────────────────────────
-	# Appears once martis is unlocked; unlocks on any outer-planet colony.
-	if evolution_ui.is_node_unlocked("homo_sapiens_martis"):
-		evolution_ui.add_evolution_node("homo_pelagicus")
-	if evolution_ui.is_node_visible("homo_pelagicus") \
-			and not evolution_ui.is_node_unlocked("homo_pelagicus") \
-			and outer_colonized:
-		evolution_ui.unlock_evolution_node("homo_pelagicus")
-
-	# ── H. cyberneticus ───────────────────────────────────────────────────────
-	# Appears when both orbitalis is unlocked and gravitus is visible;
-	# unlocks at compute ≥ 100.
-	if evolution_ui.is_node_unlocked("homo_sapiens_orbitalis") \
-			and evolution_ui.is_node_visible("homo_sapiens_gravitus"):
-		evolution_ui.add_evolution_node("homo_cyberneticus")
-	if evolution_ui.is_node_visible("homo_cyberneticus") \
-			and not evolution_ui.is_node_unlocked("homo_cyberneticus") \
-			and compute >= 100.0:
-		evolution_ui.unlock_evolution_node("homo_cyberneticus")
-
-	# ── H. digitalis ─────────────────────────────────────────────────────────
-	# Appears when cyberneticus is unlocked; unlocks at compute ≥ 1 000.
-	if evolution_ui.is_node_unlocked("homo_cyberneticus"):
-		evolution_ui.add_evolution_node("homo_digitalis")
-	if evolution_ui.is_node_visible("homo_digitalis") \
-			and not evolution_ui.is_node_unlocked("homo_digitalis") \
-			and compute >= 1000.0:
-		evolution_ui.unlock_evolution_node("homo_digitalis")
-
-	# ── H. mechanicus galacticus ──────────────────────────────────────────────
-	# Appears when digitalis is unlocked; unlocks with 3+ established colonies.
-	if evolution_ui.is_node_unlocked("homo_digitalis"):
-		evolution_ui.add_evolution_node("homo_mechanicus_galacticus")
-	if evolution_ui.is_node_visible("homo_mechanicus_galacticus") \
-			and not evolution_ui.is_node_unlocked("homo_mechanicus_galacticus") \
-			and colonized_planets.size() >= 3:
-		evolution_ui.unlock_evolution_node("homo_mechanicus_galacticus")
+		var epithet: String = EvolutionTreeData.epithet_for(world)
+		print("[Game] Lineage divergence: H. sapiens %s after %d years on %s" % [
+			epithet, years_elapsed, world.capitalize()
+		])
+		var notif: Dictionary = {
+			"id":       "split_" + world,
+			"year":     year,
+			"title":    "Evolutionary Divergence",
+			"desc":     "After %s years, the population of %s has diverged into a distinct lineage: H. sapiens %s." % [
+				Units.format_si_verbose(float(years_elapsed), "yr"),
+				world.capitalize(), epithet
+			],
+			"category": "civilization",
+		}
+		_pending_event_notifications.append(notif)
+		if timeline_panel:
+			timeline_panel.add_live_event(notif)
 
 # ── Timescale ─────────────────────────────────────────────────────────────────
 
@@ -575,6 +649,7 @@ func _update_timescale() -> void:
 	var raw: float = TIMESCALE_INIT * exp(-TIMESCALE_DECAY * elapsed)
 	SolarSystem.seconds_per_day = maxf(TIMESCALE_MIN, raw) / _user_speed_mult
 	SolarSystem.current_year = year
+	SolarSystem.snap_year = float(year)   # default; _prepare_snap_year() overrides on pause
 
 # ── Extinction events ─────────────────────────────────────────────────────────
 
@@ -654,7 +729,8 @@ func _on_restart_requested() -> void:
 	SolarSystem.paused = false
 	start_new_game()
 	politics_page.load_policies(policies)
-	_check_evolution_triggers()
+	_check_population_splits()
+	_refresh_launch_access()   # fresh run: hide Launches again until Early Rocketry
 	_refresh_stats()
 	_update_hud()
 
@@ -673,35 +749,35 @@ func _on_years_advanced_fast(years_advanced: int) -> void:
 		_last_snapshot_year = year
 	_check_extinction_events()
 	if not game_over:
-		_check_evolution_triggers()
+		_check_population_splits()
+		_check_game_events("year")
+		_check_game_events("population")
+		_check_game_events("compute")
 		if timeline_panel and timeline_panel.visible:
 			timeline_panel.set_current_year(year)
 
-## Distribute mine output (boosted) into compound_inventory by crust mass fractions.
 ## Process all active manufacturing jobs: consume inputs from compound_inventory
-## and the main resource pools, then deposit outputs.  Called every frame.
-var _prod_debug_timer: float = 0.0
-func _process_production(delta: float) -> void:
+## and the main resource pools, then deposit outputs.  `delta_days` is elapsed
+## game-days, so recipe throughput scales with the timescale like everything else.
+func _process_production(delta_days: float) -> void:
 	if _production_jobs.is_empty():
 		return
-	_prod_debug_timer += delta
-	var do_print := _prod_debug_timer >= 2.0
-	if do_print:
-		_prod_debug_timer = 0.0
-		print("[Production] processing %d jobs, delta=%.4f" % [_production_jobs.size(), delta])
 	for job in _production_jobs:
 		var recipe := _find_recipe_by_name(job.get("recipe", ""))
 		if recipe.is_empty():
 			continue
 		var rate: float = float(job.get("rate", 1.0))
+		# A job runs on a specific planet, drawing from and feeding that planet's
+		# inventory (global resources like energy are shared).
+		var planet: String = str(job.get("planet", "earth"))
 
-		# Check we can afford all inputs for this frame's slice.
+		# Check we can afford all inputs for this slice of game-time.
 		var inputs: Dictionary = recipe.get("inputs", {})
 		var can_run := true
 		var missing_input := ""
 		for key: String in inputs:
-			var need: float = float(inputs[key]) * rate * delta
-			var have: float = _get_stockpile(key)
+			var need: float = float(inputs[key]) * rate * delta_days
+			var have: float = _get_stockpile(key, planet)
 			if have < need:
 				can_run = false
 				missing_input = key
@@ -710,29 +786,19 @@ func _process_production(delta: float) -> void:
 		var job_id := int(job.get("id", 0))
 		production_panel.set_job_status(job_id, can_run, missing_input)
 
-		if do_print:
-			if not can_run:
-				print("[Production] job '%s' STALLED — missing '%s' (have %.4f, need %.4f/frame)" % [
-					job.get("recipe","?"), missing_input,
-					_get_stockpile(missing_input),
-					float(recipe.get("inputs",{}).get(missing_input,0.0)) * float(job.get("rate",1.0)) * delta
-				])
-			else:
-				print("[Production] job '%s' running — outputs: %s" % [job.get("recipe","?"), recipe.get("outputs",{})])
-
 		if not can_run:
 			continue
 
 		# Deduct inputs.
 		for key: String in inputs:
-			var amount: float = float(inputs[key]) * rate * delta
-			_deduct_stockpile(key, amount)
+			var amount: float = float(inputs[key]) * rate * delta_days
+			_deduct_stockpile(key, amount, planet)
 
 		# Credit outputs.
 		var outputs: Dictionary = recipe.get("outputs", {})
 		for key: String in outputs:
-			var amount: float = float(outputs[key]) * rate * delta
-			_add_stockpile(key, amount)
+			var amount: float = float(outputs[key]) * rate * delta_days
+			_add_stockpile(key, amount, planet)
 
 ## Look up a recipe by exact name (searches the full master list).
 func _find_recipe_by_name(name: String) -> Dictionary:
@@ -741,29 +807,51 @@ func _find_recipe_by_name(name: String) -> Dictionary:
 			return r
 	return {}
 
-## Returns the current held amount of a named resource or compound.
-func _get_stockpile(key: String) -> float:
+## The per-planet compound inventory dict for `planet` (created on first access).
+func _planet_inv(planet: String) -> Dictionary:
+	if not compound_inventory.has(planet):
+		compound_inventory[planet] = {}
+	return compound_inventory[planet]
+
+## Current held amount of a resource.  science/minerals/energy are global pools;
+## every other compound is stored per-planet (mined and crafted locally).
+func _get_stockpile(key: String, planet: String) -> float:
 	if key in ["science", "minerals", "energy"]:
 		return float(ResearchTree.resources.get(key, 0.0))
-	return float(compound_inventory.get(key, 0.0))
+	return float(_planet_inv(planet).get(key, 0.0))
 
-## Deducts from the appropriate pool (main resources or compound inventory).
-func _deduct_stockpile(key: String, amount: float) -> void:
+## Deducts from the global pool (science/minerals/energy) or the planet's inventory.
+func _deduct_stockpile(key: String, amount: float, planet: String) -> void:
 	if key in ["science", "minerals", "energy"]:
 		ResearchTree.resources[key] = maxf(0.0, float(ResearchTree.resources.get(key, 0.0)) - amount)
 	else:
-		compound_inventory[key] = maxf(0.0, float(compound_inventory.get(key, 0.0)) - amount)
+		var inv: Dictionary = _planet_inv(planet)
+		inv[key] = maxf(0.0, float(inv.get(key, 0.0)) - amount)
 
-## Adds to the appropriate pool.  Unknown keys go to compound_inventory.
-func _add_stockpile(key: String, amount: float) -> void:
+## Adds to the global pool (science/minerals/energy) or the planet's inventory.
+func _add_stockpile(key: String, amount: float, planet: String) -> void:
 	if key in ["science", "minerals", "energy"]:
 		ResearchTree.resources[key] = float(ResearchTree.resources.get(key, 0.0)) + amount
 	else:
-		compound_inventory[key] = float(compound_inventory.get(key, 0.0)) + amount
+		var inv: Dictionary = _planet_inv(planet)
+		inv[key] = float(inv.get(key, 0.0)) + amount
+
+## A colony ship delivers a foothold so the new world can bootstrap its own
+## (per-planet) economy: a few mines to extract local materials, plus a small cache
+## of construction supplies to raise the first structures.  Without this the colony
+## would start with an empty inventory and be unable to afford anything.
+func _establish_colony_base(planet_name: String) -> void:
+	if not planet_buildings.has(planet_name):
+		planet_buildings[planet_name] = []
+	for _i in range(3):
+		planet_buildings[planet_name].append("Mine")
+	var inv: Dictionary = _planet_inv(planet_name)
+	inv["Concrete"] = float(inv.get("Concrete", 0.0)) + 50_000.0
+	inv["Steel"]    = float(inv.get("Steel", 0.0)) + 20_000.0
+	_mark_prod_dirty()
 
 func _on_production_changed(jobs: Array) -> void:
 	_production_jobs = jobs.duplicate(true)
-	print("[Production] jobs received: ", _production_jobs.size())
 
 ## Returns { node_id: true } for every completed research node — used to gate recipes.
 func _completed_research_map() -> Dictionary:
@@ -772,7 +860,10 @@ func _completed_research_map() -> Dictionary:
 		result[node.id] = true
 	return result
 
-func _accumulate_compounds(delta: float) -> void:
+## Distribute mine output (boosted) into compound_inventory by crust mass
+## fractions.  `delta_days` is elapsed game-days so extraction scales with the
+## timescale, matching the bulk minerals accumulation.
+func _accumulate_compounds(delta_days: float) -> void:
 	var minerals_mult: float = (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
 	for planet_name: String in planet_buildings:
 		var crust_comp: Dictionary = (PlanetData.PLANETS.get(planet_name, {}) as Dictionary) \
@@ -790,10 +881,27 @@ func _accumulate_compounds(delta: float) -> void:
 			total_crust += float(crust_comp[compound])
 		if total_crust <= 0.0:
 			continue
-		var boosted: float = mine_rate * minerals_mult * delta
+		var boosted: float = mine_rate * minerals_mult * delta_days
+		var inv: Dictionary = _planet_inv(planet_name)
 		for compound: String in crust_comp:
 			var added: float = float(crust_comp[compound]) / total_crust * boosted
-			compound_inventory[compound] = compound_inventory.get(compound, 0.0) + added
+			inv[compound] = float(inv.get(compound, 0.0)) + added
+
+## Vent CO₂ from combustion power plants into each planet's atmosphere, in
+## proportion to the energy they generate (production.energy × co2_per_energy),
+## scaled by elapsed game-days so it tracks the timescale like all other flows.
+func _accumulate_emissions(delta_days: float) -> void:
+	for planet_name: String in planet_buildings:
+		var co2_rate: float = 0.0
+		for b_name: String in planet_buildings[planet_name]:
+			var bdef: Dictionary = _bdef_cache.get(b_name, {})
+			var factor: float = float(bdef.get("co2_per_energy", 0.0))
+			if factor <= 0.0:
+				continue
+			var e: float = float((bdef.get("production", {}) as Dictionary).get("energy", 0.0))
+			co2_rate += e * factor
+		if co2_rate > 0.0:
+			atmospheric_co2[planet_name] = atmospheric_co2.get(planet_name, 0.0) + co2_rate * delta_days
 
 # Returns compute rate (population + buildings, boosted by tech and policy).
 func _get_compute_rate() -> float:
@@ -816,7 +924,9 @@ func get_planet_data(planet_name: String) -> Dictionary:
 	}
 	var d := {
 		"name":       planet_names.get(planet_name, planet_name.capitalize()),
-		"population": stats.get("current_population", 0) if planet_name == "earth" else 0,
+		# Population is global and attributed to Earth (humanity's home); colonies
+		# show 0 here.  Always a whole number of people.
+		"population": int(stats.get("current_population", 0)) if planet_name == "earth" else 0,
 		"energy":     0.0,
 		"compute":    0.0,
 	}
@@ -831,30 +941,45 @@ func get_planet_data(planet_name: String) -> Dictionary:
 		mine_output_rate += float((bdef.get("production", {}) as Dictionary).get("minerals", 0.0))
 		counts[b_name] = counts.get(b_name, 0) + 1
 
+	# A planet's compute is dominated by its people: every individual contributes
+	# the best unlocked evolution node's FLOP/s (buildings add on top).  Without
+	# this the panel only showed the tiny building compute, missing the population.
+	var flops_per_person: float = evolution_ui.get_unlocked_compute_per_individual() \
+		if evolution_ui else 1.0e17
+	d["compute"] = d["compute"] + float(d["population"]) * flops_per_person
+
 	var buildings_list: Array = []
 	for b_name in counts:
 		buildings_list.append({"name": b_name, "count": counts[b_name]})
 	d["buildings"] = buildings_list
-	# Build composition with crust depleted by what mines have extracted so far.
+	# Build composition with crust depleted by mining and the atmosphere's CO₂
+	# raised by combustion emissions.  Uses this planet's own inventory.
+	var inv: Dictionary = _planet_inv(planet_name)
 	var raw_comp: Dictionary = (PlanetData.PLANETS.get(planet_name, {}) as Dictionary) \
 		.get("composition_g", {})
-	if raw_comp.is_empty() or compound_inventory.is_empty():
+	var added_co2: float = float(atmospheric_co2.get(planet_name, 0.0))
+	if raw_comp.is_empty():
 		d["composition_g"] = raw_comp
 	else:
 		var comp: Dictionary = {}
 		for layer: String in raw_comp:
-			if layer != "crust":
-				comp[layer] = raw_comp[layer]
-			else:
+			if layer == "crust" and not inv.is_empty():
 				var depleted: Dictionary = {}
 				for compound: String in raw_comp["crust"]:
 					depleted[compound] = maxf(
 						0.0,
-						float(raw_comp["crust"][compound]) - compound_inventory.get(compound, 0.0)
+						float(raw_comp["crust"][compound]) - float(inv.get(compound, 0.0))
 					)
 				comp["crust"] = depleted
+			elif layer == "atmosphere" and added_co2 > 0.0:
+				# Duplicate so we never mutate the PlanetData constant.
+				var atmo: Dictionary = (raw_comp["atmosphere"] as Dictionary).duplicate()
+				atmo["CO2"] = float(atmo.get("CO2", 0.0)) + added_co2
+				comp["atmosphere"] = atmo
+			else:
+				comp[layer] = raw_comp[layer]
 		d["composition_g"] = comp
-	d["compound_inventory"] = compound_inventory.duplicate()
+	d["compound_inventory"] = inv.duplicate()
 
 	# Per-compound mine output: distribute mine_output_rate by crust mass fractions.
 	var crust_comp: Dictionary = (PlanetData.PLANETS.get(planet_name, {}) as Dictionary) \
@@ -868,11 +993,11 @@ func get_planet_data(planet_name: String) -> Dictionary:
 			for compound in crust_comp:
 				mined[compound] = float(crust_comp[compound]) / total_crust * mine_output_rate
 
-	# Also surface any compounds currently in the inventory that were produced by
-	# manufacturing recipes (not mined), so the planet info panel shows them.
+	# Also surface any compounds currently in this planet's inventory that were
+	# produced by manufacturing recipes (not mined), so the panel shows them.
 	# Use a rate of 0 so they appear in the list without a misleading +x/s figure.
-	for compound: String in compound_inventory:
-		if float(compound_inventory[compound]) > 0.0 and not mined.has(compound):
+	for compound: String in inv:
+		if float(inv[compound]) > 0.0 and not mined.has(compound):
 			mined[compound] = 0.0
 
 	d["mined_resources"] = mined
@@ -887,11 +1012,34 @@ func get_planet_data(planet_name: String) -> Dictionary:
 
 	return d
 
+## Current stockpile of every resource/compound that appears in any building cost,
+## for the build panel's live affordability colouring (uses the viewed planet's
+## inventory, since you build with what's stored on that planet).
+func _build_cost_stockpiles() -> Dictionary:
+	var have: Dictionary = {}
+	for b: Dictionary in BuildingData.BUILDINGS:
+		for res: String in (b.get("cost", {}) as Dictionary):
+			if not have.has(res):
+				have[res] = _get_stockpile(res, current_planet)
+	return have
+
 func _get_catalog_for_display() -> Array:
 	var has_colony: bool   = current_planet == "earth" or colonized_planets.has(current_planet)
 	var planet_type: String = PLANET_TYPES.get(current_planet, "rocky")
+	var built: Array = planet_buildings.get(current_planet, [])
 	var result: Array = []
 	for b: Dictionary in BuildingData.BUILDINGS:
+		# Count how many of this building are on the current planet.
+		var cnt: int = 0
+		for bn in built:
+			if bn == b["name"]:
+				cnt += 1
+		# Non-buildable 1945 power plants always remain listed on Earth (their home),
+		# even after the player demolishes the last one — so the entry never vanishes.
+		# On other worlds they show only while owned.
+		var buildable: bool = b.get("buildable", true)
+		if not buildable and cnt == 0 and current_planet != "earth":
+			continue
 		# Buildings incompatible with this planet type are hidden entirely —
 		# not grayed out.  There is no point advertising a Mine on a gas giant.
 		var allowed: Array = b.get("allowed_types", [])
@@ -907,13 +1055,13 @@ func _get_catalog_for_display() -> Array:
 			entry["requires"] = req
 		else:
 			entry["requires"] = ""
-		# Count how many of this building are on the current planet.
-		var built: Array = planet_buildings.get(current_planet, [])
-		var cnt: int = 0
-		for bn in built:
-			if bn == b["name"]:
-				cnt += 1
 		entry["count"] = cnt
+		# Current stockpile (on this planet) of each cost resource so the panel can
+		# dim the ones the player can't yet afford here.
+		var have: Dictionary = {}
+		for res: String in (b.get("cost", {}) as Dictionary):
+			have[res] = _get_stockpile(res, current_planet)
+		entry["have"] = have
 		result.append(entry)
 	return result
 
@@ -925,6 +1073,10 @@ func _building_type_label(allowed_types: Array) -> String:
 	return " or ".join(names) + " planet"
 
 func select_planet(planet_name: String) -> void:
+	# Bodies stay inaccessible until a Survey probe has been sent there (Earth is
+	# home).  The planet-bar buttons enforce this too; this guards other callers.
+	if planet_name != "earth" and not surveyed_planets.has(planet_name):
+		return
 	current_planet = planet_name
 	sidebar.hide_all()
 	planet_info_page.set_planet_info(get_planet_data(planet_name))
@@ -942,13 +1094,14 @@ func try_build(planet_name: String, building_name: String) -> void:
 	if req != "" and not ResearchTree.is_unlocked(req):
 		return
 
+	# Pay with global resources (energy) and this planet's local compound inventory.
 	var cost: Dictionary = building.get("cost", {})
-	for resource in cost:
-		if ResearchTree.resources.get(resource, 0.0) < cost[resource]:
+	for resource: String in cost:
+		if _get_stockpile(resource, planet_name) < float(cost[resource]):
 			return
 
-	for resource in cost:
-		ResearchTree.resources[resource] -= cost[resource]
+	for resource: String in cost:
+		_deduct_stockpile(resource, float(cost[resource]), planet_name)
 
 	if not planet_buildings.has(planet_name):
 		planet_buildings[planet_name] = []
@@ -958,6 +1111,8 @@ func try_build(planet_name: String, building_name: String) -> void:
 	planet_info_page.set_planet_info(get_planet_data(planet_name))
 	if build_panel.visible:
 		build_panel.set_planet(planet_name, _get_catalog_for_display())
+	if launch_panel.visible:
+		launch_panel.set_launch_mods(_build_launch_mods_map())
 
 func _on_build_requested(planet_name: String, building_name: String) -> void:
 	try_build(planet_name, building_name)
@@ -967,11 +1122,23 @@ func _on_demolish_requested(planet_name: String, building_name: String) -> void:
 	var idx: int = built.rfind(building_name)   # remove the last-placed copy
 	if idx == -1:
 		return
+	# Enforce per-building minimums (e.g. always keep ≥1 Biomass Burner so energy
+	# production can't collapse and soft-lock the economy).
+	var min_count: int = int((_bdef_cache.get(building_name, {}) as Dictionary).get("min_count", 0))
+	if min_count > 0:
+		var current: int = 0
+		for bn in built:
+			if bn == building_name:
+				current += 1
+		if current <= min_count:
+			return
 	built.remove_at(idx)
 	_mark_prod_dirty()
 	planet_info_page.set_planet_info(get_planet_data(planet_name))
 	if build_panel.visible:
 		build_panel.set_planet(planet_name, _get_catalog_for_display())
+	if launch_panel.visible:
+		launch_panel.set_launch_mods(_build_launch_mods_map())
 
 func _on_research_completed(node: ResearchNode) -> void:
 	_mark_prod_dirty()
@@ -979,7 +1146,9 @@ func _on_research_completed(node: ResearchNode) -> void:
 	if current_planet != "" and build_panel.visible:
 		build_panel.set_planet(current_planet, _get_catalog_for_display())
 	production_panel.refresh_recipes(_completed_research_map())
-	_check_evolution_triggers()
+	if node.id == LAUNCH_UNLOCK_RESEARCH:
+		_refresh_launch_access()   # reveal Launches the moment Early Rocketry lands
+	_check_population_splits()
 
 # ── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -1061,7 +1230,10 @@ func _on_launch_requested(params: Dictionary) -> void:
 		ResearchTree.resources[resource] -= cost[resource]
 
 	var start_offset: int = params.get("start_offset", 0)
-	var duration: int    = int(params.get("duration", 30) * _policy_mission_dur_mult())
+	# The panel already folded the policy duration multiplier into params.duration,
+	# so use it directly — re-applying here would shorten the trip twice and make
+	# the actual arrival disagree with the time shown at launch.
+	var duration: int    = int(params.get("duration", 30))
 	var start_date := _date_add_days(year, month, day, start_offset)
 	var end_date   := _date_add_days(start_date[0], start_date[1], start_date[2], duration)
 
@@ -1087,15 +1259,81 @@ func _on_launch_requested(params: Dictionary) -> void:
 	active_launches.append(launch)
 	launch_panel.refresh_launches(_compute_launch_display_data())
 
-	if target_name != "" and target_name != origin_name:
+	# Sending a Survey probe unlocks that body's planet-bar button.
+	if m_name == "Survey":
+		_mark_surveyed(target_name)
+
+	# Spawn a craft for every launch, including local orbit insertions where the
+	# target is the origin planet itself (it just settles straight into orbit).
+	if target_name != "":
 		var origin_planet := get_node_or_null("WorldRoot/Planets/" + origin_name) as Planet
 		var target_planet := get_node_or_null("WorldRoot/Planets/" + target_name) as Planet
 		if origin_planet and target_planet:
 			_spawn_satellite(origin_planet, target_planet, arrival, launch["id"], float(duration))
 
-func _on_launches_button_pressed() -> void:
+## Best (lowest) launch cost & duration multipliers a planet's infrastructure
+## grants (e.g. a Space Elevator).  Returns {"cost": float, "duration": float};
+## {1.0, 1.0} when the planet has no launch-modifying building.
+func _planet_launch_mods(planet_name: String) -> Dictionary:
+	var cost_mult: float = 1.0
+	var dur_mult:  float = 1.0
+	for b_name: String in planet_buildings.get(planet_name, []):
+		var bdef: Dictionary = _bdef_cache.get(b_name, {})
+		if bdef.has("launch_cost_mult"):
+			cost_mult = minf(cost_mult, float(bdef["launch_cost_mult"]))
+		if bdef.has("launch_duration_mult"):
+			dur_mult = minf(dur_mult, float(bdef["launch_duration_mult"]))
+	return {"cost": cost_mult, "duration": dur_mult}
+
+## Map of { planet_name → {cost, duration} } for every planet whose buildings
+## discount launches, so the LaunchPanel can adjust cost/time by chosen origin.
+func _build_launch_mods_map() -> Dictionary:
+	var out: Dictionary = {}
+	for planet_name: String in planet_buildings:
+		var mods: Dictionary = _planet_launch_mods(planet_name)
+		if mods["cost"] < 1.0 or mods["duration"] < 1.0:
+			out[planet_name] = mods
+	return out
+
+## Called by the sidebar when the Launches view is opened, so the panel reflects
+## the current date, defaults its origin to the planet being viewed, and shows any
+## launch-infrastructure discounts (e.g. a Space Elevator).
+func refresh_launch_panel() -> void:
 	launch_panel.set_game_date(year, month + 1, day + 1)
+	launch_panel.set_current_planet(current_planet)
+	launch_panel.set_launch_mods(_build_launch_mods_map())
+	launch_panel.set_mission_duration_mult(_policy_mission_dur_mult())
+	launch_panel.set_max_accel(_max_launch_accel())
+	launch_panel.set_orbital_state(_build_orbital_state())
 	launch_panel.refresh_launches(_compute_launch_display_data())
+
+## Highest sustained transfer acceleration (m/s²) the player's propulsion research
+## allows.  Each tier of drive unlocks a higher ceiling; the LaunchPanel's
+## acceleration slider extends to match, letting faster (and costlier) transfers.
+const _ACCEL_BY_RESEARCH := {
+	"advanced_propulsion":     1.0e-1,   # ion / nuclear-thermal drives
+	"fusion_engineering":      1.0e0,    # fusion torch
+	"antimatter_handling":     1.0e1,    # antimatter drive
+	"relativistic_navigation": 1.0e2,    # relativistic drive — nudges toward c
+}
+func _max_launch_accel() -> float:
+	var best: float = 1.0e-2   # chemical baseline (early_rocketry, already required)
+	for node_id: String in _ACCEL_BY_RESEARCH:
+		if ResearchTree.is_unlocked(node_id):
+			best = maxf(best, float(_ACCEL_BY_RESEARCH[node_id]))
+	return best
+
+## Snapshot of every launchable planet's current orbital angle (radians), so the
+## LaunchPanel can compute the actual-path (launch-window) energy cost.
+func _build_orbital_state() -> Dictionary:
+	const NAMES := ["mercury", "venus", "earth", "mars",
+		"jupiter", "saturn", "uranus", "neptune"]
+	var out: Dictionary = {}
+	for pname: String in NAMES:
+		var p := get_node_or_null("WorldRoot/Planets/" + pname) as Planet
+		if p:
+			out[pname] = p.orbit_angle
+	return out
 
 func save_game(path: String = "") -> void:
 	if path == "":
@@ -1115,13 +1353,17 @@ func save_game(path: String = "") -> void:
 		"active_launches":    active_launches,
 		"next_launch_id":     _next_launch_id,
 		"colonized_planets":  colonized_planets,
+		"colonized_year":     _colonized_year,
+		"split_thresholds":   _split_thresholds,
+		"colony_parent":      _colony_parent,
+		"variant_parent":     _variant_parent,
+		"surveyed_planets":   surveyed_planets,
 		"policies":           policies,
-		"evolution": {
-			"visible":  evolution_ui.get_visible_node_ids(),
-			"unlocked": evolution_ui.get_unlocked_map(),
-		},
 		"stats_history":      statistics_page.get_save_data(),
 		"compound_inventory": compound_inventory,
+		"atmospheric_co2":    atmospheric_co2,
+		"fired_events":       _fired_events,
+		"fired_event_years":  _fired_event_years,
 	}
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -1162,6 +1404,26 @@ func load_game(path: String = "") -> void:
 
 	if data.has("planet_buildings") and data["planet_buildings"] is Dictionary:
 		planet_buildings = data["planet_buildings"]
+		# Migrate renamed buildings so older saves keep their structures.
+		const _RENAMES := {
+			"Compute Core":  "Data Center",
+			"Biomass Grid":  "Biomass Burner",   # 1945 grids → real power plants
+			"Biomass Plant": "Biomass Burner",
+			"Coal Grid":     "Coal Plant",
+			"Oil Grid":      "Oil Plant",
+			"Storage Depot": "Matter Depot",     # storage split into matter + energy
+			"Orbital Cache": "Orbital Vault",
+		}
+		for _pname: String in planet_buildings:
+			var _list: Array = planet_buildings[_pname]
+			for _i in range(_list.size()):
+				if _RENAMES.has(_list[_i]):
+					_list[_i] = _RENAMES[_list[_i]]
+		# Guarantee Earth keeps at least one Biomass Burner (soft-lock guard).
+		var _earth: Array = planet_buildings.get("earth", [])
+		if not _earth.has("Biomass Burner"):
+			_earth.append("Biomass Burner")
+			planet_buildings["earth"] = _earth
 
 	if data.has("resources") and data["resources"] is Dictionary:
 		for key in data["resources"]:
@@ -1182,28 +1444,93 @@ func load_game(path: String = "") -> void:
 	else:
 		colonized_planets = []
 
+	_colonized_year   = {}
+	_split_thresholds = {}
+	_colony_parent    = {}
+	if data.has("colonized_year") and data["colonized_year"] is Dictionary:
+		for k: String in data["colonized_year"]:
+			_colonized_year[k] = int(data["colonized_year"][k])
+	if data.has("split_thresholds") and data["split_thresholds"] is Dictionary:
+		for k: String in data["split_thresholds"]:
+			_split_thresholds[k] = int(data["split_thresholds"][k])
+	if data.has("colony_parent") and data["colony_parent"] is Dictionary:
+		for k: String in data["colony_parent"]:
+			_colony_parent[k] = str(data["colony_parent"][k])
+	# Earth's lineage clock starts at the 1945 game epoch.
+	if not _colonized_year.has("earth"):
+		_colonized_year["earth"]   = 1945
+		_split_thresholds["earth"] = int(randf_range(500_000.0, 1_000_000.0))
+	# Back-fill colonies that pre-date this save format — treat them as
+	# freshly colonised so the split will fire after a further 500k–1M years.
+	for planet_name: String in colonized_planets:
+		if not _colonized_year.has(planet_name):
+			_colonized_year[planet_name]   = year
+			_split_thresholds[planet_name] = int(randf_range(500_000.0, 1_000_000.0))
+
+	# Restore which bodies have been surveyed (planet-bar unlocks).
+	if data.has("surveyed_planets") and data["surveyed_planets"] is Array:
+		surveyed_planets = []
+		for entry in data["surveyed_planets"]:
+			surveyed_planets.append(str(entry))
+	else:
+		# Older save: infer from any Survey missions already launched.
+		surveyed_planets = ["earth"]
+		for launch: Dictionary in active_launches:
+			if launch.get("mission", "") == "Survey":
+				var t: String = str(launch.get("target", ""))
+				if t != "" and not surveyed_planets.has(t):
+					surveyed_planets.append(t)
+	if not surveyed_planets.has("earth"):
+		surveyed_planets.append("earth")
+	_refresh_planet_buttons()
+
 	policies = PoliticsData.default_state()
 	if data.has("policies") and data["policies"] is Dictionary:
 		for key: String in data["policies"]:
 			policies[key] = data["policies"][key]
 	politics_page.load_policies(policies)
 
-	if data.has("evolution") and data["evolution"] is Dictionary:
-		var ev: Dictionary = data["evolution"]
-		var visible: Array  = ev.get("visible",  ["homo_sapiens"])
-		var unlocked_ev: Dictionary = ev.get("unlocked", {"homo_sapiens": true})
-		evolution_ui.load_evolution_state(visible, unlocked_ev)
-	else:
-		evolution_ui.reset_to_baseline()
-	_check_evolution_triggers()
+	# Rebuild the evolution tree from the saved lineage map.  variant_parent is an
+	# ordered { world → parent world } dict; replaying it in insertion order
+	# guarantees each parent lineage exists before its descendant is added.
+	_variant_parent = {}
+	evolution_ui.reset_to_baseline()
+	if data.has("variant_parent") and data["variant_parent"] is Dictionary:
+		for world: String in data["variant_parent"]:
+			var parent_world: String = str(data["variant_parent"][world])
+			_variant_parent[world] = parent_world
+			evolution_ui.add_planet_variant(world, parent_world)
+	_check_population_splits()
 
 	if data.has("stats_history") and data["stats_history"] is Dictionary:
 		statistics_page.load_save_data(data["stats_history"])
 
+	# compound_inventory is per-planet { planet → { compound → grams } }.  Older
+	# saves stored a flat { compound → grams } global pool — attribute that to Earth.
 	compound_inventory = {}
 	if data.has("compound_inventory") and data["compound_inventory"] is Dictionary:
-		for key in data["compound_inventory"]:
-			compound_inventory[key] = float(data["compound_inventory"][key])
+		var saved_inv: Dictionary = data["compound_inventory"]
+		var is_per_planet: bool = false
+		for v in saved_inv.values():
+			if v is Dictionary:
+				is_per_planet = true
+			break
+		if is_per_planet:
+			for pname: String in saved_inv:
+				var pinv: Dictionary = {}
+				for compound in (saved_inv[pname] as Dictionary):
+					pinv[compound] = float(saved_inv[pname][compound])
+				compound_inventory[pname] = pinv
+		else:
+			var earth_inv: Dictionary = {}
+			for compound in saved_inv:
+				earth_inv[compound] = float(saved_inv[compound])
+			compound_inventory["earth"] = earth_inv
+
+	atmospheric_co2 = {}
+	if data.has("atmospheric_co2") and data["atmospheric_co2"] is Dictionary:
+		for key: String in data["atmospheric_co2"]:
+			atmospheric_co2[key] = float(data["atmospheric_co2"][key])
 
 	if data.has("production_jobs") and data["production_jobs"] is Array:
 		_production_jobs = data["production_jobs"].duplicate(true)
@@ -1211,6 +1538,26 @@ func load_game(path: String = "") -> void:
 	else:
 		_production_jobs = []
 		production_panel.load_jobs([])
+
+	_fired_events = []
+	_fired_event_years = {}
+	if data.has("fired_events") and data["fired_events"] is Array:
+		for entry in data["fired_events"]:
+			_fired_events.append(str(entry))
+	if data.has("fired_event_years") and data["fired_event_years"] is Dictionary:
+		for k: String in data["fired_event_years"]:
+			_fired_event_years[k] = int(data["fired_event_years"][k])
+	_pending_event_notifications = []
+
+	# Replay fired events onto the timeline so cards appear after a load.
+	# Use the saved fire-year so each card appears at the correct position.
+	if timeline_panel:
+		for ev_def: Dictionary in GameEvents.EVENTS:
+			var ev_id: String = ev_def["id"]
+			if _fired_events.has(ev_id):
+				var stamped: Dictionary = ev_def.duplicate()
+				stamped["year"] = _fired_event_years.get(ev_id, year)
+				timeline_panel.add_live_event(stamped)
 
 	_mark_prod_dirty()
 	# Pre-compute storage caps from loaded buildings so the first _process tick
@@ -1261,8 +1608,10 @@ func _update_population(delta_days: float) -> void:
 		var r: float = POP_GROWTH_PER_YEAR / 365.25
 		var decay: float = exp(-r * delta_days)
 		new_pop = k / (1.0 + (k / pop - 1.0) * decay)
-	new_pop = maxf(MIN_POPULATION, new_pop)
-	if not is_equal_approx(new_pop, pop):
+	# People are counted in whole numbers — floor to keep the population integral.
+	# Per-step growth is always far more than one person, so this never stalls.
+	new_pop = floorf(maxf(MIN_POPULATION, new_pop))
+	if new_pop != pop:
 		stats["current_population"] = new_pop
 		_mark_prod_dirty()   # population feeds the compute rate
 
@@ -1360,3 +1709,149 @@ func _on_uranus_button_pressed() -> void:
 
 func _on_neptune_button_pressed() -> void:
 	select_planet("neptune")
+
+# ── Game event system ─────────────────────────────────────────────────────────
+
+## Evaluate all unfired events of the given trigger_type against current state.
+## Called from advance_day (yearly), fast mode, and mission/colony completion.
+func _check_game_events(trigger_type: String) -> void:
+	for ev: Dictionary in GameEvents.EVENTS:
+		var ev_id: String = ev["id"]
+		if _fired_events.has(ev_id):
+			continue
+		if ev["trigger_type"] != trigger_type:
+			continue
+
+		var fired := false
+		match trigger_type:
+			"year":
+				fired = year >= int(ev["trigger_value"])
+			"population":
+				fired = float(stats.get("current_population", 0)) >= float(ev["trigger_value"])
+			"colony_count":
+				fired = colonized_planets.size() >= int(ev["trigger_value"])
+			"compute":
+				fired = _get_compute_rate() >= float(ev["trigger_value"])
+			"orbit_mission", "mission_mars", "mission_outer":
+				fired = true   # the trigger is the call itself
+
+		if fired:
+			_fired_events.append(ev_id)
+			_fired_event_years[ev_id] = year
+			# Stamp the event with the year it actually fired so the timeline
+			# card is anchored to the correct position on the canvas.
+			var stamped: Dictionary = ev.duplicate()
+			stamped["year"] = year
+			_pending_event_notifications.append(stamped)
+			if timeline_panel:
+				timeline_panel.add_live_event(stamped)
+
+## Build the CanvasLayer and VBoxContainer used for event notification cards.
+func _setup_event_notifications() -> void:
+	_event_notif_layer = CanvasLayer.new()
+	_event_notif_layer.layer = 50
+	_event_notif_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_event_notif_layer)
+
+	var anchor := Control.new()
+	anchor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_event_notif_layer.add_child(anchor)
+
+	_event_notif_vbox = VBoxContainer.new()
+	_event_notif_vbox.set_anchor(SIDE_TOP,    0.0)
+	_event_notif_vbox.set_anchor(SIDE_RIGHT,  1.0)
+	_event_notif_vbox.set_anchor(SIDE_BOTTOM, 0.0)
+	_event_notif_vbox.set_anchor(SIDE_LEFT,   1.0)
+	_event_notif_vbox.offset_top    = 12
+	_event_notif_vbox.offset_right  = -12
+	_event_notif_vbox.offset_left   = -12 - 320
+	_event_notif_vbox.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_event_notif_vbox.add_theme_constant_override("separation", 6)
+	anchor.add_child(_event_notif_vbox)
+
+## Spawn a single notification card for the given event dict.
+## Cards auto-dismiss after 10 seconds or when the × button is pressed.
+func _show_event_card(ev: Dictionary) -> void:
+	if not _event_notif_vbox:
+		return
+	var cat: String      = ev.get("category", "civilization")
+	var cat_col: Color   = GameEvents.CATEGORY_COLORS.get(cat, Color.WHITE)
+
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(320, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.10, 0.14, 0.95)
+	style.border_color = cat_col
+	style.set_border_width_all(2)
+	style.border_width_left = 4
+	style.corner_radius_top_left     = 4
+	style.corner_radius_top_right    = 4
+	style.corner_radius_bottom_left  = 4
+	style.corner_radius_bottom_right = 4
+	card.add_theme_stylebox_override("panel", style)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+	card.add_child(hbox)
+
+	# Left accent bar color block
+	var bar := ColorRect.new()
+	bar.color = cat_col
+	bar.custom_minimum_size = Vector2(4, 0)
+	bar.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hbox.add_child(bar)
+
+	# Text area
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left",   8)
+	margin.add_theme_constant_override("margin_right",  4)
+	margin.add_theme_constant_override("margin_top",    6)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(margin)
+
+	var txt_vbox := VBoxContainer.new()
+	txt_vbox.add_theme_constant_override("separation", 2)
+	margin.add_child(txt_vbox)
+
+	var year_lbl := Label.new()
+	year_lbl.text = str(year)
+	year_lbl.add_theme_font_size_override("font_size", 10)
+	year_lbl.add_theme_color_override("font_color", cat_col)
+	txt_vbox.add_child(year_lbl)
+
+	var title_lbl := Label.new()
+	title_lbl.text = ev.get("title", "")
+	title_lbl.add_theme_font_size_override("font_size", 14)
+	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	txt_vbox.add_child(title_lbl)
+
+	var desc_lbl := Label.new()
+	desc_lbl.text = ev.get("desc", "")
+	desc_lbl.add_theme_font_size_override("font_size", 11)
+	desc_lbl.add_theme_color_override("font_color", Color(0.68, 0.68, 0.76))
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	txt_vbox.add_child(desc_lbl)
+
+	# Dismiss button
+	var dismiss := Button.new()
+	dismiss.text = "×"
+	dismiss.flat = true
+	dismiss.add_theme_font_size_override("font_size", 16)
+	dismiss.add_theme_color_override("font_color", Color(0.55, 0.55, 0.65))
+	dismiss.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	dismiss.pressed.connect(card.queue_free)
+	hbox.add_child(dismiss)
+
+	_event_notif_vbox.add_child(card)
+
+	# Slide in from right
+	card.modulate.a = 0.0
+	var tween := card.create_tween()
+	tween.tween_property(card, "modulate:a", 1.0, 0.35)
+	# Auto-dismiss after 10 seconds
+	tween.tween_interval(10.0)
+	tween.tween_property(card, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(card.queue_free)

@@ -1,5 +1,23 @@
 class_name ResearchTreeData
 
+# ── Cost scaling (match production magnitudes) ───────────────────────────────
+# The hand-authored per-node costs below carry the *relative* curve (≈1.43×
+# science per column).  Their raw magnitudes (science 18–4525, energy 2–2798)
+# were trivially affordable: science income is uncapped at ~population × 10^17
+# FLOP/s (≈2.3e26 FLOP/s at the 1945 start), and energy refills its storage tank
+# almost instantly.  These multipliers lift the magnitudes onto the same scale as
+# actual production so research becomes a real, time-gated sink:
+#
+#   • Science is uncapped, so its cost is scaled to the FLOP economy.  An early
+#     node (science 30) now costs 3e27 ≈ a dozen game-days of starting output;
+#     late nodes (science ~4500) cost ~4.5e29 ≈ centuries, while production only
+#     grows ~4× (population 2.3e9 → ~1e10), so research escalates meaningfully.
+#   • Energy is storage-capped (base 1e5, +1e6 per Storage Depot), so its cost is
+#     scaled to that pool: early nodes fit the base tank, advanced nodes require
+#     building dedicated storage first.
+const SCIENCE_COST_SCALE: float = 1.0e26
+const ENERGY_COST_SCALE:  float = 1.0e3
+
 # ── Cost philosophy ─────────────────────────────────────────────────────────
 # Science grows ~1.43× per column; energy is weighted by research infrastructure:
 #   Theory/math          → energy × 0.1–0.3
@@ -1117,5 +1135,12 @@ static func build() -> Array:
 				if n.position.x < min_x:
 					n.position.x = min_x
 					any_changed = true
+
+	# Lift the hand-authored relative costs onto production-matched magnitudes.
+	for n: ResearchNode in nodes:
+		if n.cost.has("science"):
+			n.cost["science"] = float(n.cost["science"]) * SCIENCE_COST_SCALE
+		if n.cost.has("energy"):
+			n.cost["energy"] = float(n.cost["energy"]) * ENERGY_COST_SCALE
 
 	return nodes

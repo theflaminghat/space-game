@@ -41,6 +41,16 @@ var _target: Planet = null
 var _depart_angle:  float = 0.0
 var _depart_radius: float = 0.0
 var _outward:       bool  = true
+## Sun position cached at launch — the star is static, so re-reading its transform
+## every frame in _transfer_point() is pure overhead.
+var _sun_pos:       Vector3 = Vector3.ZERO
+
+# ── Continuously-unwrapped heliocentric sweep to the (moving) target ──────────────
+## Prograde angular distance from departure to the target's live angle.  Kept
+## continuous frame-to-frame so the arc never snaps by a full revolution when the
+## target crosses the departure angle (the 0/TAU branch point of a wrapped sweep).
+var _sweep:      float = 0.0
+var _sweep_init: bool  = false
 
 # ── Game-day timing ──────────────────────────────────────────────────────────────
 var _flight_days:  float = DEFAULT_FLIGHT_DAYS
@@ -49,10 +59,14 @@ var _state:        int   = State.TRANSFER
 var _started:      bool  = false   # false until begin_transfer() is called
 
 # ── Orbit / landing phase ────────────────────────────────────────────────────────
-var _orbit_angle: float = 0.0
-var _park_radius: float = 1.0
-var _orbit_tilt:  float = 0.0
-var _land_days:   float = 0.0
+var _orbit_angle:       float = 0.0
+var _orbit_dir:         float = 1.0   # +1 CCW, -1 CW — matched to incoming velocity
+var _orbit_entry_angle: float = 0.0   # orbit ring angle where velocity aligns with arrival
+var _park_radius:       float = 1.0
+var _orbit_tilt:        float = 0.0
+var _tilt_sin:          float = 0.0   # cached sin(_orbit_tilt) — constant per flight
+var _tilt_cos:          float = 1.0   # cached cos(_orbit_tilt) — constant per flight
+var _land_days:         float = 0.0
 
 # ── Visual nodes ─────────────────────────────────────────────────────────────────
 var _dot: MeshInstance3D = null
@@ -74,18 +88,32 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 	_target      = target
 	_flight_days = maxf(flight_days, 1.0)
 
-	var sun: Vector3 = center.global_position
-	var rel: Vector3 = origin.global_position - sun
+	_sun_pos = center.global_position
+	var rel: Vector3 = origin.global_position - _sun_pos
 	_depart_radius = rel.length()
 	_depart_angle  = atan2(rel.x, rel.z)
 	_outward       = target.get_visual_radius() >= _depart_radius
 
 	_park_radius = maxf(target.scale.x * PARKING_SCALE, PARKING_MIN)
 	_orbit_tilt  = deg_to_rad(ORBIT_TILT_DEG)
+	_tilt_sin    = sin(_orbit_tilt)
+	_tilt_cos    = cos(_orbit_tilt)
 
 	_elapsed_days = 0.0
-	_state        = State.TRANSFER
 	_started      = true
+	_sweep_init   = false   # seeded on the first _transfer_point() call below
+
+	# Local orbit insertion: the target *is* the origin planet, so there's no
+	# interplanetary cruise — settle straight into a parking orbit so the craft is
+	# visible orbiting from the moment it launches.
+	if origin == target:
+		_orbit_dir   = 1.0
+		_orbit_angle = 0.0
+		_state       = State.ORBIT
+		_set_craft_pos(_orbit_point(_park_radius))
+		return
+
+	_state = State.TRANSFER
 	_set_craft_pos(_transfer_point(0.0))
 
 func _process(delta: float) -> void:
@@ -120,19 +148,21 @@ func _process_transfer(delta_days: float) -> void:
 
 	if p >= 1.0:
 		arrived.emit(arrival_mode)
+		# _orbit_dir and _orbit_entry_angle are already current from _transfer_point.
 		if arrival_mode == "land":
-			_state    = State.LANDING
+			_state     = State.LANDING
 			_land_days = 0.0
 		else:
 			_state       = State.ORBIT
-			_orbit_angle = 0.0
+			_orbit_angle = _orbit_entry_angle
 
 ## Hohmann half-ellipse whose far end is recomputed every frame from the target's
 ## current radius & angle, so the craft homes onto the moving planet.
 func _transfer_point(p: float) -> Vector3:
-	var sun: Vector3  = orbit_center.global_position
-	var trel: Vector3 = _target.global_position - sun
-	var r2: float = trel.length()
+	var trel: Vector3 = _target.global_position - _sun_pos
+	# Floor the target radius so a Sun-targeted transfer (target at the centre)
+	# can't drive the transfer eccentricity to exactly 1.0 → 0/0 → NaN position.
+	var r2: float = maxf(trel.length(), 0.5)
 	var a2: float = atan2(trel.x, trel.z)
 	var r1: float = _depart_radius
 
@@ -143,32 +173,67 @@ func _transfer_point(p: float) -> Vector3:
 	var theta: float = (0.0 if _outward else PI) + p * PI
 	var r: float = a * (1.0 - e * e) / (1.0 + e * cos(theta))
 
-	var ang: float = _depart_angle + _prograde_sweep(_depart_angle, a2) * p
-	return sun + Vector3(sin(ang) * r, 0.0, cos(ang) * r)
+	# Unwrap the prograde sweep so it varies continuously as the target orbits,
+	# instead of snapping by ±TAU when the target passes the departure angle.
+	var raw: float = _prograde_sweep(_depart_angle, a2)
+	if not _sweep_init:
+		_sweep      = raw
+		_sweep_init = true
+	else:
+		while raw - _sweep >  PI: raw -= TAU
+		while raw - _sweep < -PI: raw += TAU
+		_sweep = raw
+
+	var ang: float = _depart_angle + _sweep * p
+	var pos: Vector3 = _sun_pos + Vector3(sin(ang) * r, 0.0, cos(ang) * r)
+
+	# The velocity-aligned insertion offset is blended in by smoothstep(0.75, 1.0, p),
+	# which is zero for the first three-quarters of the flight — so skip the atan2 /
+	# trig that compute it until it can actually affect the position.
+	if p >= 0.75:
+		# Pick the orbit ring angle whose velocity is already tangent to the
+		# heliocentric arrival velocity, so there's no direction flip at insertion.
+		# Orbit velocity at θ (CCW): (-sinθ, 0, cosθ); arrival tangent: (cos a, 0, -sin a).
+		#   CCW → θ = atan2(-cos a, -sin a);  CW → atan2(cos a, sin a).
+		var ang_final: float = _depart_angle + _sweep
+		var sf: float = sin(ang_final)
+		var cf: float = cos(ang_final)
+		if sf > 0.0:
+			_orbit_dir         = -1.0
+			_orbit_entry_angle = atan2(cf, sf)
+		else:
+			_orbit_dir         = 1.0
+			_orbit_entry_angle = atan2(-cf, -sf)
+
+		var insertion: Vector3 = _orbit_offset(_park_radius, _orbit_entry_angle)
+		pos += insertion * smoothstep(0.75, 1.0, p)
+	return pos
 
 # ── Phase: orbit ─────────────────────────────────────────────────────────────────
 
 func _process_orbit(delta_days: float) -> void:
-	_orbit_angle += TAU * delta_days / ORBIT_PERIOD_DAYS
+	_orbit_angle += TAU * delta_days / ORBIT_PERIOD_DAYS * _orbit_dir
 	_set_craft_pos(_orbit_point(_park_radius))
 
 ## A circular orbit around the target, tilted about the X axis so it reads as an
 ## ellipse rather than an edge-on line from the default camera.
 func _orbit_point(radius: float) -> Vector3:
-	var cx: float = cos(_orbit_angle) * radius
-	var cz: float = sin(_orbit_angle) * radius
-	return _target.global_position + Vector3(
-		cx,
-		cz * sin(_orbit_tilt),
-		cz * cos(_orbit_tilt)
-	)
+	return _target.global_position + _orbit_offset(radius, _orbit_angle)
+
+## Offset from the target's centre to a point on the tilted parking orbit at the
+## given orbital angle.  Shared by the transfer-arc insertion blend and the
+## ORBIT/LANDING phases so they line up exactly at angle 0.
+func _orbit_offset(radius: float, angle: float) -> Vector3:
+	var cx: float = cos(angle) * radius
+	var cz: float = sin(angle) * radius
+	return Vector3(cx, cz * _tilt_sin, cz * _tilt_cos)
 
 # ── Phase: landing ───────────────────────────────────────────────────────────────
 
 func _process_landing(delta_days: float) -> void:
 	_land_days += delta_days
 	var p: float = clampf(_land_days / LAND_DESCEND_DAYS, 0.0, 1.0)
-	_orbit_angle += TAU * delta_days / (ORBIT_PERIOD_DAYS * 0.5)
+	_orbit_angle += TAU * delta_days / (ORBIT_PERIOD_DAYS * 0.5) * _orbit_dir
 	var radius: float = lerpf(_park_radius, _target.scale.x * 0.9, p)
 	_set_craft_pos(_orbit_point(radius))
 	if p >= 1.0:

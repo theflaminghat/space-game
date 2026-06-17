@@ -15,13 +15,19 @@ const PLANETS: Array = [
 	"Earth", "Mercury", "Venus", "Mars",
 	"Jupiter", "Saturn", "Uranus", "Neptune",
 ]
-const RATE_MIN:  float = 0.1
-const RATE_MAX:  float = 10.0
-const RATE_STEP: float = 0.1
+## Slider operates in log₁₀ space so each position is an equal *ratio* step.
+## LOG_MIN = -2  →  0.01×   |   LOG_MAX = 3  →  1 000×
+## LOG_STEP = 0.05  →  each tick ≈ ×1.12  (≈ 60 ticks per decade)
+const LOG_MIN:  float = -2.0
+const LOG_MAX:  float =  3.0
+const LOG_STEP: float =  0.05
 
 # ── Internal state ───────────────────────────────────────────────────────────────
 var _jobs:       Array = []   # active production jobs
-var _job_status_labels: Dictionary = {}   # job_id (int) → Label
+var _job_status_labels: Dictionary = {}   # job_id → Label  (running / stalled)
+var _job_rate_labels:   Dictionary = {}   # job_id → Label  (rate readout "1.0×")
+var _job_out_labels:    Dictionary = {}   # job_id → Label  (output flow)
+var _job_in_labels:     Dictionary = {}   # job_id → Label  (input flow)
 var _next_id:    int   = 1
 var _all_recipes: Array = []   # full recipe list (updated on research change)
 
@@ -34,6 +40,23 @@ var _add_button:     Button       = null
 var _job_list:       VBoxContainer = null
 var _inputs_label:   Label        = null
 var _outputs_label:  Label        = null
+
+# ── Log-scale helpers ────────────────────────────────────────────────────────────
+
+## Slider position (log₁₀) → actual multiplier.
+static func _log_to_rate(log_val: float) -> float:
+	return pow(10.0, log_val)
+
+## Actual multiplier → slider position (log₁₀), clamped to valid range.
+static func _rate_to_log(rate: float) -> float:
+	return clampf(log(maxf(rate, 1e-6)) / log(10.0), LOG_MIN, LOG_MAX)
+
+## Human-readable rate label: "0.01×", "1.00×", "10×", "1000×".
+static func _fmt_rate(rate: float) -> String:
+	if rate >= 100.0: return "%d×"    % int(roundf(rate))
+	if rate >= 10.0:  return "%.1f×"  % rate
+	if rate >= 1.0:   return "%.2f×"  % rate
+	return "%.3f×" % rate
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────────
 
@@ -130,15 +153,15 @@ func _build_ui() -> void:
 	rate_row.add_theme_constant_override("separation", 8)
 	rate_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rate_slider = HSlider.new()
-	_rate_slider.min_value = RATE_MIN
-	_rate_slider.max_value = RATE_MAX
-	_rate_slider.step      = RATE_STEP
-	_rate_slider.value     = 1.0
+	_rate_slider.min_value = LOG_MIN
+	_rate_slider.max_value = LOG_MAX
+	_rate_slider.step      = LOG_STEP
+	_rate_slider.value     = 0.0          # 10^0 = 1×
 	_rate_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rate_slider.value_changed.connect(_on_rate_changed)
 	rate_row.add_child(_rate_slider)
 	_rate_label = Label.new()
-	_rate_label.text = "1.0×"
+	_rate_label.text = "1.00×"
 	_rate_label.custom_minimum_size = Vector2(38, 0)
 	rate_row.add_child(_rate_label)
 	form.add_child(rate_row)
@@ -210,7 +233,7 @@ func _update_io_preview() -> void:
 		_inputs_label.text  = "—"
 		_outputs_label.text = "—"
 		return
-	var rate: float = _rate_slider.value if _rate_slider else 1.0
+	var rate: float = _log_to_rate(_rate_slider.value) if _rate_slider else 1.0
 	_inputs_label.text  = _fmt_flow(recipe.get("inputs",  {}), rate)
 	_outputs_label.text = _fmt_flow(recipe.get("outputs", {}), rate)
 
@@ -240,63 +263,114 @@ func _selected_recipe() -> Dictionary:
 
 func _rebuild_job_list() -> void:
 	_job_status_labels.clear()
+	_job_rate_labels.clear()
+	_job_out_labels.clear()
+	_job_in_labels.clear()
 	for child in _job_list.get_children():
 		child.queue_free()
 	for job in _jobs:
 		_add_job_row(job)
 
 func _add_job_row(job: Dictionary) -> void:
-	var recipe := _find_recipe(job.get("recipe", ""))
-	var rate:   float  = float(job.get("rate",   1.0))
+	var recipe  := _find_recipe(job.get("recipe", ""))
+	var rate:   float  = float(job.get("rate", 1.0))
 	var planet: String = (job.get("planet", "earth") as String).capitalize()
+	var job_id  := int(job.get("id", 0))
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
+	# ── Outer card ────────────────────────────────────────────────────────────
+	var card := VBoxContainer.new()
+	card.add_theme_constant_override("separation", 3)
 
-	# Info vbox
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation", 1)
+	# Row 1: recipe name + planet + remove button
+	var header_row := HBoxContainer.new()
+	header_row.add_theme_constant_override("separation", 6)
 
 	var name_lbl := Label.new()
-	name_lbl.text = "%s  @ %s  (%.1f×)" % [job.get("recipe", "?"), planet, rate]
+	name_lbl.text = "%s  @ %s" % [job.get("recipe", "?"), planet]
 	name_lbl.add_theme_font_size_override("font_size", 12)
-	info.add_child(name_lbl)
+	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_child(name_lbl)
 
-	if not recipe.is_empty():
-		var out_lbl := Label.new()
-		out_lbl.text = "→ " + _fmt_flow(recipe.get("outputs", {}), rate)
-		out_lbl.add_theme_font_size_override("font_size", 10)
-		out_lbl.modulate = Color(0.55, 0.85, 0.60)
-		info.add_child(out_lbl)
-
-		var in_lbl := Label.new()
-		in_lbl.text = "← " + _fmt_flow(recipe.get("inputs", {}), rate)
-		in_lbl.add_theme_font_size_override("font_size", 10)
-		in_lbl.modulate = Color(0.80, 0.65, 0.55)
-		info.add_child(in_lbl)
-
-	row.add_child(info)
-
-	# Status indicator ("✓ running" / "⚠ missing inputs")
-	var job_id := int(job.get("id", 0))
 	var status_lbl := Label.new()
 	status_lbl.text = "…"
 	status_lbl.add_theme_font_size_override("font_size", 10)
 	status_lbl.modulate = Color(0.55, 0.55, 0.55)
 	status_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	info.add_child(status_lbl)
+	header_row.add_child(status_lbl)
 	_job_status_labels[job_id] = status_lbl
 
-	# Remove button
 	var rm := Button.new()
 	rm.text = "✕"
 	rm.flat = true
 	rm.custom_minimum_size = Vector2(28, 28)
 	rm.pressed.connect(_on_remove_pressed.bind(job_id))
-	row.add_child(rm)
+	header_row.add_child(rm)
 
-	_job_list.add_child(row)
+	card.add_child(header_row)
+
+	# Row 2: rate slider + readout
+	var slider_row := HBoxContainer.new()
+	slider_row.add_theme_constant_override("separation", 6)
+
+	var slider_lbl := Label.new()
+	slider_lbl.text = "Rate:"
+	slider_lbl.add_theme_font_size_override("font_size", 11)
+	slider_lbl.modulate = Color(0.70, 0.70, 0.70)
+	slider_row.add_child(slider_lbl)
+
+	var slider := HSlider.new()
+	slider.min_value = LOG_MIN
+	slider.max_value = LOG_MAX
+	slider.step      = LOG_STEP
+	slider.value     = _rate_to_log(rate)   # store position in log₁₀ space
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider_row.add_child(slider)
+
+	var rate_lbl := Label.new()
+	rate_lbl.text = _fmt_rate(rate)
+	rate_lbl.add_theme_font_size_override("font_size", 11)
+	rate_lbl.custom_minimum_size = Vector2(38, 0)
+	rate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	slider_row.add_child(rate_lbl)
+	_job_rate_labels[job_id] = rate_lbl
+
+	card.add_child(slider_row)
+
+	# Row 3: output / input flow (updated live when slider moves)
+	if not recipe.is_empty():
+		var out_lbl := Label.new()
+		out_lbl.text = "→ " + _fmt_flow(recipe.get("outputs", {}), rate)
+		out_lbl.add_theme_font_size_override("font_size", 10)
+		out_lbl.modulate = Color(0.55, 0.85, 0.60)
+		card.add_child(out_lbl)
+		_job_out_labels[job_id] = out_lbl
+
+		var in_lbl := Label.new()
+		in_lbl.text = "← " + _fmt_flow(recipe.get("inputs", {}), rate)
+		in_lbl.add_theme_font_size_override("font_size", 10)
+		in_lbl.modulate = Color(0.80, 0.65, 0.55)
+		card.add_child(in_lbl)
+		_job_in_labels[job_id] = in_lbl
+
+	# Wire slider — convert log position → real rate, then update everything.
+	slider.value_changed.connect(func(log_val: float) -> void:
+		var actual_rate := _log_to_rate(log_val)
+		# Update stored rate
+		for j: Dictionary in _jobs:
+			if int(j.get("id", -1)) == job_id:
+				j["rate"] = actual_rate
+				break
+		# Update readout and flow labels
+		rate_lbl.text = _fmt_rate(actual_rate)
+		if not recipe.is_empty():
+			if _job_out_labels.has(job_id):
+				(_job_out_labels[job_id] as Label).text = "→ " + _fmt_flow(recipe.get("outputs", {}), actual_rate)
+			if _job_in_labels.has(job_id):
+				(_job_in_labels[job_id] as Label).text = "← " + _fmt_flow(recipe.get("inputs", {}), actual_rate)
+		production_changed.emit(_jobs.duplicate(true))
+	)
+
+	_job_list.add_child(card)
 	_job_list.add_child(HSeparator.new())
 
 func _find_recipe(name: String) -> Dictionary:
@@ -311,7 +385,7 @@ func _on_recipe_selected(_idx: int) -> void:
 	_update_io_preview()
 
 func _on_rate_changed(value: float) -> void:
-	_rate_label.text = "%.1f×" % value
+	_rate_label.text = _fmt_rate(_log_to_rate(value))
 	_update_io_preview()
 
 func _on_add_pressed() -> void:
@@ -324,7 +398,7 @@ func _on_add_pressed() -> void:
 		"id":     _next_id,
 		"recipe": recipe["name"],
 		"planet": planet,
-		"rate":   _rate_slider.value,
+		"rate":   _log_to_rate(_rate_slider.value),
 	}
 	_next_id += 1
 	_jobs.append(job)

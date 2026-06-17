@@ -7,6 +7,15 @@ signal demolish_requested(planet_name: String, building_name: String)
 
 var current_planet: String = ""
 
+## Cost line-item labels, tracked so affordability colouring can be refreshed live
+## without rebuilding the whole list (which would reset scroll position).
+## Each entry: { "label": Label, "key": String, "amount": float }
+var _cost_items: Array = []
+
+# Cost-label colours: normal grey when affordable, darker when the player is short.
+const COST_OK:    Color = Color(0.75, 0.75, 0.75)
+const COST_SHORT: Color = Color(0.42, 0.42, 0.42)
+
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index in [
@@ -20,13 +29,25 @@ func set_planet(planet_name: String, catalog: Array) -> void:
 	_populate(catalog)
 	show()
 
+## Recolour cost line items against the player's current stockpiles without
+## rebuilding the list.  `have` maps resource/compound name → amount held.
+func refresh_affordability(have: Dictionary) -> void:
+	for item: Dictionary in _cost_items:
+		var enough: bool = float(have.get(item["key"], 0.0)) >= float(item["amount"])
+		(item["label"] as Label).modulate = COST_OK if enough else COST_SHORT
+
 func _populate(catalog: Array) -> void:
+	_cost_items.clear()
 	for child in build_list.get_children():
 		child.queue_free()
 
 	for building in catalog:
 		var available: bool = building.get("available", true)
 		var count:     int  = building.get("count", 0)
+		# Non-buildable = inherited starter infrastructure (the 1945 power plants):
+		# can't be constructed, but CAN be demolished down to min_count.
+		var buildable: bool = building.get("buildable", true)
+		var min_count: int  = building.get("min_count", 0)
 
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 4)
@@ -52,15 +73,41 @@ func _populate(catalog: Array) -> void:
 				else Color(0.45, 0.45, 0.45)
 			info_box.add_child(prod_label)
 
+		# Special infrastructure effects (e.g. Space Elevator launch discounts).
+		var eff_text := _format_effects(building)
+		if eff_text != "":
+			var eff_label := Label.new()
+			eff_label.text = eff_text
+			eff_label.add_theme_font_size_override("font_size", 10)
+			eff_label.modulate = Color(0.45, 0.85, 0.80) if (available or count > 0) \
+				else Color(0.40, 0.45, 0.45)
+			info_box.add_child(eff_label)
+
 		row.add_child(info_box)
 
 		# ── Cost or requirement ────────────────────────────────────────────────
+		# Non-buildable plants have an empty cost and fall through to the cost
+		# branch, which simply shows nothing (no label).
 		if available:
-			var cost_label := Label.new()
-			cost_label.text = _format_cost(building.get("cost", {}))
-			cost_label.add_theme_font_size_override("font_size", 11)
-			cost_label.modulate = Color(0.75, 0.75, 0.75)
-			row.add_child(cost_label)
+			# One label per cost item so resources the player can't afford can be
+			# dimmed individually.
+			var cost: Dictionary = building.get("cost", {})
+			var have: Dictionary = building.get("have", {})
+			var cost_box := HBoxContainer.new()
+			cost_box.add_theme_constant_override("separation", 8)
+			for key: String in cost:
+				var amount: float = float(cost[key])
+				if amount <= 0.0:
+					continue
+				var affordable: bool = float(have.get(key, 0.0)) >= amount
+				var item := Label.new()
+				item.text = Units.format_cost_component(key, amount)
+				item.add_theme_font_size_override("font_size", 11)
+				# Affordable → normal grey; short → noticeably darker.
+				item.modulate = COST_OK if affordable else COST_SHORT
+				cost_box.add_child(item)
+				_cost_items.append({"label": item, "key": key, "amount": amount})
+			row.add_child(cost_box)
 		elif count == 0:
 			var req_id: String = building.get("requires", "")
 			var req_label := Label.new()
@@ -83,7 +130,7 @@ func _populate(catalog: Array) -> void:
 		minus_btn.text               = "−"
 		minus_btn.flat               = true
 		minus_btn.custom_minimum_size = Vector2(24, 24)
-		minus_btn.disabled           = count == 0
+		minus_btn.disabled           = count <= min_count
 		minus_btn.pressed.connect(_on_demolish_pressed.bind(building["name"]))
 		row.add_child(minus_btn)
 
@@ -98,7 +145,7 @@ func _populate(catalog: Array) -> void:
 		plus_btn.text               = "+"
 		plus_btn.flat               = true
 		plus_btn.custom_minimum_size = Vector2(24, 24)
-		plus_btn.disabled           = not available
+		plus_btn.disabled           = not available or not buildable
 		plus_btn.pressed.connect(_on_build_pressed.bind(building["name"]))
 		row.add_child(plus_btn)
 
@@ -117,6 +164,21 @@ func _format_production(prod: Dictionary) -> String:
 	for key: String in ["compute", "energy", "minerals"]:
 		if prod.has(key) and float(prod[key]) > 0.0:
 			parts.append(Units.format_rate(key, float(prod[key])))
+	return "  ".join(parts)
+
+## Compact description of special infrastructure effects shown in teal under the
+## building's production line.  Currently covers launch cost/time discounts (the
+## Space Elevator).  Returns "" when the building has no such effect.
+func _format_effects(building: Dictionary) -> String:
+	var parts: Array = []
+	if building.has("launch_cost_mult"):
+		var cpct: int = int(round((1.0 - float(building["launch_cost_mult"])) * 100.0))
+		if cpct != 0:
+			parts.append("Launch cost −%d%%" % cpct)
+	if building.has("launch_duration_mult"):
+		var dpct: int = int(round((1.0 - float(building["launch_duration_mult"])) * 100.0))
+		if dpct != 0:
+			parts.append("Launch time −%d%%" % dpct)
 	return "  ".join(parts)
 
 ## Compact storage-capacity string shown in green next to storage buildings.

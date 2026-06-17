@@ -328,10 +328,6 @@ script = ExtResource("15_vxd74")
 custom_minimum_size = Vector2(150, 70)
 layout_mode = 2
 
-[node name="top view" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=2032532238]
-layout_mode = 2
-text = "Top View"
-
 [node name="research" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=1647123332]
 layout_mode = 2
 text = "Research
@@ -504,7 +500,7 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -643.0
+offset_left = -920.0
 offset_top = -304.0
 grow_horizontal = 0
 grow_vertical = 0
@@ -742,8 +738,6 @@ script = ExtResource("6_i5arm")
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer/low speed" to="." method="_on_low_speed_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer/medium speed" to="." method="_on_medium_speed_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer/HBoxContainer/high speed" to="." method="_on_high_speed_pressed"]
-[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/top view" to="WorldRoot/Planets/earth/CameraPivot" method="_on_top_view_pressed"]
-[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/top view" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_top_view_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/research" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_research_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/launches" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_launches_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/evolution" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_evolution_pressed"]

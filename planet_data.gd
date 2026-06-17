@@ -287,8 +287,10 @@ const PLANETS: Dictionary = {
 				"P2O5":  3.65e22,  # phosphorus pentoxide — 0.13 % (apatite)
 				"UO2":   7.40e19,  # uraninite — fissile U-238 ore (~2.7 ppm crust)
 				"ThO2":  2.62e20,  # thorianite — fertile Th-232 ore (~9.6 ppm crust)
-				"Coal":  1.50e22,  # organic carbon in sedimentary rock (~3 ppm crust)
-				"Oil":   3.00e18,  # petroleum + natural gas hydrocarbon inventory
+				"Coal":    1.50e22,  # organic carbon in sedimentary rock (~3 ppm crust)
+				"Oil":     3.00e18,  # petroleum + natural gas hydrocarbon inventory
+				"CuFeS2":  5.90e21,  # chalcopyrite — primary copper ore (~68 ppm Cu)
+				"N2":      6.00e20,  # fixed nitrogen in micas/feldspars (~20 ppm crust)
 			},
 			# Atmosphere  (total mass ~5.15 × 10²¹ g; surface pressure 1 bar)
 			# Uniquely O₂-rich due to photosynthetic life; CO₂ sequestered in rock.

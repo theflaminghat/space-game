@@ -11,16 +11,16 @@ const MONTH_NAMES: Array[String] = [
 const DOW_HEADERS: Array[String] = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 
 # ── View state ────────────────────────────────────────────────────────────────
-var _view_year:  int = 2026
+var _view_year:  int = 1945
 var _view_month: int = 1   # 1-indexed
 
 # ── Selected date ─────────────────────────────────────────────────────────────
-var _sel_year:  int = 2026
+var _sel_year:  int = 1945
 var _sel_month: int = 1
 var _sel_day:   int = 1
 
 # ── Minimum selectable date (game's current date) ─────────────────────────────
-var _min_year:  int = 2026
+var _min_year:  int = 1945
 var _min_month: int = 1
 var _min_day:   int = 1
 

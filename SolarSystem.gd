@@ -14,6 +14,12 @@ var ui_paused: bool = false
 ## read it without depending on Game directly.
 var current_year: int = 1945
 
+## Year the frozen planets snap to when shown.  Normally tracks current_year, but
+## Game.gd overrides it just before a pause so the planet the player is viewing
+## keeps its exact position (the others fall into their relative places for that
+## time).  See Planet._snap_to_year / Planet.compute_anchor_year.
+var snap_year: float = 1945.0
+
 ## False once the year passes ORBIT_FREEZE_YEAR.  Planets watch this via signals.
 var solar_system_active: bool = true
 

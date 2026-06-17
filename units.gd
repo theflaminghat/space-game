@@ -85,12 +85,22 @@ static func format_rate(key: String, rate: float) -> String:
 	return format_si_verbose(rate, unit)
 
 ## Format a cost or production dictionary into a compact single-line string.
-##   format_cost({"minerals": 50, "energy": 20}) → "50 Grams  20 Joules"
-##   format_cost({})                              → "Free"
+##   format_cost({"minerals": 50, "energy": 20})      → "50 Grams  20 Joules"
+##   format_cost({"SolarPanel": 5000, "energy": 5000}) → "5.0 kg SolarPanel  5.0 kJoules"
+##   format_cost({})                                   → "Free"
 static func format_cost(cost: Dictionary) -> String:
 	var parts: Array = []
 	for key: String in cost:
 		var v := float(cost[key])
 		if v > 0.0:
-			parts.append(format_resource(key, v))
+			parts.append(format_cost_component(key, v))
 	return "  ".join(parts) if not parts.is_empty() else "Free"
+
+## Format a single cost line item (one resource or compound).
+##   format_cost_component("minerals", 50)      → "50 Grams"
+##   format_cost_component("SolarPanel", 5000)  → "5.0 kg SolarPanel"
+static func format_cost_component(key: String, v: float) -> String:
+	if RESOURCE_DEFS.has(key):
+		return format_resource(key, v)
+	# Compound inventory item — display mass in grams + compound name.
+	return "%s %s" % [format_si(v, "g"), key]

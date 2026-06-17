@@ -2,92 +2,81 @@ extends Control
 
 @onready var tree: EvolutionTreeControl = $ScrollContainer/EvolutionTree
 
-## Full master reference — every node that can ever appear.
-var _master_data: Dictionary = {}
+## Column spacing per lineage depth, and row spacing between successive variants.
+const COL_STEP: float = 260.0
+const ROW_STEP: float = 110.0
+const ROW_TOP: float  = 60.0
+
+## Row index of the next dynamically-added variant (keeps variants from overlapping).
+var _row: int = 0
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 func _ready() -> void:
-	_master_data = EvolutionTreeData.build()
+	# Fill the sidebar vertically so the tree reaches the bottom of the screen.
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical   = Control.SIZE_EXPAND_FILL
+	# The ScrollContainer is anchor-positioned (not container-managed), so stretch
+	# it to a full rect here.
+	var scroll := get_node_or_null("ScrollContainer") as ScrollContainer
+	if scroll:
+		scroll.anchor_left   = 0.0
+		scroll.anchor_top    = 0.0
+		scroll.anchor_right  = 1.0
+		scroll.anchor_bottom = 1.0
+		scroll.offset_left   = 0.0
+		scroll.offset_top    = 0.0
+		scroll.offset_right  = 0.0
+		scroll.offset_bottom = 0.0
+
 	reset_to_baseline()
 	tree.node_selected.connect(_on_node_selected)
 
 # ── Public API (called by Game.gd) ────────────────────────────────────────────
 
-## Reset tree to the single root node, fully unlocked.
-## Call from Game.gd start_new_game() so a fresh run always starts at baseline.
+## Reset to the single baseline root, fully unlocked.  Call on a fresh run.
 func reset_to_baseline() -> void:
-	var initial_data: Dictionary = {
-		"homo_sapiens": _master_data["homo_sapiens"],
-	}
-	var initial_unlocked: Dictionary = {
-		"homo_sapiens": true,
-	}
-	tree.load_tree(initial_data, initial_unlocked)
+	_row = 0
+	tree.load_tree(
+		{"homo_sapiens": EvolutionTreeData.baseline()},
+		{"homo_sapiens": true})
 
-## Make a node visible in the tree for the first time.
-## Returns true if the node was freshly added; false if already visible or unknown.
-func add_evolution_node(node_id: String) -> bool:
-	if not _master_data.has(node_id):
-		push_warning("EvolutionTreeUI: unknown node id '%s'" % node_id)
-		return false
+## True once `planet` has diverged into its own lineage node.
+func has_variant(planet: String) -> bool:
+	return tree.tree_data.has(EvolutionTreeData.variant_id(planet))
+
+## Add (and unlock) the lineage for `planet`, descending from `parent_planet`'s
+## variant — or from the baseline when `parent_planet` is "" or has not diverged.
+## Returns true if a new node was created.
+func add_planet_variant(planet: String, parent_planet: String = "") -> bool:
+	var node_id: String = EvolutionTreeData.variant_id(planet)
 	if tree.tree_data.has(node_id):
-		return false   # already shown
-	tree.add_node(node_id, _master_data[node_id])
+		return false
+
+	var parent_id: String = "homo_sapiens"
+	if parent_planet != "":
+		var pid: String = EvolutionTreeData.variant_id(parent_planet)
+		if tree.tree_data.has(pid):
+			parent_id = pid
+
+	var parent_pos: Vector2 = (tree.tree_data.get(parent_id, {}) as Dictionary).get(
+		"pos", Vector2(60, 60))
+	var pos := Vector2(parent_pos.x + COL_STEP, ROW_TOP + _row * ROW_STEP)
+	_row += 1
+
+	tree.add_node(node_id, EvolutionTreeData.planet_variant(planet, parent_id, pos))
+	tree.unlock_node(node_id)
 	return true
 
-## Colour the node green (unlocked).
-func unlock_evolution_node(node_id: String) -> void:
-	# Ensure the node is visible first so the unlock is never invisible
-	add_evolution_node(node_id)
-	tree.unlock_node(node_id)
-
-## True if the node has been added to the visible tree.
-func is_node_visible(node_id: String) -> bool:
-	return tree.tree_data.has(node_id)
-
-## True if the node is both visible and coloured green.
-func is_node_unlocked(node_id: String) -> bool:
-	return tree.is_unlocked(node_id)
-
-# ── Save / load ───────────────────────────────────────────────────────────────
-
-## Returns the list of node ids currently visible (for serialisation).
-func get_visible_node_ids() -> Array:
-	var ids: Array = []
-	for key: Variant in tree.tree_data.keys():
-		ids.append(str(key))
-	return ids
-
-## Returns the unlocked map (for serialisation).
-func get_unlocked_map() -> Dictionary:
-	return tree.unlocked.duplicate()
-
-## Returns the highest compute value (FLOP/s per individual) across all
-## currently unlocked evolution nodes.  Used by Game.gd to convert population
-## into a civilisation-wide compute rate.
+## Highest compute (FLOP/s per individual) across all currently unlocked lineages.
+## The baseline is always unlocked, so this never drops below the neocortex floor.
 func get_unlocked_compute_per_individual() -> float:
 	var best: float = 0.0
 	for node_id: String in tree.unlocked:
 		if tree.unlocked[node_id]:
-			var node_data: Dictionary = _master_data.get(node_id, {})
-			var c: float = float(node_data.get("compute", 0.0))
-			if c > best:
-				best = c
+			var node_data: Dictionary = tree.tree_data.get(node_id, {})
+			best = maxf(best, float(node_data.get("compute", 0.0)))
 	return best
-
-## Restore a saved evolution state.
-func load_evolution_state(visible_ids: Array, unlocked_map: Dictionary) -> void:
-	var data: Dictionary = {}
-	for raw_id: Variant in visible_ids:
-		var id: String = str(raw_id)
-		if _master_data.has(id):
-			data[id] = _master_data[id]
-	# Always guarantee the root is present
-	if not data.has("homo_sapiens"):
-		data["homo_sapiens"] = _master_data["homo_sapiens"]
-		unlocked_map["homo_sapiens"] = true
-	tree.load_tree(data, unlocked_map)
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 

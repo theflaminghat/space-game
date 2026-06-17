@@ -70,7 +70,7 @@ func is_available(node_id: String) -> bool:
 
 func _rebuild_bounds() -> void:
 	var max_x: float = 1200.0
-	var max_y: float = 800.0
+	var max_y: float = 0.0
 
 	for key: Variant in tree_data.keys():
 		var node: Dictionary = tree_data[key]

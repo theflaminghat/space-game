@@ -21,9 +21,6 @@ func hide_all() -> void:
 	launch_panel.hide()
 	production_panel.hide()
 
-func _on_top_view_pressed() -> void:
-	hide_all()
-
 
 func _on_research_pressed() -> void:
 	hide_all()
@@ -33,6 +30,10 @@ func _on_research_pressed() -> void:
 func _on_launches_pressed() -> void:
 	hide_all()
 	launch_panel.show()
+	# Let Game set the date, default origin, and launch-infrastructure discounts.
+	var game := get_tree().current_scene
+	if game and game.has_method("refresh_launch_panel"):
+		game.refresh_launch_panel()
 
 
 func _on_evolution_pressed() -> void:

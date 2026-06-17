@@ -31,46 +31,108 @@ var _inv_value_labels: Dictionary = {}   # compound → Label (total stock)
 var _inv_rate_labels:  Dictionary = {}   # compound → Label (mine rate)
 
 const COMPOUND_NAMES: Dictionary = {
+	# ── Ores / raw minerals ───────────────────────────────────────────────────
 	"SiO2":    "Silicon Dioxide",
 	"Al2O3":   "Aluminium Oxide",
+	"Fe2O3":   "Hematite",
+	"MgO":     "Periclase",
 	"CaO":     "Calcium Oxide",
 	"Na2O":    "Sodium Oxide",
 	"K2O":     "Potassium Oxide",
+	"TiO2":    "Titanium Dioxide",
 	"CaCO3":   "Calcite",
+	"FeS2":    "Pyrite",
+	"FeO":     "Wüstite",
+	"CuFeS2":  "Chalcopyrite",
+	"Na2S":    "Sodium Sulfide",
 	"H2O":     "Water",
 	"NaCl":    "Halite",
-	"TiO2":    "Titanium Dioxide",
-	"FeS2":    "Pyrite",
 	"P2O5":    "Phosphorus Pentoxide",
 	"UO2":     "Uraninite",
 	"ThO2":    "Thorianite",
 	"Coal":    "Coal",
 	"Oil":     "Petroleum",
-	"Fe2O3":   "Hematite",
 	"CaSO4":   "Gypsum",
 	"MgSO4":   "Epsomite",
-	"Na2S":    "Sodium Sulfide",
-	"Fe":      "Iron",
+	"N2":      "Nitrogen",
+	"O2":      "Oxygen",
+	"CO2":     "Carbon Dioxide",
 	"Ni":      "Nickel",
 	"FeS":     "Troilite",
 	"MgS":     "Niningerite",
 	"MgSiO3":  "Enstatite",
 	"Mg2SiO4": "Forsterite",
-	"MgO":     "Periclase",
-	"FeO":     "Wüstite",
 	"CaSiO3":  "Wollastonite",
 	"C":       "Carbon",
+	# ── Refined metals ────────────────────────────────────────────────────────
+	"Fe":      "Iron",
+	"Si":      "Silicon",
+	"Al":      "Aluminium",
+	"Ti":      "Titanium",
+	"Mg":      "Magnesium",
+	"Ca":      "Calcium",
+	"Na":      "Sodium",
+	"K":       "Potassium",
+	"Cu":      "Copper",
+	"Steel":   "Steel",
+	# ── Chemicals / components ────────────────────────────────────────────────
+	"H2SO4":           "Sulfuric Acid",
+	"NH3":             "Ammonia",
+	"Plastic":         "Plastic",
+	"Graphene":        "Graphene",
+	"Ceramic":         "Ceramic",
+	"CarbonComposite": "Carbon Composite",
+	# ── Manufactured goods ────────────────────────────────────────────────────
+	"Concrete":      "Concrete",
+	"Glass":         "Glass",
+	"SolarPanel":    "Solar Panel",
+	"Microchip":     "Microchip",
+	"Battery":       "Battery",
+	"Superconductor":"Superconductor",
+	"Propellant":    "Rocket Propellant",
+	"FusionFuel":    "Fusion Fuel",
+	"Rocket":        "Rocket",
 }
 
 const COMPOUND_CATEGORIES: Dictionary = {
+	# Raw ores and crustal compounds
 	"Coal":    "raw",  "Oil":     "raw",
 	"SiO2":   "raw",  "Al2O3":  "raw",  "Fe2O3":  "raw",  "MgO":    "raw",
 	"CaO":    "raw",  "Na2O":   "raw",  "K2O":    "raw",  "TiO2":   "raw",
 	"CaCO3":  "raw",  "FeS2":   "raw",  "H2O":    "raw",  "NaCl":   "raw",
 	"P2O5":   "raw",  "UO2":    "raw",  "ThO2":   "raw",
-	"Fe":     "refined", "Ni":  "raw",  "FeS":    "raw",  "MgS":    "raw",
-	"Na2S":   "raw",  "C":      "raw",  "FeO":    "raw",
-	"CaSO4":  "raw",  "MgSO4":  "raw",
+	"CuFeS2": "raw",  "Na2S":   "raw",  "C":      "raw",  "FeO":    "raw",
+	"CaSO4":  "raw",  "MgSO4":  "raw",  "N2":     "raw",
+	"Ni":     "raw",  "FeS":    "raw",  "MgS":    "raw",
+	# Refined metals (outputs of smelting / electrolysis recipes)
+	"Fe":     "refined",
+	"Si":     "refined",
+	"Al":     "refined",
+	"Ti":     "refined",
+	"Mg":     "refined",
+	"Ca":     "refined",
+	"Na":     "refined",
+	"K":      "refined",
+	"Cu":     "refined",
+	"Steel":  "refined",   # primary structural alloy
+	"O2":     "refined",   # electrolytic oxygen — useful industrial gas
+	# Processed feedstock components
+	"Plastic":         "components",
+	"Graphene":        "components",
+	"Ceramic":         "components",
+	"CarbonComposite": "components",
+	"H2SO4":           "components",   # industrial chemical feedstock
+	"NH3":             "components",
+	# Manufactured goods (assembled from refined inputs)
+	"Concrete":      "manufactured",
+	"Glass":         "manufactured",
+	"SolarPanel":    "manufactured",
+	"Microchip":     "manufactured",
+	"Battery":       "manufactured",
+	"Superconductor":"manufactured",
+	"Propellant":    "manufactured",
+	"FusionFuel":    "manufactured",
+	"Rocket":        "manufactured",
 }
 
 const CATEGORY_ORDER: Array[String] = ["raw", "refined", "components", "manufactured"]
@@ -120,7 +182,7 @@ func _ready() -> void:
 
 	# ── Storage capacity rows ─────────────────────────────────────────────────
 	var _stor_min_key := Label.new()
-	_stor_min_key.text = "Matter Depot"
+	_stor_min_key.text = "Matter Storage"
 	_stor_min_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	stats_grid.add_child(_stor_min_key)
 	_storage_minerals_label = Label.new()
@@ -129,7 +191,7 @@ func _ready() -> void:
 	stats_grid.add_child(_storage_minerals_label)
 
 	var _stor_en_key := Label.new()
-	_stor_en_key.text = "Energy Depot"
+	_stor_en_key.text = "Energy Storage"
 	_stor_en_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	stats_grid.add_child(_stor_en_key)
 	_storage_energy_label = Label.new()
@@ -173,6 +235,19 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(340, 0)
 
 
+## Format a whole-number population with thousands separators, e.g. 2300000000
+## → "2,300,000,000".  Populations are always integers (a count of people).
+func _fmt_population(n: int) -> String:
+	var s: String = str(maxi(0, n))
+	var out: String = ""
+	var c: int = 0
+	for i in range(s.length() - 1, -1, -1):
+		out = s[i] + out
+		c += 1
+		if c % 3 == 0 and i > 0:
+			out = "," + out
+	return out
+
 func set_planet_info(data: Dictionary) -> void:
 	var planet_name: String = str(data.get("name", ""))
 
@@ -185,9 +260,9 @@ func set_planet_info(data: Dictionary) -> void:
 		_storage_minerals_label.text = Units.format_si(min_cap, "g") if min_cap > 0.0 else "None"
 		_storage_energy_label.text   = Units.format_si(en_cap,  "J") if en_cap  > 0.0 else "None"
 
-	energy_label.text     = str(data.get("energy",     0))
-	population_label.text = str(data.get("population", 0))
-	compute_label.text    = str(data.get("compute",    0))
+	energy_label.text     = Units.format_si_verbose(float(data.get("energy",  0.0)), "Watts")
+	population_label.text = _fmt_population(int(data.get("population", 0)))
+	compute_label.text    = Units.format_si_verbose(float(data.get("compute", 0.0)), "FLOP/s")
 
 	var mined: Dictionary = data.get("mined_resources",   {})
 	var inv:   Dictionary = data.get("compound_inventory", {})
@@ -255,17 +330,27 @@ func _rebuild_inventory(mined: Dictionary, inv: Dictionary) -> void:
 
 		var content := VBoxContainer.new()
 		content.add_theme_constant_override("separation", 2)
-		content.visible = (cat == "raw")
+		# Raw ores start collapsed (rarely inspected after mines are built).
+		# Refined and manufactured outputs start expanded so the player can
+		# immediately see what the production lines are generating.
+		content.visible = (cat != "raw")
 
 		var header := Button.new()
-		header.text = ("▼  " if content.visible else "▶  ") + label
 		header.flat = true
 		header.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		header.add_theme_font_size_override("font_size", 12)
 		header.add_theme_color_override("font_color", color)
+		# Suffix shows count of non-zero items so the player can see at a glance
+		# how many refined products are in stock even when the section is collapsed.
+		var non_zero: int = 0
+		for pair: Array in items:
+			if float(pair[2]) > 0.0:
+				non_zero += 1
+		var count_suffix: String = " (%d)" % non_zero if non_zero > 0 else ""
+		header.text = ("▼  " if content.visible else "▶  ") + label + count_suffix
 		header.pressed.connect(func() -> void:
 			content.visible = not content.visible
-			header.text = ("▼  " if content.visible else "▶  ") + label
+			header.text = ("▼  " if content.visible else "▶  ") + label + count_suffix
 		)
 		_resources_container.add_child(header)
 		_resources_container.add_child(content)

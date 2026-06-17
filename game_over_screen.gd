@@ -122,30 +122,33 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
-	# ── Buttons ────────────────────────────────────────────────────────────────────
-	var btn_box := HBoxContainer.new()
+	# ── Buttons (stacked vertically) ─────────────────────────────────────────────
+	var btn_box := VBoxContainer.new()
 	btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_box.add_theme_constant_override("separation", 12)
+	btn_box.add_theme_constant_override("separation", 8)
 	vbox.add_child(btn_box)
 
 	var btn_new := Button.new()
 	btn_new.text = "Start New Civilization"
 	btn_new.add_theme_font_size_override("font_size", 16)
-	btn_new.custom_minimum_size = Vector2(220, 48)
+	btn_new.custom_minimum_size = Vector2(260, 46)
+	btn_new.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_new.pressed.connect(_on_restart_pressed)
 	btn_box.add_child(btn_new)
 
 	var btn_menu := Button.new()
 	btn_menu.text = "Quit to Menu"
 	btn_menu.add_theme_font_size_override("font_size", 16)
-	btn_menu.custom_minimum_size = Vector2(160, 48)
+	btn_menu.custom_minimum_size = Vector2(260, 46)
+	btn_menu.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_menu.pressed.connect(_on_quit_to_menu_pressed)
 	btn_box.add_child(btn_menu)
 
 	var btn_desktop := Button.new()
 	btn_desktop.text = "Quit to Desktop"
 	btn_desktop.add_theme_font_size_override("font_size", 16)
-	btn_desktop.custom_minimum_size = Vector2(160, 48)
+	btn_desktop.custom_minimum_size = Vector2(260, 46)
+	btn_desktop.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_desktop.pressed.connect(_on_quit_to_desktop_pressed)
 	btn_box.add_child(btn_desktop)
 
@@ -274,10 +277,10 @@ func _on_epilogue_continue() -> void:
 func _build_stats_text(stats: Dictionary, person_years: float) -> String:
 	var pop:   int   = int(stats.get("current_population", 0))
 	var cols:  int   = int(stats.get("colony_count", 0))
-	var ai:    float = float(stats.get("ai_autonomy", 0.0)) * 100.0
 	var total: float = person_years   # person-years ≈ total humans who ever lived
-	return "Final population: %s  •  Colonies: %d  •  AI Autonomy: %.1f%%\nTotal humans who ever lived: ~%s" % [
-		_fmt_pop(pop), cols, ai, _fmt_pop_large(total)
+	# One stat per line, stacked vertically.
+	return "Final population: %s\nColonies: %d\nTotal humans who ever lived: ~%s" % [
+		_fmt_pop(pop), cols, _fmt_pop_large(total)
 	]
 
 ## Format very large population figures with appropriate SI suffix.

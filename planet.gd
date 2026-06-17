@@ -20,6 +20,8 @@ enum Type { STAR, GAS_GIANT, ROCKY }
 var _orbit_line: MeshInstance3D = null
 var _orbit_line_built: bool = false  # deferred until first _process tick
 var _rings: MeshInstance3D = null    # planetary rings (gas giants only)
+var _blur_torus: MeshInstance3D = null  # translucent motion-blur ring shown post-freeze
+var _body_visual_radius: float = 0.0    # apparent radius (game units); sizes the blur tube
 
 ## Per-gas-giant ring appearance.  Radii are multiples of the planet's own
 ## radius; tilt matches each body's real axial tilt (Uranus rings are nearly
@@ -87,6 +89,18 @@ var _sun_base_scale: Vector3 = Vector3.ONE
 var _sun_mat: StandardMaterial3D = null
 var _sun_last_year: int = -1   # throttle updates to once per year
 
+## Representative colour for each planet's post-freeze motion-blur ring.
+const PLANET_BLUR_COLORS: Dictionary = {
+	"mercury": Color(0.62, 0.57, 0.50),
+	"venus":   Color(0.92, 0.80, 0.55),
+	"earth":   Color(0.32, 0.52, 0.92),
+	"mars":    Color(0.82, 0.42, 0.26),
+	"jupiter": Color(0.82, 0.71, 0.56),
+	"saturn":  Color(0.86, 0.78, 0.60),
+	"uranus":  Color(0.60, 0.85, 0.90),
+	"neptune": Color(0.36, 0.50, 0.95),
+}
+
 const RING_SEGMENTS: int = 96
 const RING_SPECS: Dictionary = {
 	"jupiter": {"inner": 1.35, "outer": 1.80, "bands": 3, "tilt_deg":  3.1, "color": Color(0.78, 0.72, 0.62, 0.10)},
@@ -106,6 +120,10 @@ var size_mult: float = 1.0
 
 const EARTH_ORBIT_DAYS: float = 365.25
 
+## Calendar year the orbital epoch (DAYS_J2000_TO_GAME_EPOCH → 1945-01-01) refers
+## to.  Used to recompute true positions from a target year when motion is frozen.
+const GAME_EPOCH_YEAR: int = 1945
+
 # ── Keplerian state ────────────────────────────────────────────────────────────
 var _use_kepler: bool = false
 
@@ -124,6 +142,10 @@ var _long_periapsis_rad: float = 0.0
 
 ## Current mean anomaly M (radians), advanced each frame by _mean_motion_rad_per_day.
 var _mean_anomaly_rad: float = 0.0
+
+## Mean anomaly at the game epoch (1945-01-01), kept so we can recompute the true
+## position for any year when motion is frozen (past ORBIT_FREEZE_YEAR).
+var _mean_anomaly_epoch: float = 0.0
 
 ## Mean motion n = 2π / T  (radians per game-day).
 var _mean_motion_rad_per_day: float = 0.0
@@ -163,6 +185,11 @@ func _ready() -> void:
 		orbit_angle = orbit_offset
 		_update_position()
 
+	# Apparent radius in the parent (orbit) space — sizes the motion-blur tube.
+	# SphereMesh AABB is the unscaled diameter; half it and apply the node scale.
+	if mesh != null:
+		_body_visual_radius = mesh.get_aabb().size.x * 0.5 * scale.x
+
 	# Capture the log-scaled base size, then apply the initial stellar appearance.
 	if type == Type.STAR:
 		_sun_base_scale = scale
@@ -194,6 +221,7 @@ func _init_from_planet_data(data: Dictionary) -> void:
 	_mean_anomaly_rad = deg_to_rad(fmod(M_start_deg, 360.0))
 	if _mean_anomaly_rad < 0.0:
 		_mean_anomaly_rad += TAU
+	_mean_anomaly_epoch = _mean_anomaly_rad
 
 	# ── Pre-compute constant sqrt factors used every frame in true-anomaly calc ──
 	_sqrt_1pe = sqrt(1.0 + _eccentricity)
@@ -210,12 +238,12 @@ func _init_from_planet_data(data: Dictionary) -> void:
 	_use_kepler = true
 	_update_kepler_position()
 
-func _create_orbit_line() -> void:
-	var segments := 128
-	var r_max: float = 0.0
+## Sample the orbit centreline as `segments`+1 points (closed: last == first).
+## Kepler orbits trace their true ellipse; fallback bodies trace a circle.
+## Shared by the orbit ribbon and the post-freeze motion-blur torus.
+func _orbit_path_points(segments: int) -> PackedVector3Array:
 	var pts := PackedVector3Array()
 	pts.resize(segments + 1)
-
 	if _use_kepler:
 		for i in range(segments + 1):
 			var nu := (float(i) / float(segments)) * TAU
@@ -223,14 +251,85 @@ func _create_orbit_line() -> void:
 				* (1.0 - _eccentricity * _eccentricity) \
 				/ (1.0 + _eccentricity * cos(nu))
 			var r_vis := log(r_au + 1.0) * orbit_radius_mult
-			r_max = maxf(r_max, r_vis)
 			var angle := nu + _long_periapsis_rad
 			pts[i] = Vector3(r_vis * sin(angle), 0.0, r_vis * cos(angle))
 	else:
-		r_max = orbit_radius
 		for i in range(segments + 1):
 			var angle := (float(i) / float(segments)) * TAU
 			pts[i] = Vector3(orbit_radius * sin(angle), 0.0, orbit_radius * cos(angle))
+	return pts
+
+## Build a translucent tube swept along the orbit — the planet smeared into a ring
+## once it is spinning round its orbit faster than the eye can follow (post-freeze).
+func _create_blur_torus() -> void:
+	const PATH_SEGS: int = 128
+	const RING_SEGS: int = 8
+	var pts := _orbit_path_points(PATH_SEGS)
+	# Tube cross-section diameter == planet diameter, so the smeared band is exactly
+	# as thick as the body it represents.  tube_r is the cross-section *radius*,
+	# which therefore equals the planet's visual radius.
+	var tube_r: float = maxf(_body_visual_radius, 0.01)
+	var up := Vector3(0.0, 1.0, 0.0)
+
+	var verts := PackedVector3Array()
+	var r_max: float = 0.0
+	for i in range(PATH_SEGS):
+		var p0: Vector3 = pts[i]
+		var p1: Vector3 = pts[i + 1]
+		# Cross-section spans the radial + vertical directions, so the tube hugs the
+		# orbit plane.  Radial dir ≈ the point's own XZ direction from the centre.
+		var s0: Vector3 = Vector3(p0.x, 0.0, p0.z)
+		s0 = s0.normalized() if s0.length_squared() > 1e-9 else Vector3(1, 0, 0)
+		var s1: Vector3 = Vector3(p1.x, 0.0, p1.z)
+		s1 = s1.normalized() if s1.length_squared() > 1e-9 else Vector3(1, 0, 0)
+		r_max = maxf(r_max, Vector2(p0.x, p0.z).length())
+		for j in range(RING_SEGS):
+			var a0 := TAU * float(j)       / float(RING_SEGS)
+			var a1 := TAU * float(j + 1)   / float(RING_SEGS)
+			var o00 := p0 + (cos(a0) * s0 + sin(a0) * up) * tube_r
+			var o01 := p0 + (cos(a1) * s0 + sin(a1) * up) * tube_r
+			var o10 := p1 + (cos(a0) * s1 + sin(a0) * up) * tube_r
+			var o11 := p1 + (cos(a1) * s1 + sin(a1) * up) * tube_r
+			verts.append(o00); verts.append(o10); verts.append(o11)
+			verts.append(o00); verts.append(o11); verts.append(o01)
+
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	var tmesh := ArrayMesh.new()
+	tmesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+	# Very muted, low-saturation tint at low alpha so the ring reads as a faint,
+	# dull smear rather than a solid coloured band.
+	var base: Color = PLANET_BLUR_COLORS.get(name.to_lower(), Color(0.70, 0.70, 0.75))
+	var grey: float = base.get_luminance()
+	var col := base.lerp(Color(grey, grey, grey), 0.75)   # heavily desaturated → duller
+	col = col.darkened(0.20)                               # dimmer
+	col.a = 0.06                                           # lower opacity
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
+	mat.albedo_color = col
+	tmesh.surface_set_material(0, mat)
+
+	_blur_torus = MeshInstance3D.new()
+	_blur_torus.mesh        = tmesh
+	_blur_torus.name        = name + "_blur_torus"
+	_blur_torus.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ext: float = r_max + tube_r
+	_blur_torus.custom_aabb = AABB(
+		Vector3(-ext, -tube_r, -ext),
+		Vector3(ext * 2.0, tube_r * 2.0, ext * 2.0))
+	_blur_torus.visible = false
+	get_parent().add_child(_blur_torus)
+
+func _create_orbit_line() -> void:
+	var segments := 128
+	var pts := _orbit_path_points(segments)
+	var r_max: float = 0.0
+	for p in pts:
+		r_max = maxf(r_max, Vector2(p.x, p.z).length())
 
 	# Build a triangle-based ribbon instead of line primitives.
 	# Vulkan (Godot 4 Forward+) draws PRIMITIVE_LINE_STRIP as 1-px lines that
@@ -292,12 +391,52 @@ func _sync_visibility() -> void:
 	if type == Type.STAR:
 		visible = true
 		return
+	# Body shows during normal sim, or whenever paused so the player can inspect it.
 	var show := SolarSystem.solar_system_active or SolarSystem.paused or SolarSystem.ui_paused
 	visible = show
+	# When motion is frozen (past the orbit-freeze cutoff) the body normally holds
+	# its last position.  If we're showing it because the player paused, snap it to
+	# its true position at the snap year (chosen by Game so the viewed planet keeps
+	# its place and the rest fall into their correct relative positions).
+	if show and not SolarSystem.solar_system_active:
+		_snap_to_year(SolarSystem.snap_year)
 	# Orbit lines stay drawn even past the freeze cutoff (when the planet bodies
 	# are hidden), so the system's layout remains legible.
 	if _orbit_line:
 		_orbit_line.visible = true
+	# The motion-blur ring appears only while frozen AND fast-forwarding — i.e.
+	# exactly when the discrete body is hidden, so the planet reads as a smeared
+	# band whipping round its orbit too fast to resolve.
+	if _blur_torus:
+		_blur_torus.visible = not show
+
+## Place the planet at the true Keplerian position it would occupy at year `y`.
+## A body's mean anomaly advances by one full revolution every a^1.5 years
+## (Kepler's third law), so M(y) = M_epoch + (y − epoch)·2π/a^1.5.
+## Used when the simulation is frozen but the player pauses to look.
+func _snap_to_year(y: float) -> void:
+	if not _use_kepler:
+		return
+	var rad_per_year: float = TAU / pow(_semi_major_axis_au, 1.5)
+	_mean_anomaly_rad = fposmod(
+		_mean_anomaly_epoch + (y - float(GAME_EPOCH_YEAR)) * rad_per_year, TAU)
+	_update_kepler_position()
+
+## Returns the year nearest SolarSystem.current_year at which THIS planet would be
+## at its current (frozen) position.  Snapping every planet to this year leaves this
+## one exactly where it is — used to anchor the snap to the planet being viewed so
+## the camera (which follows it) never jumps.
+func compute_anchor_year() -> float:
+	if not _use_kepler:
+		return float(SolarSystem.current_year)
+	var rad_per_year: float = TAU / pow(_semi_major_axis_au, 1.5)
+	var period_years: float = pow(_semi_major_axis_au, 1.5)
+	# Year (mod period) whose mean anomaly matches the current frozen one, then the
+	# revolution k that lands nearest the current year.
+	var base: float = float(GAME_EPOCH_YEAR) \
+		+ (_mean_anomaly_rad - _mean_anomaly_epoch) / rad_per_year
+	var k: float = round((float(SolarSystem.current_year) - base) / period_years)
+	return base + k * period_years
 
 
 func _process(delta: float) -> void:
@@ -306,6 +445,7 @@ func _process(delta: float) -> void:
 	if not _orbit_line_built and type != Type.STAR:
 		_orbit_line_built = true
 		_create_orbit_line()
+		_create_blur_torus()
 		if type == Type.GAS_GIANT:
 			_create_rings()
 		_sync_visibility()

@@ -37,12 +37,19 @@ func _ready() -> void:
 	header.add_child(_year_label)
 
 	# ── Category legend ───────────────────────────────────────────────────────
+	# Merge both color palettes so the legend covers game events too.
 	var legend := HBoxContainer.new()
 	legend.add_theme_constant_override("separation", 8)
 	root_vbox.add_child(legend)
 
-	for cat_name: String in TimelineEvents.CATEGORY_COLORS:
-		var cat_color: Color = TimelineEvents.CATEGORY_COLORS[cat_name]
+	var all_cat_colors: Dictionary = {}
+	for k: String in TimelineEvents.CATEGORY_COLORS:
+		all_cat_colors[k] = TimelineEvents.CATEGORY_COLORS[k]
+	for k: String in GameEvents.CATEGORY_COLORS:
+		all_cat_colors[k] = GameEvents.CATEGORY_COLORS[k]
+
+	for cat_name: String in all_cat_colors:
+		var cat_color: Color = all_cat_colors[cat_name]
 
 		var dot := ColorRect.new()
 		dot.color = cat_color
@@ -78,3 +85,9 @@ func set_current_year(year: int) -> void:
 		_year_label.text = "Year: %d" % year
 	if _canvas:
 		_canvas.set_current_year(year)
+
+## Add a live game event card to the timeline canvas.
+## The dict should contain "year", "title", "desc", and "category".
+func add_live_event(ev: Dictionary) -> void:
+	if _canvas:
+		_canvas.add_event(ev)

@@ -100,16 +100,3 @@ func _on_uranus_button_pressed() -> void:
 
 func _on_neptune_button_pressed() -> void:
 	move_to_planet("neptune")
-
-
-func _on_top_view_pressed() -> void:
-	state = "top_view"
-
-	if get_parent() != world_root:
-		var old_global := global_transform
-		get_parent().remove_child(self)
-		world_root.add_child(self)
-		global_transform = old_global
-
-	global_position = Vector3(0, 30, 0)
-	rotation_degrees = Vector3(-90, 0, 0)

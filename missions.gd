@@ -1,11 +1,26 @@
 class_name MissionData
 
+# Costs are the *baseline* for a bare surface-to-orbit launch (difficulty factor
+# 1.0); LaunchPanel multiplies them by the destination's Hohmann Δv difficulty, so
+# an interplanetary transfer to Mars or Neptune costs proportionally more.
+#
+#   minerals (g)  ≈ launch-vehicle wet mass — propellant + structure expended.
+#   energy   (J)  ≈ the energy that mass-to-orbit demands (capacitor/grid draw).
+#
+# Magnitudes are scaled to the game economy but the *ratios* mirror reality: a
+# colony ship is a Starship-class vehicle (~thousands of tonnes), a survey probe
+# rides a small launcher, and a research probe / supply run sit in between.
 const MISSION_TYPES := [
-	{"name": "Survey",         "cost": {"minerals": 50,  "energy": 20}},
-	{"name": "Mining Ops",     "cost": {"minerals": 100, "energy": 40}},
-	{"name": "Colony Ship",    "cost": {"minerals": 500, "energy": 200}},
-	{"name": "Research Probe", "cost": {"minerals": 80,  "energy": 30}},
-	{"name": "Supply Run",     "cost": {"minerals": 30,  "energy": 15}},
+	# Small interplanetary probe on a medium launcher.
+	{"name": "Survey",         "cost": {"minerals":    20_000, "energy":    30_000}},
+	# Robotic prospecting hardware + lander — heavy-lift class.
+	{"name": "Mining Ops",     "cost": {"minerals":   200_000, "energy":   250_000}},
+	# Crewed habitat + life support + ISRU — super-heavy, by far the largest.
+	{"name": "Colony Ship",    "cost": {"minerals": 1_500_000, "energy": 2_500_000}},
+	# Instrument-laden science probe.
+	{"name": "Research Probe", "cost": {"minerals":    25_000, "energy":    45_000}},
+	# Cargo resupply to an established colony.
+	{"name": "Supply Run",     "cost": {"minerals":    80_000, "energy":    90_000}},
 ]
 
 const START_OFFSETS := [

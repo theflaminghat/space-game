@@ -9,11 +9,12 @@ const NODE_GAP_Y: float = 90.0
 
 const TREE_LEFT_PAD: float = 40.0
 const TREE_TOP_PAD: float = 90.0
-const TREE_RIGHT_PAD: float = 60.0
+const TREE_RIGHT_PAD: float = 360.0   # extra right scroll room so the last column
+									  # can be panned out from under the info panel
 const TREE_BOTTOM_PAD: float = 40.0
 
 const INFO_PANEL_W: float = 260.0
-const INFO_PANEL_MARGIN_R: float = 8.0
+const INFO_PANEL_MARGIN_R: float = 48.0   # inset from the right edge
 const INFO_PANEL_GAP: float = 64
 
 const LINE_STUB: float = 18.0
@@ -142,7 +143,7 @@ func _build_scene() -> void:
 	_scroll.anchor_bottom = 1.0
 	_scroll.offset_left = 0.0
 	_scroll.offset_top = 0.0
-	_scroll.offset_right = -(INFO_PANEL_W + INFO_PANEL_MARGIN_R + INFO_PANEL_GAP)
+	_scroll.offset_right = 0.0   # tree fills the full width; info panel floats on top
 	_scroll.offset_bottom = 0.0
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -181,6 +182,8 @@ func _build_scene() -> void:
 	_tooltip_timer.timeout.connect(_try_hide_tooltip)
 	add_child(_tooltip_timer)
 
+	# Info panel floats on the right (z_index 10) over the full-width tree, inset
+	# slightly from the edge by INFO_PANEL_MARGIN_R.
 	_info_panel = PanelContainer.new()
 	_info_panel.custom_minimum_size = Vector2(INFO_PANEL_W, 0)
 	_info_panel.anchor_left = 1.0
@@ -593,6 +596,7 @@ func _update_tooltip_position() -> void:
 
 	var right_limit: float = size.x - tooltip_size.x - 8.0
 	if _info_panel.visible:
+		# Panel is right-anchored — keep the tooltip to the left of it.
 		var info_left: float = _info_panel.get_global_rect().position.x - global_position.x
 		right_limit = min(right_limit, info_left - tooltip_size.x - 8.0)
 
@@ -696,11 +700,20 @@ func _format_cost(cost: Dictionary) -> String:
 	if cost.is_empty():
 		return "Free"
 
+	# Costs are production-scaled (science can reach ~1e29), so format with SI
+	# prefixes instead of printing a raw 30-digit integer.
+	const UNITS := {"science": "FLOP", "energy": "J", "minerals": "g"}
+	var total: float = 0.0
 	var parts: Array[String] = []
 	for key_value: Variant in cost.keys():
 		var k: String = key_value as String
-		parts.append("%s: %d" % [k.capitalize(), int(cost[k])])
+		var v: float = float(cost[k])
+		total += v
+		if v > 0.0:
+			parts.append("%s: %s" % [k.capitalize(), Units.format_si(v, UNITS.get(k, ""))])
 
+	if total <= 0.0:
+		return "Free"
 	return "  |  ".join(parts)
 
 
