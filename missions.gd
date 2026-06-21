@@ -21,6 +21,12 @@ const MISSION_TYPES := [
 	{"name": "Research Probe", "cost": {"minerals":    25_000, "energy":    45_000}},
 	# Cargo resupply to an established colony.
 	{"name": "Supply Run",     "cost": {"minerals":    80_000, "energy":    90_000}},
+	# Heavy-lift carrier that ferries a batch of manufactured Solar Satellites to the
+	# Sun and releases them into the Dyson swarm.  Only valid with the Sun as target;
+	# the cost here is the carrier vehicle — the satellites themselves are consumed
+	# from the origin planet's stockpile (payload_per_launch per flight).
+	{"name": "Solar Deployment", "cost": {"minerals": 150_000, "energy": 200_000},
+		"payload": "SolarSatellite", "payload_per_launch": 12, "sun_only": true},
 ]
 
 const START_OFFSETS := [

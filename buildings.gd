@@ -18,38 +18,38 @@ class_name BuildingData
 ## can never dead-lock the economy.
 
 const BUILDINGS := [
-	# ── Inherited 1945 power infrastructure (given to the player at game start) ─
-	# The 1945 global energy supply (~100 EJ/yr ≈ 3.169e12 W) is delivered as a
-	# FLEET of regional power stations (≈126.75 GW each) rather than one giant
-	# plant.  Game.start_new_game() grants 10 biomass + 10 coal + 5 oil = 25
-	# stations → 1.2675e12 + 1.2675e12 + 6.3375e11 ≈ 3.169e12 W (a 40/40/20 split).
-	# "buildable": false → they can't be *constructed* (no new 1945-era stations),
-	# but they CAN be demolished as the player modernises — except the Biomass
-	# Burner, whose "min_count": 1 keeps at least one running so energy production
-	# never collapses (which would soft-lock the economy, since building anything
-	# costs energy).  Fuelled by the starting mines + production jobs.
+	# ── 1945 fossil power infrastructure (a starting fleet AND buildable) ──────
+	# The 1945 global energy supply is a FLEET of regional power stations rated
+	# 120 GW each.  Game.start_new_game() grants 10 biomass + 10 coal + 5 oil = 25
+	# stations → 1.2e12 + 1.2e12 + 6.0e11 = 3.0e12 W (a 40/40/20 split, ≈ the real
+	# 1945 supply of ~100 EJ/yr).
+	# These are the cheap, dirty workhorse of the early grid: buildable from the
+	# start (no research gate) with a modest bill of materials — but every one vents
+	# CO₂ while it runs, so leaning on them warms the planet.  The Biomass Burner's
+	# "min_count": 1 keeps at least one running so energy production can never
+	# collapse (which would soft-lock the economy, since building anything costs
+	# energy).  Solar/nuclear/fusion cost more (or are gated) but emit nothing.
 	# "co2_per_energy" = grams of CO₂ vented to the atmosphere per unit of energy
 	# generated (per game-day of running).  Combustion intensities differ by fuel:
-	# coal is dirtiest, oil cleanest, biomass in between.  Solar/nuclear/fusion omit
-	# the field, so they emit nothing.
+	# coal is dirtiest, oil cleanest, biomass in between.
+	# Energy costs stay under the base energy storage cap (1e5) so these are
+	# buildable from the start without first raising the cap with Battery Banks; the
+	# real investment is the (uncapped) Concrete/Steel/Cu bill of materials.
 	{"name": "Biomass Burner",
-		"buildable": false,
 		"min_count": 1,
 		"allowed_types": ["rocky"],
-		"cost": {},
-		"production": {"energy": 1.2675e11},
+		"cost": {"Concrete": 120_000, "Steel": 90_000, "Cu": 12_000, "energy": 40_000},
+		"production": {"energy": 1.2e11},   # 120 GW
 		"co2_per_energy": 38.0},
 	{"name": "Coal Plant",
-		"buildable": false,
 		"allowed_types": ["rocky"],
-		"cost": {},
-		"production": {"energy": 1.2675e11},
+		"cost": {"Concrete": 200_000, "Steel": 160_000, "Cu": 20_000, "energy": 50_000},
+		"production": {"energy": 1.2e11},   # 120 GW
 		"co2_per_energy": 45.0},
 	{"name": "Oil Plant",
-		"buildable": false,
 		"allowed_types": ["rocky"],
-		"cost": {},
-		"production": {"energy": 1.2675e11},
+		"cost": {"Concrete": 180_000, "Steel": 150_000, "Cu": 18_000, "energy": 50_000},
+		"production": {"energy": 1.2e11},   # 120 GW
 		"co2_per_energy": 32.0},
 
 	# ── Always available ──────────────────────────────────────────────────────
@@ -67,12 +67,14 @@ const BUILDINGS := [
 		"production": {},
 		"storage": {"energy": 1_000_000.0}},
 
-	# Solar Farm — utility PV array, 200 W per module.
-	# One assembled photovoltaic module (Solar Panel Assembly recipe).
+	# Solar Farm — utility-scale photovoltaic plant, 50 GW.  The early, clean,
+	# fuel-free option: weaker than a fossil station but emits nothing, so several
+	# farms replace one 120 GW burner.  Cost scales with the new output (a real
+	# multi-GW array) so it stays a genuine investment rather than free power.
 	{"name": "Solar Farm",
 		"allowed_types": ["rocky", "gas_giant"],
-		"cost": {"SolarPanel": 5_000, "energy": 5_000},
-		"production": {"energy": 200.0}},
+		"cost": {"SolarPanel": 1_500_000, "Steel": 250_000, "Cu": 80_000, "energy": 2_000_000},
+		"production": {"energy": 5.0e10}},   # 50 GW
 
 	# Mine — surface excavator on a concrete pad.  Concrete is coal-free and needs
 	# no research, so the first mines are always buildable (no bootstrap lock).
@@ -82,12 +84,13 @@ const BUILDINGS := [
 		"production": {"minerals": 50.0}},
 
 	# ── Tier 1 (research-gated) ───────────────────────────────────────────────
-	# Nuclear Plant — PWR + containment + steam turbines.  Real reactor ≈ 1 GW.
-	# Massive containment concrete, steel pressure vessel, ceramic fuel cladding.
+	# Nuclear Plant — multi-unit PWR complex, 300 GW.  The first power source that
+	# beats a fossil station: denser and cleaner, the workhorse upgrade once
+	# nuclear_power is researched.
 	{"name": "Nuclear Plant",
 		"allowed_types": ["rocky"],
 		"cost": {"Concrete": 900_000, "Steel": 700_000, "Cu": 80_000, "Ceramic": 20_000, "energy": 1_000_000},
-		"production": {"energy": 1.0e9}},
+		"production": {"energy": 3.0e11}},   # 300 GW
 
 	# Research Lab — precision instruments + clean-room optics.
 	# Steel frame, glass optics, copper wiring.
@@ -118,11 +121,12 @@ const BUILDINGS := [
 		"production": {}},
 
 	# ── Tier 3 ────────────────────────────────────────────────────────────────
-	# Fusion Reactor — superconducting tokamak + ceramic blanket.  ≈ 2 GW electrical.
+	# Fusion Reactor — superconducting tokamak farm + ceramic blanket.  1.5 TW —
+	# the endgame power source, an order of magnitude past any fossil or fission plant.
 	{"name": "Fusion Reactor",
 		"allowed_types": ["rocky"],
 		"cost": {"Steel": 28_000_000, "Ceramic": 5_000_000, "Cu": 2_000_000, "Superconductor": 60_000, "energy": 25_000_000},
-		"production": {"energy": 2.0e9}},
+		"production": {"energy": 1.5e12}},   # 1.5 TW
 
 	# AI Research Hub — warehouse-scale GPU cluster + immersion cooling.  80 c/s.
 	{"name": "AI Research Hub",
@@ -136,18 +140,10 @@ const BUILDINGS := [
 	{"name": "Space Elevator",
 		"allowed_types": ["rocky"],
 		"cost": {"CarbonComposite": 40_000_000, "Steel": 15_000_000, "Superconductor": 1_000_000, "energy": 30_000_000},
-		"production": {"energy": 2.0e8},
+		"production": {"energy": 2.0e10},   # 20 GW (a side benefit; its real value is launch discounts)
 		# Multipliers applied to launches originating from a body that has one.
 		"launch_cost_mult":     0.35,   # −65% mineral & energy cost to orbit
 		"launch_duration_mult": 0.80},  # −20% transit/insertion time
-
-	# ── Tier 4 — orbital / any solid body ────────────────────────────────────
-	# Orbital Array — space solar power constellation.  1 200 W output.
-	# Photovoltaic panels, aluminium frame, control microchips.
-	{"name": "Orbital Array",
-		"allowed_types": ["rocky", "gas_giant"],
-		"cost": {"SolarPanel": 2_000_000, "Al": 800_000, "Microchip": 50_000, "energy": 2_000_000},
-		"production": {"energy": 1_200.0}},
 
 	# ── Storage ───────────────────────────────────────────────────────────────
 	# Orbital Vault — sealed aluminium vault domes; 10× the Matter Depot (matter only).

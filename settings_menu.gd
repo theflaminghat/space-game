@@ -255,7 +255,21 @@ func _on_fullscreen_toggled(pressed: bool) -> void:
 	if pressed:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	else:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		_apply_windowed_to_screen()
+
+## Windowed mode sized to the monitor the window is on, instead of reverting to the
+## fixed 2560×1080 design resolution.  The canvas_items/keep_height stretch then
+## scales the UI to whatever size we pick, so the game fits any screen.
+func _apply_windowed_to_screen() -> void:
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	var screen := DisplayServer.window_get_current_screen()
+	var usable: Rect2i = DisplayServer.screen_get_usable_rect(screen)
+	# Fill ~92% of the usable area (leaving room for the title bar / taskbar).
+	var win := Vector2i(int(usable.size.x * 0.92), int(usable.size.y * 0.92))
+	win.x = mini(win.x, usable.size.x)
+	win.y = mini(win.y, usable.size.y)
+	DisplayServer.window_set_size(win)
+	DisplayServer.window_set_position(usable.position + (usable.size - win) / 2)
 
 func _on_vsync_toggled(pressed: bool) -> void:
 	var mode := (DisplayServer.VSYNC_ENABLED

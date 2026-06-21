@@ -38,6 +38,9 @@ var _info_boosts: Label
 var _progress_bar: ProgressBar
 var _research_btn: Button
 
+## Always-visible science total + rate banner (moved here from the top HUD bar).
+var _science_label: Label
+
 var _tooltip_boosts: Label
 
 var _node_rects: Dictionary = {}
@@ -229,6 +232,33 @@ func _build_scene() -> void:
 	info_box.add_child(_research_btn)
 
 	_info_panel.hide()
+
+	# Science total banner — always visible, floating top-left over the tree.  Science
+	# funds research, so it belongs on this panel rather than the global HUD bar.
+	var sci_panel := PanelContainer.new()
+	sci_panel.z_index = 11
+	sci_panel.anchor_left = 0.0
+	sci_panel.anchor_top = 0.0
+	sci_panel.offset_left = 10.0
+	sci_panel.offset_top = 8.0
+	add_child(sci_panel)
+	var sci_margin := MarginContainer.new()
+	sci_margin.add_theme_constant_override("margin_left", 8)
+	sci_margin.add_theme_constant_override("margin_right", 8)
+	sci_margin.add_theme_constant_override("margin_top", 4)
+	sci_margin.add_theme_constant_override("margin_bottom", 4)
+	sci_panel.add_child(sci_margin)
+	_science_label = _make_label("Science: 0 FLOP", true)
+	_science_label.add_theme_color_override("font_color", Color(0.55, 0.85, 0.95))
+	sci_margin.add_child(_science_label)
+
+
+## Update the always-visible science total + production rate (called by Game.gd).
+func set_science(total: float, rate: float) -> void:
+	if _science_label:
+		_science_label.text = "Science: %s (+%s)" % [
+			Units.format_si_verbose(total, "FLOP"),
+			Units.format_si_verbose(rate, "FLOP/s")]
 
 
 func _make_label(txt: String, bold: bool = false, do_wrap: bool = false) -> Label:

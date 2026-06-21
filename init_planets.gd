@@ -9,9 +9,9 @@ extends Node3D
 ##
 ##   • The main asteroid belt between Mars and Jupiter (purely visual).
 ##   • A Dyson swarm of solar collectors hugging the Sun across several tilted
-##     orbital lanes.  Its visible collector count tracks how many Orbital Array
-##     buildings the player has constructed — so the swarm literally grows around
-##     the star as the megastructure is built out.
+##     orbital lanes.  Each collector is one Solar Satellite the player has
+##     manufactured and launched to the Sun — so the swarm literally grows around
+##     the star, lane by lane, as the megastructure is built out.
 
 # ── Scale constants (must match Planet.gd) ─────────────────────────────────────
 const ORBIT_RADIUS_MULT: float = 32.0
@@ -37,18 +37,20 @@ const KIRKWOOD_GAPS: Array = [
 # ── Dyson swarm ──────────────────────────────────────────────────────────────
 ## A shell of flat solar collectors close to the Sun (inside Mercury's orbit),
 ## spread across several circular lanes at increasing inclinations so the lanes
-## cross like a 3D swarm.  Collectors are revealed in proportion to the player's
-## Orbital Array count, evenly across all lanes.
+## cross like a 3D swarm.  Each collector is one Solar Satellite the player has
+## manufactured and launched to the Sun: satellites fill the evenly-spaced slots of
+## one lane, and once a lane is full new arrivals spill into the next lane.
 const SWARM_LANES:    int   = 6
-const SWARM_PER_LANE: int   = 120
-const SWARM_MAX:      int   = SWARM_LANES * SWARM_PER_LANE   # 720 collectors
+const SWARM_PER_LANE: int   = 24
+const SWARM_MAX:      int   = SWARM_LANES * SWARM_PER_LANE   # 144 collector slots
 const SWARM_INNER_AU: float = 0.15
 const SWARM_OUTER_AU: float = 0.35
-## Collectors lit up per Orbital Array building the player has constructed.
-const SWARM_PER_ARRAY: int  = 24
-const PANEL_W:    float = 0.22   # collector panel width (game units)
-const PANEL_THIN: float = 0.03   # panel thickness
-const SWARM_POLL_SEC: float = 0.5   # how often to re-read the Orbital Array count
+## Step (coprime to SWARM_PER_LANE) used to fill a lane's slots in a spread-out
+## order, so a half-full lane still looks evenly distributed rather than clustered.
+const SWARM_SPREAD_STEP: int = 13
+const PANEL_W:    float = 0.30   # collector panel width (game units)
+const PANEL_THIN: float = 0.04   # panel thickness
+const SWARM_POLL_SEC: float = 0.5   # how often to re-read the deployed-satellite count
 
 # ── Per-asteroid orbital state (flat parallel arrays for cache efficiency) ──────
 var _a_au:        PackedFloat32Array = PackedFloat32Array()  # semi-major axis (AU)
@@ -402,18 +404,20 @@ func _build_swarm() -> void:
 		var node: float = rng.randf() * TAU
 		_lane_basis.append(Basis(Vector3.UP, node) * Basis(Vector3.RIGHT, incl))
 
-	# Collectors, interleaved across lanes so the reveal grows the swarm evenly.
+	# Slots laid out lane-major: instance indices [0..SWARM_PER_LANE) are lane 0,
+	# the next block is lane 1, and so on.  Because visible_instance_count reveals
+	# instances in index order, satellites fill one lane completely before the next.
+	# Within a lane the fill order is spread (coprime step) so a partly-filled lane
+	# still looks evenly distributed around its ring rather than bunched in an arc.
 	_sw_lane.resize(SWARM_MAX)
 	_sw_phase.resize(SWARM_MAX)
 	var idx: int = 0
-	for k in range(SWARM_PER_LANE):
-		for lane in range(SWARM_LANES):
+	for lane in range(SWARM_LANES):
+		for fill in range(SWARM_PER_LANE):
 			_sw_lane[idx] = lane
-			# Even spacing in the lane + a per-lane offset + a little jitter.
+			var slot: int = (fill * SWARM_SPREAD_STEP) % SWARM_PER_LANE
 			_sw_phase[idx] = fposmod(
-				TAU * float(k) / float(SWARM_PER_LANE)
-				+ float(lane) * 0.37
-				+ rng.randf_range(-0.03, 0.03) * TAU, TAU)
+				TAU * float(slot) / float(SWARM_PER_LANE) + float(lane) * 0.37, TAU)
 			idx += 1
 
 	_refresh_swarm_count()
@@ -437,27 +441,19 @@ func _update_swarm_transforms() -> void:
 		var b := Basis(t1 * PANEL_W, radial * PANEL_THIN, t2 * PANEL_W)
 		_swarm_mm.set_instance_transform(i, Transform3D(b, pos))
 
-## Show one block of collectors per built Orbital Array (clamped to the swarm cap).
+## Show one collector per Solar Satellite the player has deployed to the Sun.
 func _refresh_swarm_count() -> void:
 	if _swarm_mm == null:
 		return
-	_swarm_mm.visible_instance_count = clampi(
-		_count_orbital_arrays() * SWARM_PER_ARRAY, 0, SWARM_MAX)
+	_swarm_mm.visible_instance_count = clampi(_deployed_satellite_count(), 0, SWARM_MAX)
 
-## Total Orbital Array buildings across all planets (read from Game).
-func _count_orbital_arrays() -> int:
+## How many Solar Satellites have arrived at the Sun (read from Game).
+func _deployed_satellite_count() -> int:
 	var game := get_tree().current_scene
 	if game == null:
 		return 0
-	var pb: Variant = game.get("planet_buildings")
-	if not (pb is Dictionary):
-		return 0
-	var total: int = 0
-	for p in (pb as Dictionary):
-		for b in (pb[p] as Array):
-			if b == "Orbital Array":
-				total += 1
-	return total
+	var n: Variant = game.get("solar_satellites_deployed")
+	return int(n) if n != null else 0
 
 func _make_panel_material() -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()

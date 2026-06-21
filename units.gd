@@ -31,6 +31,16 @@ const RESOURCE_DEFS: Dictionary = {
 ##   format_si(0.0,    "W")      → "0 W"
 static func format_si(value: float, unit: String) -> String:
 	var v := absf(value)
+	# Quetta (10^30) is the largest SI prefix; past 1000 Q, keep it and switch the
+	# mantissa to base-10 (scientific) notation, e.g. "1.50×10^7 QFLOP".
+	if v >= 1.0e33:
+		var q := value * 1.0e-30                        # amount in Quetta
+		var e := int(floor(log(absf(q)) / log(10.0)))   # base-10 exponent
+		var m := q / pow(10.0, e)                        # mantissa
+		if absf(m) >= 10.0:                              # log10 rounding guard
+			m *= 0.1
+			e += 1
+		return "%.2f×10^%d %s" % [m, e, "Q" + unit]
 	if v >= 1.0e30: return "%.2f %s" % [value * 1.0e-30, "Q" + unit]   # Quetta
 	if v >= 1.0e27: return "%.2f %s" % [value * 1.0e-27, "R" + unit]   # Ronna
 	if v >= 1.0e24: return "%.2f %s" % [value * 1.0e-24, "Y" + unit]   # Yotta
@@ -53,6 +63,16 @@ static func format_si(value: float, unit: String) -> String:
 ##   format_si_verbose(50.0,    "grams")  → "50 grams"
 static func format_si_verbose(value: float, unit: String) -> String:
 	var v := absf(value)
+	# Past 1000 Quetta, keep the Quetta prefix and write the mantissa in base-10
+	# (scientific) notation, e.g. "1.50×10^7 QuettaFLOP".
+	if v >= 1.0e33:
+		var q := value * 1.0e-30
+		var e := int(floor(log(absf(q)) / log(10.0)))
+		var m := q / pow(10.0, e)
+		if absf(m) >= 10.0:
+			m *= 0.1
+			e += 1
+		return "%.2f×10^%d %s" % [m, e, "Quetta" + unit]
 	if v >= 1.0e30: return "%.2f %s" % [value * 1.0e-30, "Quetta" + unit]
 	if v >= 1.0e27: return "%.2f %s" % [value * 1.0e-27, "Ronna"  + unit]
 	if v >= 1.0e24: return "%.2f %s" % [value * 1.0e-24, "Yotta"  + unit]

@@ -88,6 +88,20 @@ var _planet_angles: Dictionary = {}
 ## pushed by Game.gd so the displayed transit time matches what actually happens.
 var _mission_dur_mult: float = 1.0
 
+## Dyson-swarm state pushed by Game.gd, so a Solar Deployment can show its satellite
+## payload and refuse to fly with nothing to carry (or a full swarm).
+var _sat_stock: Dictionary = {}   # { planet_lower → satellites in stock }
+var _sat_deployed: int = 0
+var _sat_max: int = 0
+
+## Swallow mouse-wheel events so scrolling over this panel doesn't zoom the
+## solar-system camera behind it.
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index in [
+			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN,
+			MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+		accept_event()
+
 func _ready() -> void:
 	# Hide the legacy "Start:" label and dropdown that were in the scene.
 	var start_lbl: Node = get_node_or_null(
@@ -187,6 +201,32 @@ func set_current_planet(planet_name: String) -> void:
 			_update_duration()
 			_update_cost()
 			break
+
+## Push the Dyson-swarm state (per-planet satellite stock + deployed/cap) so a Solar
+## Deployment mission can size and gate its payload.
+func set_swarm_state(stock: Dictionary, deployed: int, max_slots: int) -> void:
+	_sat_stock    = stock
+	_sat_deployed = deployed
+	_sat_max      = max_slots
+	_update_cost()
+
+## Satellites stockpiled at the currently-selected origin.
+func _origin_sat_stock() -> int:
+	var o := origin_option.selected
+	if o < 0 or o >= PLANETS.size():
+		return 0
+	return int(_sat_stock.get(PLANETS[o].to_lower(), 0))
+
+## Number of satellites the selected Solar Deployment would actually carry.
+func _payload_batch(mission_idx: int) -> int:
+	var mdef: Dictionary = MissionData.MISSION_TYPES[mission_idx]
+	var per:  int = int(mdef.get("payload_per_launch", 0))
+	var room: int = maxi(0, _sat_max - _sat_deployed)
+	return mini(per, mini(_origin_sat_stock(), room))
+
+func _selected_target_is_sun() -> bool:
+	var p := planet_option.selected
+	return p >= 0 and p < TARGETS.size() and TARGETS[p] == "Sun"
 
 ## Push the per-origin launch modifiers (from Game.gd) and refresh the readouts.
 func set_launch_mods(mods: Dictionary) -> void:
@@ -450,6 +490,17 @@ func _update_cost() -> void:
 		if pf > 1.005:
 			txt += "   (+%d%% energy — %s window)" % [
 				int(round((pf - 1.0) * 100.0)), _window_label(pf)]
+	# Solar Deployment: show the satellite payload and why it might be blocked.
+	if MissionData.MISSION_TYPES[idx].get("sun_only", false):
+		var avail: int = _origin_sat_stock()
+		var batch: int = _payload_batch(idx)
+		txt += "\n+ %d Solar Satellite payload (have %d)" % [batch, avail]
+		if not _selected_target_is_sun():
+			txt += "  — target must be the Sun"
+		elif _sat_deployed >= _sat_max:
+			txt += "  — swarm full"
+		elif avail <= 0:
+			txt += "  — none in stock at origin"
 	cost_value.text = txt
 
 ## Base mission cost scaled by destination Δv, launch window, and how hard the
@@ -491,6 +542,10 @@ func _on_launch_pressed() -> void:
 	var duration := _selected_duration_days()
 	if duration <= 0:
 		return   # invalid combination (e.g. land on the same body or on the Sun)
+	# A Solar Deployment must fly to the Sun and actually carry satellites.
+	if MissionData.MISSION_TYPES[m_idx].get("sun_only", false):
+		if target_name != "Sun" or _payload_batch(m_idx) <= 0:
+			return
 	var cost: Dictionary = _actual_cost(m_idx)
 	var start_offset: int = 0
 	if _calendar:

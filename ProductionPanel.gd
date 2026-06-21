@@ -32,7 +32,9 @@ var _next_id:    int   = 1
 var _all_recipes: Array = []   # full recipe list (updated on research change)
 
 # ── UI refs built in _build_ui ───────────────────────────────────────────────────
-var _recipe_option:  OptionButton = null
+var _recipe_menu:    MenuButton    = null   # dropdown with one submenu per category
+var _selected_recipe_name: String  = ""     # source of truth for the current pick
+var _cat_submenus:   Array         = []      # category PopupMenu nodes, freed on rebuild
 var _planet_option:  OptionButton = null
 var _rate_slider:    HSlider      = null
 var _rate_label:     Label        = null
@@ -136,10 +138,11 @@ func _build_ui() -> void:
 	vbox.add_child(form)
 
 	_form_label(form, "Recipe:")
-	_recipe_option = OptionButton.new()
-	_recipe_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_recipe_option.item_selected.connect(_on_recipe_selected)
-	form.add_child(_recipe_option)
+	_recipe_menu = MenuButton.new()
+	_recipe_menu.flat = false
+	_recipe_menu.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_recipe_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	form.add_child(_recipe_menu)
 
 	_form_label(form, "Location:")
 	_planet_option = OptionButton.new()
@@ -221,11 +224,56 @@ func _form_label(parent: Control, text: String) -> void:
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	parent.add_child(lbl)
 
+## Preferred display order for the category submenus; any unknown category is
+## appended after these.
+const CATEGORY_ORDER: Array = ["materials", "chemicals", "fuels", "energy", "biologics"]
+
+## Rebuild the recipe dropdown as one submenu per category.
 func _populate_recipes() -> void:
-	_recipe_option.clear()
-	for r in _all_recipes:
-		_recipe_option.add_item("%s  [%s]" % [r["name"], (r["category"] as String).capitalize()])
+	var popup := _recipe_menu.get_popup()
+	popup.clear()
+	for sm in _cat_submenus:
+		(sm as Node).queue_free()
+	_cat_submenus.clear()
+
+	# Bucket recipe indices by category.
+	var by_cat: Dictionary = {}
+	for i in range(_all_recipes.size()):
+		var cat: String = str(_all_recipes[i].get("category", "other"))
+		if not by_cat.has(cat):
+			by_cat[cat] = []
+		by_cat[cat].append(i)
+
+	# Known categories first (fixed order), then any extras alphabetically.
+	var cats: Array = []
+	for c in CATEGORY_ORDER:
+		if by_cat.has(c):
+			cats.append(c)
+	var extras: Array = by_cat.keys().filter(func(c): return c not in CATEGORY_ORDER)
+	extras.sort()
+	cats.append_array(extras)
+
+	for cat: String in cats:
+		var sub := PopupMenu.new()
+		for idx: int in by_cat[cat]:
+			sub.add_item(str(_all_recipes[idx]["name"]), idx)   # id = global recipe index
+		sub.id_pressed.connect(_on_recipe_picked)
+		_cat_submenus.append(sub)
+		popup.add_submenu_node_item(cat.capitalize(), sub)
+
+	# Keep the current pick if it still exists; otherwise default to the first recipe.
+	if _selected_recipe().is_empty():
+		_selected_recipe_name = str(_all_recipes[0]["name"]) if not _all_recipes.is_empty() else ""
+	_update_recipe_menu_text()
 	_update_io_preview()
+
+## Update the MenuButton's label to reflect the current selection.
+func _update_recipe_menu_text() -> void:
+	var r := _selected_recipe()
+	if r.is_empty():
+		_recipe_menu.text = "Select recipe…"
+	else:
+		_recipe_menu.text = "%s  [%s]" % [r["name"], (r["category"] as String).capitalize()]
 
 func _update_io_preview() -> void:
 	var recipe := _selected_recipe()
@@ -254,10 +302,12 @@ func _fmt_amount(v: float) -> String:
 	return "%.3f" % v
 
 func _selected_recipe() -> Dictionary:
-	var idx := _recipe_option.selected if _recipe_option else -1
-	if idx < 0 or idx >= _all_recipes.size():
+	if _selected_recipe_name == "":
 		return {}
-	return _all_recipes[idx]
+	for r in _all_recipes:
+		if str(r["name"]) == _selected_recipe_name:
+			return r
+	return {}
 
 # ── Job list ─────────────────────────────────────────────────────────────────────
 
@@ -381,8 +431,12 @@ func _find_recipe(name: String) -> Dictionary:
 
 # ── Signals ──────────────────────────────────────────────────────────────────────
 
-func _on_recipe_selected(_idx: int) -> void:
-	_update_io_preview()
+## A recipe was chosen from one of the category submenus (id = global recipe index).
+func _on_recipe_picked(recipe_idx: int) -> void:
+	if recipe_idx >= 0 and recipe_idx < _all_recipes.size():
+		_selected_recipe_name = str(_all_recipes[recipe_idx]["name"])
+		_update_recipe_menu_text()
+		_update_io_preview()
 
 func _on_rate_changed(value: float) -> void:
 	_rate_label.text = _fmt_rate(_log_to_rate(value))

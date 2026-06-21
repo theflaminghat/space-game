@@ -10,7 +10,6 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Colony Dome":     "space_habitation_systems",
 	"Fusion Reactor":  "fusion_engineering",
 	"AI Research Hub": "machine_learning_systems",
-	"Orbital Array":   "space_power_infrastructure",
 	"Space Elevator":  "nanostructured_materials",
 	"Matter Depot":    "",
 	"Battery Bank":    "",

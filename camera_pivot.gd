@@ -8,6 +8,11 @@ var planets_root: Node3D = null
 
 @onready var child_node: Camera3D = $Camera3D
 
+## Camera rotation speed in degrees per second.  Scaled by frame delta so the feel
+## is identical at any frame rate (a fixed per-frame step made it faster on
+## higher-FPS displays).
+const ROT_SPEED: float = 60.0
+
 
 func move_to_planet(planet_name: String) -> void:
 	state = "planet_view"
@@ -57,14 +62,15 @@ func _process(delta: float) -> void:
 			rotation_degrees = Vector3.ZERO
 			set_to_zero = true
 
+		var step: float = ROT_SPEED * delta
 		if Input.is_action_pressed("right"):
-			rotation_degrees.y += 1
+			rotation_degrees.y += step
 		elif Input.is_action_pressed("left"):
-			rotation_degrees.y -= 1
+			rotation_degrees.y -= step
 		elif Input.is_action_pressed("up") and rotation_degrees.x > -90:
-			rotation_degrees.x -= 1
+			rotation_degrees.x -= step
 		elif Input.is_action_pressed("down") and rotation_degrees.x < 90:
-			rotation_degrees.x += 1
+			rotation_degrees.x += step
 
 
 func _on_sun_button_pressed() -> void:

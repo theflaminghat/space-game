@@ -310,6 +310,18 @@ const RECIPES: Array = [
 		"inputs":  {"Al": 8.0, "Steel": 4.0, "Microchip": 1.0, "energy": 800.0},
 		"outputs": {"Rocket": 1.0},
 	},
+	# Solar collector satellite: a free-flying photovoltaic collector on an aluminium
+	# bus with microchip avionics.  Launched to the Sun (Solar Deployment mission) to
+	# occupy a slot in the Dyson swarm — the more you build and loft, the larger the
+	# swarm and the more power it beams back.
+	{
+		"name":        "Solar Satellite Assembly",
+		"category":    "materials",
+		"description": "Integrate photovoltaic collectors, an aluminium spacecraft bus, and microchip avionics into a free-flying solar collector satellite for deployment to a solar-power swarm.",
+		"requires":    "space_power_infrastructure",
+		"inputs":  {"SolarPanel": 40.0, "Al": 12.0, "Microchip": 1.0, "energy": 1_500.0},
+		"outputs": {"SolarSatellite": 1.0},
+	},
 
 	# ── Chemicals ────────────────────────────────────────────────────────────────
 

@@ -68,6 +68,16 @@ var policies: Dictionary = {}         # policy_id -> bool or float
 var active_launches: Array = []
 var _next_launch_id: int = 1
 var _launch_satellites: Dictionary = {}
+## Solar Satellites that have arrived at the Sun and joined the Dyson swarm.  The
+## swarm renderer (init_planets.gd) reads this to light up one collector each.
+var solar_satellites_deployed: int = 0
+## Hard cap = total collector slots in the swarm (keep in sync with init_planets.gd
+## SWARM_LANES × SWARM_PER_LANE).  Each deployed satellite also feeds the grid.
+const SWARM_SAT_MAX:   int   = 6 * 24          # 144 slots
+# Each deployed collector beams back ~100 GW (on the scale of a fossil station), so a
+# full 144-satellite swarm delivers ~14.4 TW — the largest power source in the game,
+# the payoff for the long manufacture-and-launch campaign that builds it out.
+const SWARM_SAT_POWER: float = 1.0e11          # watts beamed back per deployed satellite
 var colonized_planets: Array = []     # planets that have received a completed Colony Ship
 ## Year each populated world's clock started — Earth at game start, each colony when
 ## settled.  Used for the evolutionary divergence timer.
@@ -115,6 +125,17 @@ var _fired_events: Array = []
 var _fired_event_years: Dictionary = {}
 ## Queue of event dicts waiting to be shown as notifications.
 var _pending_event_notifications: Array = []
+
+## ── Asteroid impacts ──────────────────────────────────────────────────────────
+## Major impacts are scheduled (not rolled per frame): each strike sets the game
+## year of the next, so deep fast-forward can't spam them.  A real-time cooldown
+## further caps how often one can fire while skipping eons.
+const IMPACT_GAP_MIN: int = 15_000   # min game-years between impacts
+const IMPACT_GAP_MAX: int = 100_000  # max game-years between impacts
+const IMPACT_REAL_COOLDOWN_MS: int = 5_000   # never more than one per 5 real seconds
+var _next_impact_year: int = 0
+var _impact_cooldown_ms: int = 0     # Time.get_ticks_msec() floor before next impact
+
 ## The CanvasLayer that hosts notification cards.
 var _event_notif_layer: CanvasLayer = null
 ## VBoxContainer inside the layer where cards are stacked.
@@ -188,7 +209,11 @@ func _prepare_snap_year() -> void:
 	if SolarSystem.solar_system_active:
 		SolarSystem.snap_year = float(year)
 		return
-	var p := get_node_or_null("WorldRoot/Planets/" + current_planet) as Planet
+	# Anchor to the planet being viewed.  Until the player picks one, current_planet
+	# is "" but the camera still defaults to Earth (camera_pivot.gd), so fall back to
+	# Earth here too — otherwise the homeworld jumps on the first post-cutoff pause.
+	var anchor: String = current_planet if current_planet != "" else "earth"
+	var p := get_node_or_null("WorldRoot/Planets/" + anchor) as Planet
 	SolarSystem.snap_year = p.compute_anchor_year() if p else float(year)
 
 func start_new_game() -> void:
@@ -206,6 +231,7 @@ func start_new_game() -> void:
 	time_accum = 0.0
 	active_launches = []
 	_next_launch_id = 1
+	solar_satellites_deployed = 0
 	colonized_planets = []
 	# Earth's population starts diverging from the 1945 baseline immediately; after
 	# its random threshold it becomes "H. sapiens terran".
@@ -244,6 +270,8 @@ func start_new_game() -> void:
 	_fired_events          = []
 	_fired_event_years     = {}
 	_pending_event_notifications = []
+	_next_impact_year      = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
+	_impact_cooldown_ms    = 0
 	surveyed_planets       = ["earth"]   # home world is always accessible
 	_refresh_planet_buttons()
 	_mark_prod_dirty()
@@ -436,6 +464,7 @@ func advance_day() -> void:
 			_last_snapshot_year = year
 			_check_extinction_events()
 			_check_population_splits()
+			_check_asteroid_impact()
 			_check_game_events("year")
 			_check_game_events("population")
 			_check_game_events("compute")
@@ -481,11 +510,18 @@ func advance_day() -> void:
 							target.capitalize(), _colony_parent[target], _split_thresholds[target]
 						])
 						_check_game_events("colony_count")
+				# Solar Satellites arrive at the Sun and join the Dyson swarm.
+				var payload: int = int(launch.get("payload", 0))
+				if payload > 0:
+					solar_satellites_deployed = clampi(
+						solar_satellites_deployed + payload, 0, SWARM_SAT_MAX)
+					_mark_prod_dirty()   # swarm now beams back more power
 	if any_completed:
 		_check_population_splits()
 	if launch_panel.visible:
 		launch_panel.set_game_date(year, month + 1, day + 1)
 		launch_panel.set_orbital_state(_build_orbital_state())
+		launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, SWARM_SAT_MAX)
 		launch_panel.refresh_launches(_compute_launch_display_data())
 
 ## Populate _bdef_cache from BuildingData.BUILDINGS (called once in _ready).
@@ -556,6 +592,8 @@ func _recompute_production_cache() -> void:
 			compute  += (prod.get("compute",  0.0) as float)
 			minerals += (prod.get("minerals", 0.0) as float)
 			energy   += (prod.get("energy",   0.0) as float)
+	# Dyson swarm: every Solar Satellite deployed to the Sun beams power to the grid.
+	energy += float(solar_satellites_deployed) * SWARM_SAT_POWER
 	compute  *= (1.0 + ResearchTree.get_boost("research_speed")) * _policy_compute_mult()
 	minerals *= (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
 	energy   *= (1.0 + ResearchTree.get_boost("energy_production"))  * _policy_energy_mult()
@@ -628,10 +666,11 @@ func _check_population_splits() -> void:
 		var notif: Dictionary = {
 			"id":       "split_" + world,
 			"year":     year,
-			"title":    "Evolutionary Divergence",
-			"desc":     "After %s years, the population of %s has diverged into a distinct lineage: H. sapiens %s." % [
+			"title":    "Lineage Divergence",
+			"desc":     "The population of %s has been reproductively isolated for %s. It is now classified as a distinct lineage: H. sapiens %s." % [
+				world.capitalize(),
 				Units.format_si_verbose(float(years_elapsed), "yr"),
-				world.capitalize(), epithet
+				epithet
 			],
 			"category": "civilization",
 		}
@@ -708,11 +747,11 @@ func _check_extinction_events() -> void:
 			var cause: String
 			var desc: String
 			if year >= PLANETARY_NEBULA_YEAR:
-				cause = "Planetary Nebula"
-				desc  = "The dying Sun has shed its outer envelope in a brilliant planetary nebula, flooding the solar system with searing ultraviolet radiation. The remaining colonies on %s have been sterilised. The Sun will spend the next 10 billion years cooling as a white dwarf." % planet_str
+				cause = "Planetary nebula"
+				desc  = "Sol has ejected its outer envelope. System-wide ultraviolet flux exceeds habitable tolerance. Inhabited worlds: 0. Remnant: white dwarf, cooling."
 			else:
-				cause = "Solar Expansion"
-				desc  = "The expanding Sun has engulfed %s. Every world humanity called home has been consumed by stellar fire." % planet_str
+				cause = "Solar envelope expansion"
+				desc  = "Sol's photosphere now encloses the orbit of %s. Inhabited worlds outside the photosphere: 0." % planet_str
 			trigger_game_over(cause, desc)
 
 ## Pause the game and display the extinction screen.
@@ -750,6 +789,7 @@ func _on_years_advanced_fast(years_advanced: int) -> void:
 	_check_extinction_events()
 	if not game_over:
 		_check_population_splits()
+		_check_asteroid_impact()
 		_check_game_events("year")
 		_check_game_events("population")
 		_check_game_events("compute")
@@ -1222,12 +1262,32 @@ func _on_launch_requested(params: Dictionary) -> void:
 	if mission_def.is_empty():
 		return
 
+	var origin_name: String = params.get("origin", "earth")
+	var target_name: String = params.get("target", "")
+	var arrival: String = params.get("arrival", "orbit")
+
+	# Solar Deployment ferries a batch of manufactured Solar Satellites to the Sun.
+	# Validate (and size) the payload before spending anything on the launch vehicle.
+	var sat_payload: int = 0
+	if mission_def.get("sun_only", false):
+		if target_name != "sun":
+			return                                    # this carrier only flies to the Sun
+		var room: int = SWARM_SAT_MAX - solar_satellites_deployed
+		if room <= 0:
+			return                                    # swarm already full
+		var avail: int = int(_get_stockpile(mission_def.get("payload", ""), origin_name))
+		sat_payload = mini(int(mission_def.get("payload_per_launch", 0)), mini(avail, room))
+		if sat_payload <= 0:
+			return                                    # no satellites stockpiled to loft
+
 	var cost: Dictionary = params.get("actual_cost", mission_def.get("cost", {}))
 	for resource in cost:
 		if ResearchTree.resources.get(resource, 0.0) < cost[resource]:
 			return
 	for resource in cost:
 		ResearchTree.resources[resource] -= cost[resource]
+	if sat_payload > 0:
+		_deduct_stockpile(mission_def.get("payload", ""), float(sat_payload), origin_name)
 
 	var start_offset: int = params.get("start_offset", 0)
 	# The panel already folded the policy duration multiplier into params.duration,
@@ -1237,16 +1297,13 @@ func _on_launch_requested(params: Dictionary) -> void:
 	var start_date := _date_add_days(year, month, day, start_offset)
 	var end_date   := _date_add_days(start_date[0], start_date[1], start_date[2], duration)
 
-	var origin_name: String = params.get("origin", "earth")
-	var target_name: String = params.get("target", "")
-	var arrival: String = params.get("arrival", "orbit")
-
 	var launch := {
 		"id":          _next_launch_id,
 		"mission":     m_name,
 		"origin":      origin_name,
 		"target":      target_name,
 		"arrival":     arrival,
+		"payload":     sat_payload,
 		"start_year":  start_date[0],
 		"start_month": start_date[1],
 		"start_day":   start_date[2],
@@ -1285,6 +1342,14 @@ func _planet_launch_mods(planet_name: String) -> Dictionary:
 			dur_mult = minf(dur_mult, float(bdef["launch_duration_mult"]))
 	return {"cost": cost_mult, "duration": dur_mult}
 
+## Per-planet Solar Satellite stock, so the LaunchPanel can size/gate a Solar
+## Deployment's payload by the chosen origin.
+func _build_satellite_stock() -> Dictionary:
+	var out: Dictionary = {}
+	for p: String in compound_inventory:
+		out[p] = int(float((compound_inventory[p] as Dictionary).get("SolarSatellite", 0.0)))
+	return out
+
 ## Map of { planet_name → {cost, duration} } for every planet whose buildings
 ## discount launches, so the LaunchPanel can adjust cost/time by chosen origin.
 func _build_launch_mods_map() -> Dictionary:
@@ -1305,6 +1370,7 @@ func refresh_launch_panel() -> void:
 	launch_panel.set_mission_duration_mult(_policy_mission_dur_mult())
 	launch_panel.set_max_accel(_max_launch_accel())
 	launch_panel.set_orbital_state(_build_orbital_state())
+	launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, SWARM_SAT_MAX)
 	launch_panel.refresh_launches(_compute_launch_display_data())
 
 ## Highest sustained transfer acceleration (m/s²) the player's propulsion research
@@ -1352,6 +1418,7 @@ func save_game(path: String = "") -> void:
 		"resources":          ResearchTree.resources,
 		"active_launches":    active_launches,
 		"next_launch_id":     _next_launch_id,
+		"solar_satellites_deployed": solar_satellites_deployed,
 		"colonized_planets":  colonized_planets,
 		"colonized_year":     _colonized_year,
 		"split_thresholds":   _split_thresholds,
@@ -1364,6 +1431,7 @@ func save_game(path: String = "") -> void:
 		"atmospheric_co2":    atmospheric_co2,
 		"fired_events":       _fired_events,
 		"fired_event_years":  _fired_event_years,
+		"next_impact_year":   _next_impact_year,
 	}
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -1393,6 +1461,10 @@ func load_game(path: String = "") -> void:
 
 	var data: Dictionary = parsed
 
+	# Dyson-swarm size.  Set the base value first so the Orbital Array migration in
+	# the planet_buildings block below can add to it (older saves have no key → 0).
+	solar_satellites_deployed = int(data.get("solar_satellites_deployed", 0))
+
 	ResearchTree.load_tree(ResearchTreeData.build())
 	if data.has("research") and data["research"] is Dictionary:
 		ResearchTree.load_state(data["research"])
@@ -1414,11 +1486,20 @@ func load_game(path: String = "") -> void:
 			"Storage Depot": "Matter Depot",     # storage split into matter + energy
 			"Orbital Cache": "Orbital Vault",
 		}
+		# Retired "Orbital Array" infrastructure → deployed Solar Satellites.  Each old
+		# array was 24 swarm collectors, so carry that forward, then drop the buildings.
+		var _migrated_arrays: int = 0
 		for _pname: String in planet_buildings:
 			var _list: Array = planet_buildings[_pname]
 			for _i in range(_list.size()):
 				if _RENAMES.has(_list[_i]):
 					_list[_i] = _RENAMES[_list[_i]]
+			while _list.has("Orbital Array"):
+				_list.erase("Orbital Array")
+				_migrated_arrays += 1
+		if _migrated_arrays > 0:
+			solar_satellites_deployed = clampi(
+				solar_satellites_deployed + _migrated_arrays * 24, 0, SWARM_SAT_MAX)
 		# Guarantee Earth keeps at least one Biomass Burner (soft-lock guard).
 		var _earth: Array = planet_buildings.get("earth", [])
 		if not _earth.has("Biomass Burner"):
@@ -1547,6 +1628,10 @@ func load_game(path: String = "") -> void:
 	if data.has("fired_event_years") and data["fired_event_years"] is Dictionary:
 		for k: String in data["fired_event_years"]:
 			_fired_event_years[k] = int(data["fired_event_years"][k])
+	# Asteroid-impact schedule (old saves: schedule a fresh one from the current year).
+	_next_impact_year = int(data.get("next_impact_year",
+		year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)))
+	_impact_cooldown_ms = 0
 	_pending_event_notifications = []
 
 	# Replay fired events onto the timeline so cards appear after a load.
@@ -1648,10 +1733,8 @@ func _update_hud() -> void:
 		var min_cap: float = _cached_storage_caps.get("minerals", 0.0)
 		var en_cap:  float = _cached_storage_caps.get("energy",   0.0)
 		science_label.text = (
-			"Compute: %s  |  Science: %s (+%s)  |  Matter: %s / %s (+%s)  |  Energy: %s / %s (+%s)" % [
+			"Compute: %s  |  Matter: %s / %s (+%s)  |  Energy: %s / %s (+%s)" % [
 				Units.format_si_verbose(compute_rate, "FLOP/s"),
-				Units.format_si_verbose(ResearchTree.resources.get("science",  0.0), "FLOP"),
-				Units.format_si_verbose(prod.get("science",  0.0), "FLOP/s"),
 				Units.format_si_verbose(ResearchTree.resources.get("minerals", 0.0), "Grams"),
 				Units.format_si_verbose(min_cap, "Grams"),
 				Units.format_si_verbose(prod.get("minerals", 0.0), "Grams/s"),
@@ -1660,6 +1743,10 @@ func _update_hud() -> void:
 				Units.format_si_verbose(prod.get("energy",   0.0), "Watts"),
 			]
 		)
+		# Science lives on the research panel now, not the top bar.
+		if research_ui and research_ui.has_method("set_science"):
+			research_ui.set_science(
+				ResearchTree.resources.get("science", 0.0), prod.get("science", 0.0))
 
 func _on_save_pressed() -> void:
 	save_game()
@@ -1745,6 +1832,54 @@ func _check_game_events(trigger_type: String) -> void:
 			_pending_event_notifications.append(stamped)
 			if timeline_panel:
 				timeline_panel.add_live_event(stamped)
+
+## Fire a major asteroid impact when the scheduled year arrives.  Rate-limited in
+## real time so skipping through eons in fast mode can't trigger a flood of them.
+func _check_asteroid_impact() -> void:
+	if game_over or year < _next_impact_year:
+		return
+	if Time.get_ticks_msec() < _impact_cooldown_ms:
+		return   # too soon since the last strike (deep fast-forward guard)
+	_next_impact_year   = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
+	_impact_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
+	_trigger_asteroid_impact()
+
+## A mountain-sized asteroid strikes one inhabited world: it levels every structure
+## there and kills much of the population (softened when humanity is spread across
+## several worlds).  Survivable by design — one emergency Biomass Burner is left so
+## the grid can recover, and the population floor prevents outright extinction.
+func _trigger_asteroid_impact() -> void:
+	var inhabited: Array = (["earth"] as Array) + colonized_planets
+	var target: String = str(inhabited[randi() % inhabited.size()])
+
+	# Raze the struck world's infrastructure, leaving one lone Biomass Burner running
+	# so energy production (and thus the ability to rebuild anything) never hits zero.
+	planet_buildings[target] = ["Biomass Burner"]
+	_mark_prod_dirty()
+
+	# Kill a majority of the population, divided across inhabited worlds — colonies
+	# mean each strike claims a smaller share of all humanity.
+	var pop: float = float(stats.get("current_population", 0))
+	var kill_frac: float = randf_range(0.50, 0.85) / float(inhabited.size())
+	var survivors: float = floorf(maxf(MIN_POPULATION, pop * (1.0 - kill_frac)))
+	var lost: float = maxf(0.0, pop - survivors)
+	stats["current_population"] = survivors
+	_refresh_stats()
+
+	var notif: Dictionary = {
+		"id":       "impact_%d" % year,
+		"year":     year,
+		"title":    "Asteroid Impact",
+		"desc":     "Impact event recorded on %s. Surface structures: 0 remaining. Population change: −%s (−%d%%)." % [
+			target.capitalize(), Units.format_si_verbose(lost, ""), int(round(kill_frac * 100.0))
+		],
+		"category": "warning",
+	}
+	_pending_event_notifications.append(notif)
+	if timeline_panel:
+		timeline_panel.add_live_event(notif)
+	print("[Game] Asteroid impact on %s: %s killed, all infrastructure destroyed." % [
+		target.capitalize(), Units.format_si_verbose(lost, "")])
 
 ## Build the CanvasLayer and VBoxContainer used for event notification cards.
 func _setup_event_notifications() -> void:

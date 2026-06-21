@@ -12,6 +12,14 @@ var _row: int = 0
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+## Swallow mouse-wheel events so scrolling over this panel doesn't zoom the
+## solar-system camera behind it.
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index in [
+			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN,
+			MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+		accept_event()
+
 func _ready() -> void:
 	# Fill the sidebar vertically so the tree reaches the bottom of the screen.
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL

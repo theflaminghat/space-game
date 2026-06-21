@@ -46,13 +46,13 @@ theme_override_constants/separation = 12
 
 [node name="TitleLabel" type="Label" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
-text = "SPACE GAME"
+text = "DON'T GO EXTINCT"
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 42
 
 [node name="SubtitleLabel" type="Label" parent="CenterContainer/MainPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
-text = "A civilisation simulator"
+text = "1945 to the heat death of the universe"
 horizontal_alignment = 1
 theme_override_colors/font_color = Color(0.55, 0.65, 0.8, 1)
 
