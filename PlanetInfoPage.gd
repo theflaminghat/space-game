@@ -93,6 +93,13 @@ const COMPOUND_NAMES: Dictionary = {
 	"Propellant":    "Rocket Propellant",
 	"FusionFuel":    "Fusion Fuel",
 	"Rocket":        "Rocket",
+	"H2":            "Hydrogen",
+	"Aerogel":       "Aerogel",
+	"CarbonNanotube":"Carbon Nanotube",
+	"Metamaterial":  "Metamaterial",
+	"SelfHealingComposite": "Self-Healing Composite",
+	"QuantumProcessor":     "Quantum Processor",
+	"Antimatter":    "Antimatter",
 }
 
 const COMPOUND_CATEGORIES: Dictionary = {
@@ -135,6 +142,13 @@ const COMPOUND_CATEGORIES: Dictionary = {
 	"Propellant":    "manufactured",
 	"FusionFuel":    "manufactured",
 	"Rocket":        "manufactured",
+	"H2":            "refined",
+	"Aerogel":       "manufactured",
+	"CarbonNanotube":"manufactured",
+	"Metamaterial":  "manufactured",
+	"SelfHealingComposite": "manufactured",
+	"QuantumProcessor":     "manufactured",
+	"Antimatter":    "manufactured",
 }
 
 const CATEGORY_ORDER: Array[String] = ["raw", "refined", "components", "manufactured"]

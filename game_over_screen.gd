@@ -22,6 +22,7 @@ var _cause_label: Label = null
 var _desc_label:  Label = null
 var _year_label:  Label = null
 var _stats_label: Label = null
+var _graph: StatsGraph  = null   # mirror of the in-game Statistics chart for this run
 
 # ── Menu vs. cinematic layers ───────────────────────────────────────────────────
 var _overlay: ColorRect       = null   # the dimmed game-over menu backdrop
@@ -66,7 +67,7 @@ func _build_ui() -> void:
 	var center := _center
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(660, 520)
+	panel.custom_minimum_size = Vector2(680, 800)
 	center.add_child(panel)
 
 	var vbox := VBoxContainer.new()
@@ -119,6 +120,21 @@ func _build_ui() -> void:
 	_stats_label.add_theme_color_override("font_color", Color(0.58, 0.62, 0.74))
 	_stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(_stats_label)
+
+	vbox.add_child(HSeparator.new())
+
+	# ── Run-history graph (mirrors the in-game Statistics page) ─────────────────
+	var graph_label := Label.new()
+	graph_label.text = "Run History"
+	graph_label.add_theme_font_size_override("font_size", 13)
+	graph_label.add_theme_color_override("font_color", Color(0.58, 0.62, 0.74))
+	graph_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(graph_label)
+
+	_graph = StatsGraph.new()
+	_graph.custom_minimum_size = Vector2(620, 240)
+	_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(_graph)
 
 	vbox.add_child(HSeparator.new())
 
@@ -206,8 +222,21 @@ func _build_epilogue() -> void:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+## Mirror the run's recorded history from the live Statistics graph onto this screen's
+## chart, so the extinction screen shows the same series and data.
+func set_graph_history(source: StatsGraph) -> void:
+	if _graph == null or source == null:
+		return
+	_graph.series_meta   = source.series_meta.duplicate(true)
+	_graph.active        = source.active.duplicate()
+	_graph.history_years = source.history_years.duplicate()
+	_graph.history_data  = source.history_data.duplicate(true)
+	_graph._cached_vmin  = source._cached_vmin.duplicate()
+	_graph._cached_vmax  = source._cached_vmax.duplicate()
+	_graph.queue_redraw()
+
 ## Display the screen with cause info and final stats.
-func show_game_over(cause: String, description: String, final_year: int, stats: Dictionary, person_years: float = 0.0) -> void:
+func show_game_over(cause: String, description: String, final_year: int, stats: Dictionary, people_ever_lived: float = 0.0) -> void:
 	# Start the music first — gives the MP3 decoder a head-start so no frames
 	# are dropped when the black screen appears on the next render.
 	if _music_player and not _music_player.playing:
@@ -215,7 +244,7 @@ func show_game_over(cause: String, description: String, final_year: int, stats: 
 	_cause_label.text = cause
 	_desc_label.text  = description
 	_year_label.text  = "Final Year: %s" % _fmt_year(final_year)
-	_stats_label.text = _build_stats_text(stats, person_years)
+	_stats_label.text = _build_stats_text(stats, people_ever_lived)
 	# Hide the menu and run the cinematic epilogue.
 	_overlay.visible = false
 	_center.visible  = false
@@ -274,10 +303,10 @@ func _on_epilogue_continue() -> void:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-func _build_stats_text(stats: Dictionary, person_years: float) -> String:
+func _build_stats_text(stats: Dictionary, people_ever_lived: float) -> String:
 	var pop:   int   = int(stats.get("current_population", 0))
 	var cols:  int   = int(stats.get("colony_count", 0))
-	var total: float = person_years   # person-years ≈ total humans who ever lived
+	var total: float = people_ever_lived   # cumulative humans ever born
 	# One stat per line, stacked vertically.
 	return "Final population: %s\nColonies: %d\nTotal humans who ever lived: ~%s" % [
 		_fmt_pop(pop), cols, _fmt_pop_large(total)

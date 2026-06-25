@@ -20,9 +20,10 @@ class_name BuildingData
 const BUILDINGS := [
 	# ── 1945 fossil power infrastructure (a starting fleet AND buildable) ──────
 	# The 1945 global energy supply is a FLEET of regional power stations rated
-	# 120 GW each.  Game.start_new_game() grants 10 biomass + 10 coal + 5 oil = 25
-	# stations → 1.2e12 + 1.2e12 + 6.0e11 = 3.0e12 W (a 40/40/20 split, ≈ the real
-	# 1945 supply of ~100 EJ/yr).
+	# 132 GW each.  Game.start_new_game() grants 10 biomass + 10 coal + 5 oil = 25
+	# stations → 1.32e12 + 1.32e12 + 6.6e11 = 3.3e12 W (a 40/40/20 split, ≈ the real
+	# 1945 supply of ~100 EJ/yr).  At default policy this is exactly the 3.3 TW the
+	# grid shows on a fresh game.
 	# These are the cheap, dirty workhorse of the early grid: buildable from the
 	# start (no research gate) with a modest bill of materials — but every one vents
 	# CO₂ while it runs, so leaning on them warms the planet.  The Biomass Burner's
@@ -39,17 +40,17 @@ const BUILDINGS := [
 		"min_count": 1,
 		"allowed_types": ["rocky"],
 		"cost": {"Concrete": 120_000, "Steel": 90_000, "Cu": 12_000, "energy": 40_000},
-		"production": {"energy": 1.2e11},   # 120 GW
+		"production": {"energy": 1.32e11},   # 132 GW
 		"co2_per_energy": 38.0},
 	{"name": "Coal Plant",
 		"allowed_types": ["rocky"],
 		"cost": {"Concrete": 200_000, "Steel": 160_000, "Cu": 20_000, "energy": 50_000},
-		"production": {"energy": 1.2e11},   # 120 GW
+		"production": {"energy": 1.32e11},   # 132 GW
 		"co2_per_energy": 45.0},
 	{"name": "Oil Plant",
 		"allowed_types": ["rocky"],
 		"cost": {"Concrete": 180_000, "Steel": 150_000, "Cu": 18_000, "energy": 50_000},
-		"production": {"energy": 1.2e11},   # 120 GW
+		"production": {"energy": 1.32e11},   # 132 GW
 		"co2_per_energy": 32.0},
 
 	# ── Always available ──────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ const BUILDINGS := [
 
 	# Solar Farm — utility-scale photovoltaic plant, 50 GW.  The early, clean,
 	# fuel-free option: weaker than a fossil station but emits nothing, so several
-	# farms replace one 120 GW burner.  Cost scales with the new output (a real
+	# farms replace one 132 GW burner.  Cost scales with the new output (a real
 	# multi-GW array) so it stays a genuine investment rather than free power.
 	{"name": "Solar Farm",
 		"allowed_types": ["rocky", "gas_giant"],

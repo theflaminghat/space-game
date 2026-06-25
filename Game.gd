@@ -48,6 +48,12 @@ const COLONY_HABITAT_K:    float = 5.0e9     # max people one fully-supplied col
 const ENERGY_PER_CAPITA:   float = 200.0     # Watts of output per sustained off-world person
 const MINERALS_PER_CAPITA: float = 0.5       # Grams/s of output per sustained off-world person
 const MIN_POPULATION:      float = 1.0e5     # floor short of outright extinction
+## Climate: accumulated atmospheric CO₂ deterministically lowers Earth's carrying
+## capacity (no hidden risk roll — just a shrinking ceiling).  CO2_K_HALF is the CO₂
+## mass that halves it; CO₂ also naturally sequesters, so cutting emissions lets the
+## climate (and the population ceiling) recover.
+const CO2_K_HALF:            float = 2.0e19
+const CO2_SEQUESTRATION_DAYS: float = 80_000.0   # carbon-cycle time constant (~150 yr half-life)
 
 var year: int = 2026
 var month: int = 0
@@ -112,9 +118,32 @@ var has_left_solar_system: bool = false
 var _user_speed_mult: float = 1.0
 ## Last year we pushed a stats snapshot (used to throttle in fast mode).
 var _last_snapshot_year: int = 2026
-## Running integral of population × time (person-years), used to derive
-## total humans ever lived shown on the game-over screen.
-var _person_years: float = 0.0
+## Cumulative number of humans ever born (Population Reference Bureau-style estimate)
+## shown on the game-over screen.  Seeded with the ~85 billion who had already lived
+## by 1945, then grows with births each tick.
+const PEOPLE_EVER_LIVED_1945: float = 8.5e10
+var _people_ever_lived: float = PEOPLE_EVER_LIVED_1945
+
+## Life expectancy (years).  A 1945 baseline raised by medical research and lowered by
+## pollution from a CO2-emitting power grid.  It governs population turnover — births
+## per year ≈ population ÷ life expectancy — so a longer life expectancy means fewer
+## new people are born, slowing the growth of the "people ever lived" total.
+const BASE_LIFE_EXPECTANCY: float = 52.0
+const MIN_LIFE_EXPECTANCY:  float = 20.0
+const POLLUTION_LE_PENALTY: float = 6.0   # years lost when the grid is fully CO2-emitting
+## Medical-lane research nodes → years of life expectancy each adds when unlocked.
+const MEDICAL_RESEARCH: Dictionary = {
+	"modern_medicine":                  22.0,   # antibiotics, vaccines, sanitation
+	"advanced_biomedical_engineering":   8.0,
+	"medical_informatics":               5.0,
+	"bioinformatics":                    5.0,
+	"genome_engineering":               12.0,   # gene therapy
+	"synthetic_biology":                10.0,
+	"human_adaptation_systems":         15.0,
+	"longevity_engineering":            60.0,   # explicit life-extension
+	"synthetic_biosphere_engineering":   8.0,
+	"post_biological_transition":     5000.0,   # uploaded minds: effective immortality
+}
 ## Accumulated real seconds since the last autosave.
 var _autosave_accum: float = 0.0
 
@@ -135,6 +164,34 @@ const IMPACT_GAP_MAX: int = 100_000  # max game-years between impacts
 const IMPACT_REAL_COOLDOWN_MS: int = 5_000   # never more than one per 5 real seconds
 var _next_impact_year: int = 0
 var _impact_cooldown_ms: int = 0     # Time.get_ticks_msec() floor before next impact
+
+## ── Engineered pandemics ──────────────────────────────────────────────────────
+## A scheduled roll whose probability rises with bioengineering capability and AI
+## (which accelerates pathogen design), is amplified by a population packed onto few
+## worlds, and worsened by poor public health.  Gated on having any bioengineering
+## research — there is no engineered-pandemic risk before the capability exists.
+const PANDEMIC_GAP_MIN: int = 800
+const PANDEMIC_GAP_MAX: int = 2_500
+const PANDEMIC_BASE: float  = 0.03
+const PANDEMIC_BIOTECH: Array = [
+	"advanced_biomedical_engineering", "bioinformatics", "genome_engineering", "synthetic_biology",
+]
+var _next_pandemic_year: int = 0
+var _pandemic_cooldown_ms: int = 0
+
+## ── Nuclear war ───────────────────────────────────────────────────────────────
+## A tempting gamble: military spending accelerates research (the arms race drove the
+## space race), but while humanity is single-world it stokes geopolitical tension, and
+## a sustained high-military / high-tension standoff compounds the chance of a nuclear
+## exchange.  Tension — and the risk — collapse as you spread off-world, so the player
+## races to escape the cradle before the gamble catches up with them.
+const NUCLEAR_GAP_MIN: int = 25
+const NUCLEAR_GAP_MAX: int = 120
+const NUCLEAR_BASE: float = 0.04
+const NUCLEAR_STRAIN_DECAY: float = 0.6   # how much standoff pressure carries between checks
+var _next_nuclear_year: int = 0
+var _nuclear_cooldown_ms: int = 0
+var _arms_strain: float = 0.0             # compounding pressure from a sustained arms race
 
 ## The CanvasLayer that hosts notification cards.
 var _event_notif_layer: CanvasLayer = null
@@ -266,12 +323,17 @@ func start_new_game() -> void:
 	_user_speed_mult       = settings_menu.get_default_speed_mult() if settings_menu else 1.0
 	_autosave_accum        = 0.0
 	_last_snapshot_year    = 1945
-	_person_years          = 0.0
+	_people_ever_lived     = PEOPLE_EVER_LIVED_1945
 	_fired_events          = []
 	_fired_event_years     = {}
 	_pending_event_notifications = []
 	_next_impact_year      = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
 	_impact_cooldown_ms    = 0
+	_next_pandemic_year    = year + randi_range(PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX)
+	_pandemic_cooldown_ms  = 0
+	_next_nuclear_year     = year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)
+	_nuclear_cooldown_ms   = 0
+	_arms_strain           = 0.0
 	surveyed_planets       = ["earth"]   # home world is always accessible
 	_refresh_planet_buttons()
 	_mark_prod_dirty()
@@ -290,6 +352,11 @@ func start_new_game() -> void:
 
 func _ready() -> void:
 	_init_building_cache()
+
+	# Developer console (toggle with the backtick key) — can trigger extinction events.
+	var console := DevConsole.new()
+	add_child(console)
+	console.setup(self)
 
 	# Endgame music player — keeps playing while the game-over screen is up, so it
 	# must ignore the tree pause that trigger_game_over() sets.
@@ -438,9 +505,14 @@ func _process(delta: float) -> void:
 					ResearchTree.resources[resource], _cached_storage_caps[resource]
 				)
 		# Evolve population on the same game-day clock.
+		var pop_before: float = float(stats.get("current_population", 0))
 		_update_population(delta_days)
-		# Accumulate person-days → convert to person-years for the final stat.
-		_person_years += float(stats.get("current_population", 0)) * delta_days / 365.25
+		var pop_after: float = float(stats.get("current_population", 0))
+		# Births = replacement (deaths ≈ population ÷ life expectancy) + net growth.
+		var life_exp: float = _life_expectancy()
+		stats["life_expectancy"] = life_exp
+		_people_ever_lived += pop_after * (delta_days / 365.25) / life_exp \
+			+ maxf(0.0, pop_after - pop_before)
 		_refresh_stats()
 		statistics_page.set_stats(stats)
 		_update_hud()
@@ -465,6 +537,8 @@ func advance_day() -> void:
 			_check_extinction_events()
 			_check_population_splits()
 			_check_asteroid_impact()
+			_check_pandemic()
+			_check_nuclear_war()
 			_check_game_events("year")
 			_check_game_events("population")
 			_check_game_events("compute")
@@ -761,7 +835,10 @@ func trigger_game_over(cause: String, description: String) -> void:
 	game_over          = true
 	SolarSystem.paused = true
 	_refresh_stats()
-	game_over_screen.show_game_over(cause, description, year, stats, _person_years)
+	# Record the final moment, then mirror the run's history onto the extinction screen.
+	statistics_page.push_snapshot(year, stats)
+	game_over_screen.set_graph_history(statistics_page.get_graph())
+	game_over_screen.show_game_over(cause, description, year, stats, _people_ever_lived)
 
 ## Called when the player presses "Start New Civilization" on the game-over screen.
 func _on_restart_requested() -> void:
@@ -790,6 +867,8 @@ func _on_years_advanced_fast(years_advanced: int) -> void:
 	if not game_over:
 		_check_population_splits()
 		_check_asteroid_impact()
+		_check_pandemic()
+		_check_nuclear_war()
 		_check_game_events("year")
 		_check_game_events("population")
 		_check_game_events("compute")
@@ -810,35 +889,37 @@ func _process_production(delta_days: float) -> void:
 		# A job runs on a specific planet, drawing from and feeding that planet's
 		# inventory (global resources like energy are shared).
 		var planet: String = str(job.get("planet", "earth"))
-
-		# Check we can afford all inputs for this slice of game-time.
 		var inputs: Dictionary = recipe.get("inputs", {})
-		var can_run := true
-		var missing_input := ""
+
+		# Run the job for as much of this game-time slice as the inputs allow, instead
+		# of all-or-nothing.  Over long timescales delta_days is enormous and inputs
+		# arrive concurrently (mine → smelter → factory), so a full-slice buffer never
+		# exists up front — producing the affordable fraction keeps the chain flowing
+		# and lets resources accumulate correctly at any timescale.
+		var run_days: float = delta_days
+		var bottleneck: String = ""
 		for key: String in inputs:
-			var need: float = float(inputs[key]) * rate * delta_days
-			var have: float = _get_stockpile(key, planet)
-			if have < need:
-				can_run = false
-				missing_input = key
-				break
+			var per_day: float = float(inputs[key]) * rate
+			if per_day <= 0.0:
+				continue
+			var affordable_days: float = _get_stockpile(key, planet) / per_day
+			if affordable_days < run_days:
+				run_days = affordable_days
+				bottleneck = key
+		run_days = maxf(0.0, run_days)
 
 		var job_id := int(job.get("id", 0))
-		production_panel.set_job_status(job_id, can_run, missing_input)
+		# "Running" only when it sustained the full slice; otherwise an input throttled it.
+		production_panel.set_job_status(job_id, bottleneck == "", bottleneck)
 
-		if not can_run:
+		if run_days <= 0.0:
 			continue
 
-		# Deduct inputs.
 		for key: String in inputs:
-			var amount: float = float(inputs[key]) * rate * delta_days
-			_deduct_stockpile(key, amount, planet)
-
-		# Credit outputs.
+			_deduct_stockpile(key, float(inputs[key]) * rate * run_days, planet)
 		var outputs: Dictionary = recipe.get("outputs", {})
 		for key: String in outputs:
-			var amount: float = float(outputs[key]) * rate * delta_days
-			_add_stockpile(key, amount, planet)
+			_add_stockpile(key, float(outputs[key]) * rate * run_days, planet)
 
 ## Look up a recipe by exact name (searches the full master list).
 func _find_recipe_by_name(name: String) -> Dictionary:
@@ -931,6 +1012,8 @@ func _accumulate_compounds(delta_days: float) -> void:
 ## proportion to the energy they generate (production.energy × co2_per_energy),
 ## scaled by elapsed game-days so it tracks the timescale like all other flows.
 func _accumulate_emissions(delta_days: float) -> void:
+	# Per-planet emission rate (grams/game-day) from combustion plants.
+	var emit_rate: Dictionary = {}
 	for planet_name: String in planet_buildings:
 		var co2_rate: float = 0.0
 		for b_name: String in planet_buildings[planet_name]:
@@ -941,7 +1024,53 @@ func _accumulate_emissions(delta_days: float) -> void:
 			var e: float = float((bdef.get("production", {}) as Dictionary).get("energy", 0.0))
 			co2_rate += e * factor
 		if co2_rate > 0.0:
-			atmospheric_co2[planet_name] = atmospheric_co2.get(planet_name, 0.0) + co2_rate * delta_days
+			emit_rate[planet_name] = co2_rate * PoliticsData.co2_mult(policies)
+
+	# Integrate emission AND natural sequestration in closed form: the exact solution
+	# of dCO₂/dt = rate − CO₂/τ.  Correct for any delta_days (so a single deep-time
+	# frame is right), and CO₂ relaxes toward rate·τ — zero once emissions stop, which
+	# is what lets the climate recover when the grid goes clean.
+	var decay: float = exp(-delta_days / CO2_SEQUESTRATION_DAYS)
+	var gain: float = CO2_SEQUESTRATION_DAYS * (1.0 - decay)
+	var planets: Dictionary = {}
+	for p: String in atmospheric_co2:
+		planets[p] = true
+	for p: String in emit_rate:
+		planets[p] = true
+	for p: String in planets:
+		var co2: float = float(atmospheric_co2.get(p, 0.0)) * decay + float(emit_rate.get(p, 0.0)) * gain
+		if co2 < 1.0:
+			atmospheric_co2.erase(p)
+		else:
+			atmospheric_co2[p] = co2
+
+## Current life expectancy in years: the 1945 baseline raised by each unlocked medical
+## research node and reduced by pollution from a CO2-emitting power grid.
+func _life_expectancy() -> float:
+	var le: float = BASE_LIFE_EXPECTANCY
+	for node_id: String in MEDICAL_RESEARCH:
+		if ResearchTree.is_unlocked(node_id):
+			le += float(MEDICAL_RESEARCH[node_id])
+	le -= _dirty_power_fraction() * POLLUTION_LE_PENALTY
+	le += PoliticsData.life_expectancy_bonus(policies)   # healthcare/welfare vs pollution
+	return maxf(MIN_LIFE_EXPECTANCY, le)
+
+## Fraction of total power generation (buildings + Dyson swarm) that comes from
+## CO2-emitting plants — drives the pollution penalty on life expectancy.
+func _dirty_power_fraction() -> float:
+	var dirty: float = 0.0
+	var total: float = 0.0
+	for p_name: String in planet_buildings:
+		for b_name: String in planet_buildings[p_name]:
+			var bdef: Dictionary = _bdef_cache.get(b_name, {})
+			var e: float = float((bdef.get("production", {}) as Dictionary).get("energy", 0.0))
+			if e <= 0.0:
+				continue
+			total += e
+			if float(bdef.get("co2_per_energy", 0.0)) > 0.0:
+				dirty += e
+	total += float(solar_satellites_deployed) * SWARM_SAT_POWER   # the swarm is clean
+	return dirty / total if total > 0.0 else 0.0
 
 # Returns compute rate (population + buildings, boosted by tech and policy).
 func _get_compute_rate() -> float:
@@ -1413,6 +1542,7 @@ func save_game(path: String = "") -> void:
 		"month":              month,
 		"day":                day,
 		"population":         stats.get("current_population", EARTH_NATURAL_K),
+		"people_ever_lived":  _people_ever_lived,
 		"production_jobs":    production_panel.get_jobs(),
 		"planet_buildings":   planet_buildings,
 		"resources":          ResearchTree.resources,
@@ -1432,6 +1562,9 @@ func save_game(path: String = "") -> void:
 		"fired_events":       _fired_events,
 		"fired_event_years":  _fired_event_years,
 		"next_impact_year":   _next_impact_year,
+		"next_pandemic_year": _next_pandemic_year,
+		"next_nuclear_year":  _next_nuclear_year,
+		"arms_strain":        _arms_strain,
 	}
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -1473,6 +1606,7 @@ func load_game(path: String = "") -> void:
 	month = int(data.get("month", 0))
 	day   = int(data.get("day",   0))
 	stats["current_population"] = float(data.get("population", stats.get("current_population", EARTH_NATURAL_K)))
+	_people_ever_lived = float(data.get("people_ever_lived", PEOPLE_EVER_LIVED_1945))
 
 	if data.has("planet_buildings") and data["planet_buildings"] is Dictionary:
 		planet_buildings = data["planet_buildings"]
@@ -1632,6 +1766,13 @@ func load_game(path: String = "") -> void:
 	_next_impact_year = int(data.get("next_impact_year",
 		year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)))
 	_impact_cooldown_ms = 0
+	_next_pandemic_year = int(data.get("next_pandemic_year",
+		year + randi_range(PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX)))
+	_pandemic_cooldown_ms = 0
+	_next_nuclear_year = int(data.get("next_nuclear_year",
+		year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)))
+	_nuclear_cooldown_ms = 0
+	_arms_strain = float(data.get("arms_strain", 0.0))
 	_pending_event_notifications = []
 
 	# Replay fired events onto the timeline so cards appear after a load.
@@ -1673,7 +1814,15 @@ func _population_capacity() -> float:
 	)
 	var colony_habitat: float = COLONY_HABITAT_K * float(colonized_planets.size())
 	var offworld_k: float = maxf(0.0, minf(colony_habitat, supportable_offworld))
-	return EARTH_NATURAL_K + offworld_k
+	# Climate: CO₂ deterministically shrinks Earth's habitable capacity.
+	return (EARTH_NATURAL_K * _climate_capacity_factor() + offworld_k) \
+		* PoliticsData.pop_capacity_mult(policies)
+
+## Earth's carrying-capacity multiplier from atmospheric CO₂: 1.0 when pristine,
+## falling smoothly toward 0 as CO₂ builds (no random roll — a deterministic ceiling).
+func _climate_capacity_factor() -> float:
+	var co2: float = float(atmospheric_co2.get("earth", 0.0))
+	return maxf(0.05, 1.0 / (1.0 + co2 / CO2_K_HALF))
 
 ## Advance population one logistic step over `delta_days` game-days toward the
 ## resource-driven capacity.  Uses the closed-form logistic solution, which is
@@ -1690,7 +1839,7 @@ func _update_population(delta_days: float) -> void:
 	else:
 		# P(t+Δ) = K / (1 + (K/P − 1)·e^(−rΔ)); handles both growth (P<K) and
 		# decline (P>K) and converges to K as Δ → ∞.
-		var r: float = POP_GROWTH_PER_YEAR / 365.25
+		var r: float = POP_GROWTH_PER_YEAR / 365.25 * PoliticsData.pop_growth_mult(policies)
 		var decay: float = exp(-r * delta_days)
 		new_pop = k / (1.0 + (k / pop - 1.0) * decay)
 	# People are counted in whole numbers — floor to keep the population integral.
@@ -1707,6 +1856,9 @@ func _refresh_stats() -> void:
 	stats["minerals"]         = ResearchTree.resources.get("minerals", 0.0)
 	stats["energy"]           = ResearchTree.resources.get("energy",   0.0)
 	stats["colony_count"]     = colonized_planets.size()
+	stats["life_expectancy"]  = _life_expectancy()
+	stats["ai_autonomy"]      = PoliticsData.ai_autonomy(policies)
+	stats["existential_risk"] = PoliticsData.existential_risk(policies)
 
 func _fmt_year_hud() -> String:
 	if SolarSystem.seconds_per_day < FAST_THRESHOLD:
@@ -1840,7 +1992,9 @@ func _check_asteroid_impact() -> void:
 		return
 	if Time.get_ticks_msec() < _impact_cooldown_ms:
 		return   # too soon since the last strike (deep fast-forward guard)
-	_next_impact_year   = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
+	# Planetary-defence policy widens the interval between impacts.
+	_next_impact_year   = year + int(randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX) \
+		* PoliticsData.asteroid_gap_mult(policies))
 	_impact_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 	_trigger_asteroid_impact()
 
@@ -1880,6 +2034,135 @@ func _trigger_asteroid_impact() -> void:
 		timeline_panel.add_live_event(notif)
 	print("[Game] Asteroid impact on %s: %s killed, all infrastructure destroyed." % [
 		target.capitalize(), Units.format_si_verbose(lost, "")])
+
+## Scheduled engineered-pandemic roll.  Probability compounds with the factors that
+## make a deliberate plague more likely and more lethal; rate-limited like impacts so
+## deep fast-forward can't spam it.
+func _check_pandemic() -> void:
+	if game_over or year < _next_pandemic_year:
+		return
+	if Time.get_ticks_msec() < _pandemic_cooldown_ms:
+		return
+	_next_pandemic_year   = year + randi_range(PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX)
+	_pandemic_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
+
+	# No engineered-pandemic risk before the bioengineering capability exists.
+	var biotech: int = 0
+	for node_id: String in PANDEMIC_BIOTECH:
+		if ResearchTree.is_unlocked(node_id):
+			biotech += 1
+	if biotech == 0:
+		return
+
+	var inhabited: int = 1 + colonized_planets.size()
+	var ai: float = PoliticsData.ai_autonomy(policies)
+	var le: float = _life_expectancy()
+	# More bioengineering and more AI raise the odds; spreading across worlds lowers
+	# them; poor public health (low life expectancy) raises them.
+	var prob: float = PANDEMIC_BASE \
+		* (1.0 + 0.4 * float(biotech)) \
+		* (1.0 + 2.0 * ai) \
+		* (2.0 / (1.0 + float(inhabited))) \
+		* clampf(BASE_LIFE_EXPECTANCY / le, 0.5, 3.0)
+	if randf() < clampf(prob, 0.0, 0.95):
+		_trigger_pandemic()
+
+## A synthetic plague kills much of the population — divided across inhabited worlds,
+## so colonies blunt it.  Survivable by design unless the species is already fragile.
+func _trigger_pandemic() -> void:
+	var inhabited: int = 1 + colonized_planets.size()
+	var pop: float = float(stats.get("current_population", 0))
+	var kill_frac: float = randf_range(0.70, 0.95) / float(inhabited)
+	var survivors: float = floorf(maxf(MIN_POPULATION, pop * (1.0 - kill_frac)))
+	var lost: float = maxf(0.0, pop - survivors)
+	stats["current_population"] = survivors
+	_refresh_stats()
+
+	var notif: Dictionary = {
+		"id":       "pandemic_%d" % year,
+		"year":     year,
+		"title":    "Engineered Pandemic",
+		"desc":     "Engineered-pathogen outbreak recorded. Population change: −%s (−%d%%)." % [
+			Units.format_si_verbose(lost, ""), int(round(kill_frac * 100.0))],
+		"category": "warning",
+	}
+	_pending_event_notifications.append(notif)
+	if timeline_panel:
+		timeline_panel.add_live_event(notif)
+	print("[Game] Engineered pandemic: %s killed." % Units.format_si_verbose(lost, ""))
+
+## Geopolitical tension [0,1].  Highest when humanity is packed onto one world under
+## resource scarcity and an arms buildup; falls toward zero as it spreads off-world and
+## reaches abundance.  Drives nuclear-war risk — and is what the player defuses by
+## escaping the cradle rather than merely disarming.
+func _geopolitical_tension() -> float:
+	var worlds: float = 1.0 + float(colonized_planets.size())
+	var concentration: float = 1.0 / worlds                       # one world = maximal rivalry
+	var pop: float = float(stats.get("current_population", 0))
+	var scarcity: float = clampf(pop / maxf(_population_capacity(), 1.0), 0.0, 1.0)
+	var arms: float = clampf(float(policies.get("military_spending", 10.0)) / 50.0, 0.0, 1.0)
+	return clampf(concentration * (0.4 + 0.6 * scarcity) * (0.6 + 0.8 * arms), 0.0, 1.0)
+
+## Scheduled nuclear-war roll.  Probability compounds with a sustained military/tension
+## standoff (_arms_strain) and is rate-limited like the other catastrophes.  Zero
+## military or near-zero tension means no exchange — so spreading off-world (which
+## collapses tension) is the real escape, not merely cutting spending.
+func _check_nuclear_war() -> void:
+	if game_over or year < _next_nuclear_year:
+		return
+	if Time.get_ticks_msec() < _nuclear_cooldown_ms:
+		return
+	_next_nuclear_year   = year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)
+	_nuclear_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
+
+	var tension: float = _geopolitical_tension()
+	var military: float = clampf(float(policies.get("military_spending", 10.0)) / 50.0, 0.0, 1.0)
+	var pressure: float = tension * military
+	# Compounding: a sustained standoff ratchets the danger; calm/de-escalation relaxes it.
+	_arms_strain = clampf(_arms_strain * NUCLEAR_STRAIN_DECAY + pressure, 0.0, 5.0)
+	if military <= 0.0 or tension < 0.05:
+		return   # no arsenal, or nothing left to fight over
+
+	var prob: float = NUCLEAR_BASE * pressure * (1.0 + _arms_strain)
+	if randf() < clampf(prob, 0.0, 0.9):
+		_trigger_nuclear_war()
+
+## A strategic exchange devastates Earth's population and industry.  Off-world colonies
+## are spared (the conflict is between Earth powers), so spreading out blunts it.
+func _trigger_nuclear_war() -> void:
+	var inhabited: int = 1 + colonized_planets.size()
+	var pop: float = float(stats.get("current_population", 0))
+	var kill_frac: float = randf_range(0.55, 0.90) / float(inhabited)
+	var survivors: float = floorf(maxf(MIN_POPULATION, pop * (1.0 - kill_frac)))
+	var lost: float = maxf(0.0, pop - survivors)
+	stats["current_population"] = survivors
+
+	# Roughly half of Earth's surface industry is destroyed; one Biomass Burner is left
+	# so power production (and recovery) can't collapse to zero.
+	if planet_buildings.has("earth"):
+		var kept: Array = []
+		for b: String in planet_buildings["earth"]:
+			if randf() > 0.5:
+				kept.append(b)
+		if not kept.has("Biomass Burner"):
+			kept.append("Biomass Burner")
+		planet_buildings["earth"] = kept
+	_arms_strain = 0.0      # the standoff broke
+	_mark_prod_dirty()
+	_refresh_stats()
+
+	var notif: Dictionary = {
+		"id":       "nuclear_%d" % year,
+		"year":     year,
+		"title":    "Nuclear War",
+		"desc":     "Strategic nuclear exchange recorded on Earth. Population change: −%s (−%d%%). Surface industry: heavily degraded." % [
+			Units.format_si_verbose(lost, ""), int(round(kill_frac * 100.0))],
+		"category": "warning",
+	}
+	_pending_event_notifications.append(notif)
+	if timeline_panel:
+		timeline_panel.add_live_event(notif)
+	print("[Game] Nuclear war: %s killed." % Units.format_si_verbose(lost, ""))
 
 ## Build the CanvasLayer and VBoxContainer used for event notification cards.
 func _setup_event_notifications() -> void:

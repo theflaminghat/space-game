@@ -227,11 +227,17 @@ func _build_effects_summary(parent: VBoxContainer) -> void:
 	box.add_child(hdr)
 
 	var rows: Array = [
-		["science",  "Science output"],
-		["compute",  "Compute"],
-		["minerals", "Matter output"],
-		["energy",   "Energy output"],
-		["mission",  "Mission time"],
+		["science",    "Science output"],
+		["compute",    "Compute"],
+		["minerals",   "Matter output"],
+		["energy",     "Energy output"],
+		["pop_growth", "Population growth"],
+		["capacity",   "Carrying capacity"],
+		["life_exp",   "Life expectancy"],
+		["co2",        "CO₂ emissions"],
+		["asteroid",   "Impact interval"],
+		["mission",    "Mission time"],
+		["risk",       "Existential risk"],
 	]
 	for r: Array in rows:
 		var row := HBoxContainer.new()
@@ -257,12 +263,19 @@ func _build_effects_summary(parent: VBoxContainer) -> void:
 func _refresh_effects() -> void:
 	if _effect_labels.is_empty():
 		return
-	_set_effect("science",  PoliticsData.science_mult(_state),  false)
-	_set_effect("compute",  PoliticsData.compute_mult(_state),  false)
-	_set_effect("minerals", PoliticsData.minerals_mult(_state), false)
-	_set_effect("energy",   PoliticsData.energy_mult(_state),   false)
-	# Mission time: a multiplier below 1.0 (shorter) is the beneficial direction.
-	_set_effect("mission",  PoliticsData.mission_dur_mult(_state), true)
+	_set_effect("science",    PoliticsData.science_mult(_state),       false)
+	_set_effect("compute",    PoliticsData.compute_mult(_state),       false)
+	_set_effect("minerals",   PoliticsData.minerals_mult(_state),      false)
+	_set_effect("energy",     PoliticsData.energy_mult(_state),        false)
+	_set_effect("pop_growth", PoliticsData.pop_growth_mult(_state),    false)
+	_set_effect("capacity",   PoliticsData.pop_capacity_mult(_state),  false)
+	_set_effect_years("life_exp", PoliticsData.life_expectancy_bonus(_state))
+	# CO₂ and mission time: a multiplier below 1.0 is the beneficial direction.
+	_set_effect("co2",        PoliticsData.co2_mult(_state),           true)
+	# Impact interval: a larger multiplier means rarer impacts (good).
+	_set_effect("asteroid",   PoliticsData.asteroid_gap_mult(_state),  false)
+	_set_effect("mission",    PoliticsData.mission_dur_mult(_state),   true)
+	_set_effect_pct("risk",   PoliticsData.existential_risk(_state))
 
 ## Update one effect label's text and colour.  `lower_is_better` flips the
 ## green/red sense (used for mission time, where shorter is good).
@@ -278,3 +291,25 @@ func _set_effect(key: String, m: float, lower_is_better: bool) -> void:
 		var beneficial: bool = (m < 1.0) if lower_is_better else (m > 1.0)
 		lbl.add_theme_color_override("font_color",
 			Color(0.45, 0.85, 0.55) if beneficial else Color(0.90, 0.55, 0.45))
+
+## Effect shown as a year delta (life expectancy): "+12 yr".  More is better.
+func _set_effect_years(key: String, years: float) -> void:
+	var lbl: Label = _effect_labels.get(key, null)
+	if lbl == null:
+		return
+	lbl.text = "%+d yr" % int(round(years))
+	if abs(years) < 0.5:
+		lbl.add_theme_color_override("font_color", Color(0.72, 0.72, 0.78))
+	else:
+		lbl.add_theme_color_override("font_color",
+			Color(0.45, 0.85, 0.55) if years > 0.0 else Color(0.90, 0.55, 0.45))
+
+## Effect shown as a percentage where lower is better (existential risk): "18%".
+func _set_effect_pct(key: String, frac: float) -> void:
+	var lbl: Label = _effect_labels.get(key, null)
+	if lbl == null:
+		return
+	lbl.text = "%d%%" % int(round(frac * 100.0))
+	# Green when low, red when high.
+	lbl.add_theme_color_override("font_color",
+		Color(0.45, 0.85, 0.55).lerp(Color(0.90, 0.45, 0.40), clampf(frac / 0.5, 0.0, 1.0)))

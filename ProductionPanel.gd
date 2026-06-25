@@ -226,7 +226,7 @@ func _form_label(parent: Control, text: String) -> void:
 
 ## Preferred display order for the category submenus; any unknown category is
 ## appended after these.
-const CATEGORY_ORDER: Array = ["materials", "chemicals", "fuels", "energy", "biologics"]
+const CATEGORY_ORDER: Array = ["metals", "materials", "electronics", "aerospace", "chemicals", "fuels", "biologics"]
 
 ## Rebuild the recipe dropdown as one submenu per category.
 func _populate_recipes() -> void:

@@ -8,9 +8,8 @@ const GRAPH_METRICS: Array = [
 	{"key": "science",            "label": "Science",     "color": Color(0.4,  0.9,  0.6),  "type": "float"},
 	{"key": "minerals",           "label": "Minerals",    "color": Color(0.9,  0.5,  0.2),  "type": "float"},
 	{"key": "energy",             "label": "Energy",      "color": Color(0.9,  0.9,  0.3),  "type": "float"},
-	{"key": "existential_risk",   "label": "Exist. Risk", "color": Color(0.9,  0.25, 0.25), "type": "percent"},
-	{"key": "ai_autonomy",        "label": "AI Autonomy", "color": Color(0.7,  0.35, 0.9),  "type": "percent"},
 	{"key": "colony_count",       "label": "Colonies",    "color": Color(0.5,  0.9,  0.8),  "type": "int"},
+	{"key": "life_expectancy",    "label": "Life Expectancy", "color": Color(0.95, 0.6,  0.75), "type": "int"},
 ]
 
 var _stats: Dictionary = {}
@@ -120,6 +119,10 @@ func push_snapshot(snap_year: int, data_dict: Dictionary) -> void:
 func clear_history() -> void:
 	if _graph != null:
 		_graph.clear_history()
+
+## The live history graph, so the extinction screen can mirror it.
+func get_graph() -> StatsGraph:
+	return _graph
 
 # ── Save / load ───────────────────────────────────────────────────────────────
 

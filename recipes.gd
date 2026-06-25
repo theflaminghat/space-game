@@ -4,7 +4,9 @@ class_name RecipeData
 ##
 ## Keys per recipe:
 ##   name        – display name
-##   category    – "materials" | "chemicals" | "fuels" | "energy" | "biologics"
+##   category    – "metals" | "materials" | "electronics" | "aerospace"
+##                  | "chemicals" | "fuels" | "biologics"
+##                  (groups the recipe in the Production panel's category dropdown)
 ##   inputs      – Dictionary { resource_or_compound → grams-per-second at rate 1× }
 ##   outputs     – Dictionary { resource_or_compound → grams-per-second at rate 1× }
 ##   requires    – research node id that must be completed (empty = always available)
@@ -30,7 +32,7 @@ const RECIPES: Array = [
 	# Hematite route (Earth / Mars): blast-furnace reduction of Fe2O3 with coke.
 	{
 		"name":        "Iron Smelting",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Blast-furnace reduction of hematite ore with coke to produce pig iron.",
 		"requires":    "",
 		"inputs":  {"Fe2O3": 10.0, "Coal": 3.0, "energy": 50.0},
@@ -41,7 +43,7 @@ const RECIPES: Array = [
 	# on planets where pyrite is the primary iron source.
 	{
 		"name":        "Pyrite Smelting",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Roast pyrite to iron oxide, then carbothermically reduce to metallic iron.",
 		"requires":    "",
 		"inputs":  {"FeS2": 8.0, "Coal": 2.0, "energy": 60.0},
@@ -51,7 +53,7 @@ const RECIPES: Array = [
 	# Venus crust carries ~9 % FeO by mass — an abundant, easily reduced feedstock.
 	{
 		"name":        "Wüstite Reduction",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Carbothermic reduction of wüstite (FeO) — the dominant iron ore in Venus' basaltic crust.",
 		"requires":    "",
 		"inputs":  {"FeO": 8.0, "Coal": 1.5, "energy": 40.0},
@@ -63,7 +65,7 @@ const RECIPES: Array = [
 	# Carbothermic reduction of quartz (all rocky planets).
 	{
 		"name":        "Silicon Refining",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Carbothermic reduction of quartz sand to metallurgical-grade silicon.",
 		"requires":    "metallurgy",
 		"inputs":  {"SiO2": 8.0, "Coal": 4.0, "energy": 120.0},
@@ -75,7 +77,7 @@ const RECIPES: Array = [
 	# Hall–Héroult electrolysis of alumina (all rocky planets).
 	{
 		"name":        "Aluminium Smelting",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Hall–Héroult electrolysis of alumina to primary aluminium.",
 		"requires":    "advanced_alloys",
 		"inputs":  {"Al2O3": 12.0, "energy": 200.0},
@@ -88,7 +90,7 @@ const RECIPES: Array = [
 	# 2MgO + Si → 2Mg + SiO2  (here simplified to pure electrolytic route).
 	{
 		"name":        "Magnesium Smelting",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Thermal reduction of periclase (MgO) to produce primary magnesium metal.",
 		"requires":    "metallurgy",
 		"inputs":  {"MgO": 6.0, "energy": 150.0},
@@ -98,7 +100,7 @@ const RECIPES: Array = [
 	# Abundant in Martian evaporite deposits; lower Mg yield than oxide route.
 	{
 		"name":        "Magnesium from Sulfate",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Thermal decomposition of Martian epsomite (MgSO₄) to recover magnesium metal.",
 		"requires":    "metallurgy",
 		"inputs":  {"MgSO4": 8.0, "Coal": 2.0, "energy": 180.0},
@@ -110,7 +112,7 @@ const RECIPES: Array = [
 	# Intermediate — convert calcite to quicklime (CaO) for use downstream.
 	{
 		"name":        "Lime Production",
-		"category":    "materials",
+		"category":    "chemicals",
 		"description": "Thermal decomposition of calcite to quicklime (CaO) and CO₂.",
 		"requires":    "",
 		"inputs":  {"CaCO3": 8.0, "energy": 40.0},
@@ -119,7 +121,7 @@ const RECIPES: Array = [
 	# Ca metal: electrolytic reduction of molten CaO (Fused-salt electrolysis).
 	{
 		"name":        "Calcium Electrolysis",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Fused-salt electrolysis of calcium oxide to produce reactive calcium metal.",
 		"requires":    "advanced_alloys",
 		"inputs":  {"CaO": 5.0, "energy": 120.0},
@@ -131,7 +133,7 @@ const RECIPES: Array = [
 	# Kroll process (all rocky planets with TiO2 in crust).
 	{
 		"name":        "Titanium Extraction",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Kroll-process chlorination and magnesiothermic reduction of rutile to sponge titanium.",
 		"requires":    "advanced_alloys",
 		"inputs":  {"TiO2": 6.0, "Coal": 2.0, "energy": 350.0},
@@ -144,7 +146,7 @@ const RECIPES: Array = [
 	# 2NaCl → 2Na + Cl₂  at ~600 °C.
 	{
 		"name":        "Sodium Electrolysis",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Downs-cell electrolysis of molten sodium chloride to produce sodium metal.",
 		"requires":    "metallurgy",
 		"inputs":  {"NaCl": 6.0, "energy": 80.0},
@@ -154,7 +156,7 @@ const RECIPES: Array = [
 	# Na2S → 2Na + S  (electrolytic, molten-salt bath).
 	{
 		"name":        "Sodium from Sulfide",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Electrolysis of molten sodium sulfide — the primary sodium ore in Mercury's reducing crust.",
 		"requires":    "metallurgy",
 		"inputs":  {"Na2S": 5.0, "energy": 100.0},
@@ -166,7 +168,7 @@ const RECIPES: Array = [
 	# Electrolytic reduction of K2O (Earth crust — 1.8 % K2O by mass).
 	{
 		"name":        "Potassium Reduction",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Electrolytic or metalothermic reduction of potassium oxide to produce potassium metal.",
 		"requires":    "metallurgy",
 		"inputs":  {"K2O": 5.0, "energy": 90.0},
@@ -178,7 +180,7 @@ const RECIPES: Array = [
 	# Pyrometallurgical smelting of chalcopyrite (Earth).
 	{
 		"name":        "Copper Smelting",
-		"category":    "materials",
+		"category":    "metals",
 		"description": "Roast and smelt chalcopyrite ore through matte smelting and converting to produce blister copper.",
 		"requires":    "metallurgy",
 		"inputs":  {"CuFeS2": 5.0, "energy": 90.0},
@@ -190,7 +192,7 @@ const RECIPES: Array = [
 	# Phosphate: wet-process digestion of P2O5 ore.
 	{
 		"name":        "Phosphate Processing",
-		"category":    "materials",
+		"category":    "chemicals",
 		"description": "Acid digestion of phosphate rock into concentrated phosphoric acid.",
 		"requires":    "industrial_mechanization",
 		"inputs":  {"P2O5": 5.0, "H2O": 3.0, "energy": 20.0},
@@ -220,7 +222,7 @@ const RECIPES: Array = [
 	# panel mass).  A Solar Farm building consumes 5 000 g (≈ one 200 W module).
 	{
 		"name":        "Solar Panel Assembly",
-		"category":    "materials",
+		"category":    "electronics",
 		"description": "Laminate silicon wafers between toughened glass sheets in an aluminium frame to produce photovoltaic solar panel modules.",
 		"requires":    "metallurgy",
 		"inputs":  {"Si": 12.0, "Glass": 35.0, "Al": 3.0, "energy": 2_000.0},
@@ -248,7 +250,7 @@ const RECIPES: Array = [
 	# interconnects and plastic packaging — the most energy-intensive recipe.
 	{
 		"name":        "Microchip Fabrication",
-		"category":    "materials",
+		"category":    "electronics",
 		"description": "Photolithographic fabrication of integrated circuits on silicon wafers with copper interconnects and plastic packaging.",
 		"requires":    "microprocessors",
 		"inputs":  {"Si": 5.0, "Cu": 1.0, "Plastic": 1.0, "energy": 1_500.0},
@@ -284,7 +286,7 @@ const RECIPES: Array = [
 	# Battery: sodium-ion cells using a graphene anode — bulk grid energy storage.
 	{
 		"name":        "Battery Production",
-		"category":    "materials",
+		"category":    "electronics",
 		"description": "Assemble sodium-ion cells with graphene anodes for grid-scale electrical storage.",
 		"requires":    "high_energy_density_power",
 		"inputs":  {"Na": 4.0, "Graphene": 2.0, "energy": 150.0},
@@ -293,7 +295,7 @@ const RECIPES: Array = [
 	# Superconductor: copper-oxide ceramic cuprate for magnets and lossless transmission.
 	{
 		"name":        "Superconductor Fabrication",
-		"category":    "materials",
+		"category":    "electronics",
 		"description": "Sinter copper-oxide ceramic into high-temperature superconducting tape for magnets and lossless power transmission.",
 		"requires":    "radiation_hardened_systems",
 		"inputs":  {"Cu": 2.0, "Ceramic": 2.0, "energy": 400.0},
@@ -304,7 +306,7 @@ const RECIPES: Array = [
 	# into space.
 	{
 		"name":        "Rocket Assembly",
-		"category":    "materials",
+		"category":    "aerospace",
 		"description": "Integrate an aluminium-alloy airframe, steel engines, and microchip avionics into a complete launch vehicle.",
 		"requires":    "early_rocketry",
 		"inputs":  {"Al": 8.0, "Steel": 4.0, "Microchip": 1.0, "energy": 800.0},
@@ -316,7 +318,7 @@ const RECIPES: Array = [
 	# swarm and the more power it beams back.
 	{
 		"name":        "Solar Satellite Assembly",
-		"category":    "materials",
+		"category":    "aerospace",
 		"description": "Integrate photovoltaic collectors, an aluminium spacecraft bus, and microchip avionics into a free-flying solar collector satellite for deployment to a solar-power swarm.",
 		"requires":    "space_power_infrastructure",
 		"inputs":  {"SolarPanel": 40.0, "Al": 12.0, "Microchip": 1.0, "energy": 1_500.0},
@@ -449,6 +451,80 @@ const RECIPES: Array = [
 		"requires":    "advanced_biomedical_engineering",
 		"inputs":  {"CaO": 3.0, "P2O5": 2.0, "H2O": 1.0, "energy": 40.0},
 		"outputs": {"minerals": 2.0},
+	},
+
+	# ── Advanced craftables ───────────────────────────────────────────────────────
+	# Each is built from existing crafted goods (all inputs are mineable or already
+	# producible), and gated on a deep-tech research node, giving several otherwise
+	# unused late-tree nodes a payload.
+
+	# Hydrogen — the other half of water electrolysis; a feedstock and propellant, and
+	# the input to antimatter synthesis.
+	{
+		"name":        "Hydrogen Electrolysis",
+		"category":    "chemicals",
+		"description": "Electrolyse water to recover hydrogen gas — a clean feedstock and propellant.",
+		"requires":    "",
+		"inputs":  {"H2O": 10.0, "energy": 70.0},
+		"outputs": {"H2": 6.0},
+	},
+	# Aerogel — ultralight silica solid for insulation and habitat shielding.
+	{
+		"name":        "Aerogel Synthesis",
+		"category":    "materials",
+		"description": "Supercritically dry a silica gel into aerogel — a near-weightless, near-transparent insulator for habitats and cryogenics.",
+		"requires":    "nanostructured_materials",
+		"inputs":  {"SiO2": 6.0, "energy": 300.0},
+		"outputs": {"Aerogel": 3.0},
+	},
+	# Carbon nanotube — the strongest tether material; the proper basis for elevators
+	# and megastructures.
+	{
+		"name":        "Carbon Nanotube Spinning",
+		"category":    "materials",
+		"description": "Spin single-walled carbon nanotubes from graphene feedstock — stronger and lighter than any composite.",
+		"requires":    "molecular_manufacturing",
+		"inputs":  {"Graphene": 4.0, "energy": 800.0},
+		"outputs": {"CarbonNanotube": 2.0},
+	},
+	# Metamaterial — engineered electromagnetic response: radiation shielding and
+	# low-observability skins (going quiet in the dark forest).
+	{
+		"name":        "Metamaterial Fabrication",
+		"category":    "materials",
+		"description": "Pattern sub-wavelength structures into a ceramic-metal matrix to steer electromagnetic radiation around what it shields.",
+		"requires":    "field_stabilized_materials",
+		"inputs":  {"Ceramic": 4.0, "Cu": 2.0, "Si": 2.0, "energy": 600.0},
+		"outputs": {"Metamaterial": 2.0},
+	},
+	# Self-healing composite — structures that reseal damage, keeping megastructures
+	# intact under bombardment.
+	{
+		"name":        "Self-Healing Composite Layup",
+		"category":    "materials",
+		"description": "Embed microvascular healing agents in a carbon-composite matrix so structural damage seals itself.",
+		"requires":    "self_healing_megastructures",
+		"inputs":  {"CarbonComposite": 3.0, "Plastic": 3.0, "energy": 500.0},
+		"outputs": {"SelfHealingComposite": 2.0},
+	},
+	# Quantum processor — superconducting qubit arrays; computation beyond classical chips.
+	{
+		"name":        "Quantum Processor Fabrication",
+		"category":    "electronics",
+		"description": "Fabricate superconducting qubit arrays in a cryogenic substrate for quantum computation far beyond any classical chip.",
+		"requires":    "quantum_computing",
+		"inputs":  {"Microchip": 3.0, "Superconductor": 2.0, "energy": 3_000.0},
+		"outputs": {"QuantumProcessor": 1.0},
+	},
+	# Antimatter — the densest fuel possible, at a staggering energy cost; fuels the
+	# highest-acceleration relativistic drives.
+	{
+		"name":        "Antimatter Synthesis",
+		"category":    "fuels",
+		"description": "Forge and magnetically bottle antiprotons — the most energy-dense fuel there is, made at enormous power cost.",
+		"requires":    "antimatter_handling",
+		"inputs":  {"H2": 4.0, "energy": 50_000.0},
+		"outputs": {"Antimatter": 0.5},
 	},
 ]
 

@@ -20,6 +20,11 @@ const COL_CURS: Color = Color(1.0,  1.0,  1.0,  0.25)
 const COL_LABL: Color = Color(0.45, 0.47, 0.58)
 const COL_EMPTY:Color = Color(0.35, 0.37, 0.45)
 
+## Cap on stored points.  When exceeded, history is halved (every other point kept),
+## which bounds memory and per-frame draw cost over very long sessions while keeping
+## the full time span visible — deep-time history just gets coarser, not truncated.
+const MAX_POINTS: int = 4000
+
 ## Parallel arrays — one entry per recorded year.
 var history_years: Array[int]   = []
 ## key → Array[float]   (same length as history_years)
@@ -61,7 +66,24 @@ func push_snapshot(year: int, data_dict: Dictionary) -> void:
 		else:
 			_cached_vmin[key] = minf(_cached_vmin[key], val)
 			_cached_vmax[key] = maxf(_cached_vmax[key], val)
+	if history_years.size() > MAX_POINTS:
+		_downsample()
 	queue_redraw()
+
+## Halve the stored resolution, keeping every other point.  Amortised O(1) per push
+## (runs only once every ~MAX_POINTS/2 snapshots).  Cached min/max are left intact —
+## they remain valid outer bounds for axis scaling.
+func _downsample() -> void:
+	var thinned_years: Array[int] = []
+	for i in range(0, history_years.size(), 2):
+		thinned_years.append(history_years[i])
+	history_years = thinned_years
+	for key: String in history_data:
+		var arr: Array = history_data[key]
+		var thinned: Array = []
+		for i in range(0, arr.size(), 2):
+			thinned.append(arr[i])
+		history_data[key] = thinned
 
 func clear_history() -> void:
 	history_years.clear()
