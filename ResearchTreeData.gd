@@ -491,8 +491,8 @@ static func build() -> Array:
 	# industrial_robotics → mass_production → industrial_mechanization chain)
 	nodes.append(make.call(
 		"autonomous_industrial_control",
-		"Industrial Automation",
-		"Software-directed, adaptive, partially autonomous industrial operation and fault handling.",
+		"Industrial AI",
+		"Software that plans and runs industry on its own — adaptive scheduling, fault handling, and standing-order execution. Unlocks the Automation panel, where you delegate building and launches to be carried out without you.",
 		["automated_logistics", "networked_computing"],
 		{"science": 155, "energy": 45},
 		15.0,
@@ -1098,15 +1098,18 @@ static func build() -> Array:
 		"space_power_infrastructure": {"energy_production": 0.35},
 		# NEW — Energy Storage improves how effectively produced energy is used
 		"energy_storage":             {"energy_production": 0.12},
-		# Industry / materials lane → matter production
+		# Industry / materials lane → matter production AND automation.  "automation"
+		# multiplies per-planet Manufacturing Capacity and lowers the labour each unit of
+		# capacity needs (Game._automation_factor / _process_production); self-replicating
+		# industry is the big jump that finally decouples output from population.
 		"metallurgy":                 {"matter_production": 0.10},
-		"mass_production_systems":    {"matter_production": 0.15},
-		"industrial_robotics":        {"matter_production": 0.20},
-		"automated_logistics":        {"matter_production": 0.20},
-		"autonomous_factories":       {"matter_production": 0.30},
-		"self_replicating_industry":  {"matter_production": 0.40},
+		"mass_production_systems":    {"matter_production": 0.15, "automation": 0.5},
+		"industrial_robotics":        {"matter_production": 0.20, "automation": 1.0},
+		"automated_logistics":        {"matter_production": 0.20, "automation": 1.0},
+		"autonomous_factories":       {"matter_production": 0.30, "automation": 2.0},
+		"self_replicating_industry":  {"matter_production": 0.40, "automation": 5.0},
 		# NEW — Additive Manufacturing reduces material waste → more output
-		"additive_manufacturing":     {"matter_production": 0.20},
+		"additive_manufacturing":     {"matter_production": 0.20, "automation": 0.5},
 		# NEW — Theory / forecasting lane → science production
 		"predictive_modeling":        {"science_production": 0.20},
 		"institutional_science":      {"research_speed":    0.12},

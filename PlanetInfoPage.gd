@@ -10,6 +10,8 @@ extends PanelContainer
 # Dynamically-created storage labels (added to stats_grid in _ready).
 var _storage_minerals_label: Label = null
 var _storage_energy_label:   Label = null
+## Manufacturing Capacity readout ("used / capacity"), added to stats_grid in _ready.
+var _mc_label: Label = null
 
 # Composition section (replaces the Tree node at runtime).
 var _composition_scroll:    ScrollContainer = null
@@ -196,6 +198,18 @@ func _ready() -> void:
 	composition_tree.hide()
 	var tree_idx: int = composition_tree.get_index()
 
+	# ── Manufacturing capacity row ────────────────────────────────────────────
+	# How much the world can run in the recipe panel at once (used / capacity, in
+	# work-units/day).  Factories raise the capacity; see Game's Manufacturing Capacity.
+	var _mc_key := Label.new()
+	_mc_key.text = "Manufacturing"
+	_mc_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_grid.add_child(_mc_key)
+	_mc_label = Label.new()
+	_mc_label.text = "-"
+	_mc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	stats_grid.add_child(_mc_label)
+
 	# ── Storage capacity rows ─────────────────────────────────────────────────
 	var _stor_min_key := Label.new()
 	_stor_min_key.text = "Matter Storage"
@@ -279,6 +293,19 @@ func set_planet_info(data: Dictionary) -> void:
 	energy_label.text     = Units.format_si_verbose(float(data.get("energy",  0.0)), "Watts")
 	population_label.text = _fmt_population(int(data.get("population", 0)))
 	compute_label.text    = Units.format_si_verbose(float(data.get("compute", 0.0)), "FLOP/s")
+
+	if _mc_label:
+		var mc_cap:  float = float(data.get("mc_capacity", 0.0))
+		var mc_used: float = float(data.get("mc_used", 0.0))
+		if mc_cap > 0.0:
+			_mc_label.text = "%s / %s" % [
+				Units.format_si_verbose(mc_used, ""), Units.format_si_verbose(mc_cap, "")]
+			# Amber when demand outstrips capacity (jobs on this world are throttled).
+			_mc_label.modulate = Color(0.95, 0.65, 0.30) if mc_used > mc_cap + 0.5 \
+				else Color(0.85, 0.85, 0.85)
+		else:
+			_mc_label.text = "-"
+			_mc_label.modulate = Color(0.85, 0.85, 0.85)
 
 	var mined: Dictionary = data.get("mined_resources",   {})
 	var inv:   Dictionary = data.get("compound_inventory", {})
@@ -402,6 +429,9 @@ func clear_planet_info() -> void:
 	energy_label.text      = "-"
 	population_label.text  = "-"
 	compute_label.text     = "-"
+	if _mc_label:
+		_mc_label.text = "-"
+		_mc_label.modulate = Color(0.85, 0.85, 0.85)
 	if _storage_minerals_label:
 		_storage_minerals_label.text = "-"
 		_storage_energy_label.text   = "-"

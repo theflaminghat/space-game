@@ -15,14 +15,6 @@ const TARGETS := [
 	"Jupiter", "Saturn", "Uranus", "Neptune", "Sun",
 ]
 
-const PLANET_ORBIT_AU := {
-	"Mercury": 0.387, "Venus": 0.723, "Earth": 1.0,   "Mars": 1.524,
-	"Jupiter": 5.203, "Saturn": 9.537, "Uranus": 19.191, "Neptune": 30.069,
-	# Close solar orbit (Parker-probe class, ~0.05 AU); shedding Earth's orbital
-	# speed to fall this far in makes the Sun the costliest destination.
-	"Sun": 0.05,
-}
-
 @onready var origin_option:   OptionButton  = $MarginContainer/VBoxContainer/FormGrid/OriginOption
 @onready var planet_option:   OptionButton  = $MarginContainer/VBoxContainer/FormGrid/PlanetOption
 @onready var mission_option:  OptionButton  = $MarginContainer/VBoxContainer/FormGrid/MissionOption
@@ -32,42 +24,18 @@ const PLANET_ORBIT_AU := {
 @onready var launch_button:   Button        = $MarginContainer/VBoxContainer/LaunchButton
 @onready var launch_list:     VBoxContainer = $MarginContainer/VBoxContainer/ScrollContainer/LaunchList
 
-# ── Acceleration control ───────────────────────────────────────────────────────
-# The ship runs a constant-acceleration (brachistochrone) transfer: thrust to the
-# midpoint, flip, decelerate.  Transit time for distance D at acceleration a is
-# t = 2·√(D/a), capped at the light-travel time D/c — you can approach c but never
-# beat it.  Higher acceleration = a much shorter trip (and much more energy).  The
-# slider is logarithmic because usable accelerations span many orders of magnitude;
-# its top end is raised by propulsion research (see Game._max_launch_accel).
-const ACCEL_MIN:        float = 1.0e-3   # m/s² — efficient low-thrust floor (≈ Hohmann time)
-const ACCEL_LOG_STEP:   float = 0.1      # slider granularity, in log10 decades
-const ACCEL_ENERGY_EXP: float = 0.35     # energy premium ∝ (a/ACCEL_MIN)^this
-const AU_METERS:        float = 1.495978707e11
-const LIGHT_SPEED:      float = 2.998e8   # m/s
-const STD_GRAVITY:      float = 9.80665   # m/s² per g (for display)
-## Days for an orbit-insertion launch from the surface of the origin planet itself.
-const LOCAL_ORBIT_DAYS: int   = 30
+# ── Fuel & acceleration ────────────────────────────────────────────────────────
+# The chosen FUEL fixes the transfer acceleration: faster fuels (fusion, antimatter)
+# are gated by propulsion research and cost far more to manufacture, so speed is paid
+# in fuel.  All trajectory cost/time math lives in LaunchPlanner (shared with the
+# AutomationPanel executor); this panel just feeds it the player's selections.
 
-# ── Launch-cost realism ─────────────────────────────────────────────────────────
-# Mission costs scale with the real Δv budget of the trajectory, so reaching a
-# distant or deep-gravity target costs far more propellant and energy than a
-# local orbit insertion.
-## Circular heliocentric orbital speed at 1 AU (Earth), km/s.  v(r) = this / √r.
-const V_EARTH_KMS: float          = 29.78
-## Reference Δv to climb from a planet's surface to orbit (km/s).  Every launch
-## pays it; interplanetary transfers add their Hohmann Δv on top.  Costs scale
-## with total Δv ÷ this, so a bare local orbit insertion is the 1.0× baseline.
-const SURFACE_TO_ORBIT_DV: float  = 9.0
-## Extra energy a worst-case launch window adds, on top of the transfer baseline.
-## The actual path depends on where the planets are: a poorly-phased target forces
-## a less efficient trajectory, scaling energy from 1.0× (optimal) up to 1+this.
-const PHASE_ENERGY_WEIGHT: float  = 1.0
-
-var _accel_slider: HSlider = null
-var _accel_label:  Label   = null
-## Currently selected acceleration (m/s²) and the research-gated maximum.
-var _accel:     float = ACCEL_MIN
-var _max_accel: float = 1.0e-2   # raised by propulsion research, pushed from Game
+## Fuel selector (replaces the old acceleration slider).
+var _fuel_option: OptionButton = null
+var _fuel_map:    Array        = []   # fuel-dropdown index → MissionData.FUELS index
+## Per-origin stock of rockets + fuels, pushed by Game.gd for the cost readout / gate:
+## { planet_lower → { "Rocket": n, "Propellant": n, ... } }.
+var _launch_stock: Dictionary = {}
 
 # ── Calendar date picker (replaces the old StartOption dropdown) ───────────────
 var _calendar: CalendarPicker = null
@@ -133,35 +101,22 @@ func _ready() -> void:
 	var btn_idx := launch_button.get_index()
 	vbox.move_child(date_section, btn_idx)
 
-	# Acceleration slider (log scale), injected just above the start-date section.
-	var accel_section := VBoxContainer.new()
-	accel_section.add_theme_constant_override("separation", 2)
-
-	var accel_header := HBoxContainer.new()
-	var accel_lbl := Label.new()
-	accel_lbl.text = "Acceleration:"
-	accel_lbl.add_theme_font_size_override("font_size", 11)
-	accel_lbl.modulate = Color(0.75, 0.75, 0.75)
-	accel_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	accel_header.add_child(accel_lbl)
-	_accel_label = Label.new()
-	_accel_label.add_theme_font_size_override("font_size", 11)
-	_accel_label.modulate = Color(0.85, 0.85, 0.95)
-	_accel_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	accel_header.add_child(_accel_label)
-	accel_section.add_child(accel_header)
-
-	_accel_slider = HSlider.new()
-	_accel_slider.min_value  = log(ACCEL_MIN) / log(10.0)        # log10 of min accel
-	_accel_slider.max_value  = log(_max_accel) / log(10.0)       # extended by research
-	_accel_slider.step       = ACCEL_LOG_STEP
-	_accel_slider.value      = log(ACCEL_MIN) / log(10.0)        # default: efficient/cheap
-	_accel_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_accel_slider.value_changed.connect(_on_accel_changed)
-	accel_section.add_child(_accel_slider)
-
-	vbox.add_child(accel_section)
-	vbox.move_child(accel_section, date_section.get_index())
+	# Fuel selector, injected just above the start-date section.  The chosen fuel sets
+	# the transfer acceleration and is what the launch consumes.
+	var fuel_section := VBoxContainer.new()
+	fuel_section.add_theme_constant_override("separation", 2)
+	var fuel_lbl := Label.new()
+	fuel_lbl.text = "Fuel:"
+	fuel_lbl.add_theme_font_size_override("font_size", 11)
+	fuel_lbl.modulate = Color(0.75, 0.75, 0.75)
+	fuel_section.add_child(fuel_lbl)
+	_fuel_option = OptionButton.new()
+	_fuel_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_fuel_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
+	fuel_section.add_child(_fuel_option)
+	vbox.add_child(fuel_section)
+	vbox.move_child(fuel_section, date_section.get_index())
+	_populate_fuels()
 
 	_populate_origin()
 	_populate_planets()
@@ -174,7 +129,6 @@ func _ready() -> void:
 	arrival_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
 	launch_button.pressed.connect(_on_launch_pressed)
 	_update_arrival_options()
-	_update_accel_label()
 	_update_duration()
 	_update_cost()
 
@@ -272,34 +226,32 @@ func _populate_arrival() -> void:
 	arrival_option.add_item("Land")
 
 # ── Duration ─────────────────────────────────────────────────────────────────
+# The trajectory math itself lives in LaunchPlanner (shared with the automation
+# executor); these wrappers just feed it the panel's current selections + state.
 
-func _compute_hohmann_days(origin_name: String, target_name: String) -> int:
-	var a1: float = PLANET_ORBIT_AU.get(origin_name, 1.0)
-	var a2: float = PLANET_ORBIT_AU.get(target_name, 1.0)
-	return int(365.25 / 2.0 * pow((a1 + a2) / 2.0, 1.5))
+## Selected origin / target names ("" when nothing valid is chosen).
+func _origin_name() -> String:
+	var o := origin_option.selected
+	return PLANETS[o] if o >= 0 and o < PLANETS.size() else ""
 
-## Heliocentric Hohmann transfer Δv (km/s) between two circular orbits (AU).
-## Sum of the periapsis and apoapsis burns; 0 when origin and target coincide.
-func _hohmann_delta_v(r1: float, r2: float) -> float:
-	if is_equal_approx(r1, r2):
-		return 0.0
-	var vc1: float = V_EARTH_KMS / sqrt(r1)
-	var vc2: float = V_EARTH_KMS / sqrt(r2)
-	var dv1: float = absf(vc1 * (sqrt(2.0 * r2 / (r1 + r2)) - 1.0))
-	var dv2: float = absf(vc2 * (1.0 - sqrt(2.0 * r1 / (r1 + r2))))
-	return dv1 + dv2
+func _target_name() -> String:
+	var t := planet_option.selected
+	return TARGETS[t] if t >= 0 and t < TARGETS.size() else ""
+
+## Days from "now" to the chosen start date (planets are propagated to that date).
+func _offset_days() -> float:
+	if _calendar:
+		return float(_calendar.get_offset_days(_cur_year, _cur_month, _cur_day))
+	return 0.0
 
 ## Cost multiplier from the trajectory's total Δv relative to a bare surface-to-
 ## orbit launch.  Local orbit → 1.0×; Earth→Mars ≈ 1.6×; Earth→Neptune ≈ 2.7×.
 func _difficulty_factor() -> float:
-	var o_idx := origin_option.selected
-	var t_idx := planet_option.selected
-	if o_idx < 0 or t_idx < 0:
+	var o := _origin_name()
+	var t := _target_name()
+	if o == "" or t == "":
 		return 1.0
-	var r1: float = float(PLANET_ORBIT_AU.get(PLANETS[o_idx], 1.0))
-	var r2: float = float(PLANET_ORBIT_AU.get(TARGETS[t_idx], 1.0))
-	var total_dv: float = SURFACE_TO_ORBIT_DV + _hohmann_delta_v(r1, r2)
-	return total_dv / SURFACE_TO_ORBIT_DV
+	return LaunchPlanner.difficulty_factor(o, t)
 
 ## Push the planets' live orbital angles (from Game.gd) and refresh the cost,
 ## which now depends on the actual launch-window geometry.
@@ -314,86 +266,57 @@ func set_mission_duration_mult(m: float) -> void:
 	_mission_dur_mult = m
 	_update_duration()
 
-## Mean motion (rad/day) of a circular orbit at semi-major axis a_au.
-func _mean_motion(a_au: float) -> float:
-	return TAU / (365.25 * pow(a_au, 1.5))
-
-## Launch-window energy multiplier (≥ 1.0) from the *actual* path between the two
-## planets.  A Hohmann transfer only rendezvouses if the target leads the origin
-## by a specific phase angle at departure; the further the real configuration (at
-## the chosen start date) is from that ideal, the more energy the trajectory needs.
+## Launch-window energy multiplier (≥ 1.0) from the actual path between the planets
+## at the chosen start date (see LaunchPlanner.path_energy_factor).
 func _path_energy_factor() -> float:
-	var o_idx := origin_option.selected
-	var t_idx := planet_option.selected
-	if o_idx < 0 or t_idx < 0:
+	var o := _origin_name()
+	var t := _target_name()
+	if o == "" or t == "":
 		return 1.0
-	var o_name: String = PLANETS[o_idx]
-	var t_name: String = TARGETS[t_idx]
-	if o_name == t_name:
-		return 1.0   # local orbit — no interplanetary path
-	var ol := o_name.to_lower()
-	var tl := t_name.to_lower()
-	if not (_planet_angles.has(ol) and _planet_angles.has(tl)):
-		return 1.0   # no live position data yet
-
-	var a1: float = float(PLANET_ORBIT_AU.get(o_name, 1.0))
-	var a2: float = float(PLANET_ORBIT_AU.get(t_name, 1.0))
-
-	# Propagate both planets forward to the chosen start date so a future launch
-	# date can target a better window.
-	var offset_days: float = 0.0
-	if _calendar:
-		offset_days = float(_calendar.get_offset_days(_cur_year, _cur_month, _cur_day))
-	var ang1: float = float(_planet_angles[ol]) + _mean_motion(a1) * offset_days
-	var ang2: float = float(_planet_angles[tl]) + _mean_motion(a2) * offset_days
-
-	# Ideal Hohmann phase: how far the target should lead the origin at departure.
-	var ideal_lead: float = PI * (1.0 - pow((a1 + a2) / (2.0 * a2), 1.5))
-	var lead: float  = fposmod(ang2 - ang1, TAU)
-	var ideal: float = fposmod(ideal_lead, TAU)
-	var diff: float = absf(lead - ideal)
-	diff = minf(diff, TAU - diff)            # angular error in [0, π]
-	return 1.0 + PHASE_ENERGY_WEIGHT * (diff / PI)
+	return LaunchPlanner.path_energy_factor(o, t, _planet_angles, _offset_days())
 
 ## Short label describing how good the current launch window is.
 func _window_label(pf: float) -> String:
-	var x: float = (pf - 1.0) / PHASE_ENERGY_WEIGHT   # 0 = optimal, 1 = worst
+	var x: float = (pf - 1.0) / LaunchPlanner.PHASE_ENERGY_WEIGHT   # 0 = optimal, 1 = worst
 	if x < 0.15: return "optimal"
 	if x < 0.45: return "good"
 	if x < 0.75: return "fair"
 	return "poor"
 
-## Slider moved → read the log-scale value back into a real acceleration.
-func _on_accel_changed(value: float) -> void:
-	_accel = pow(10.0, value)
-	_update_accel_label()
+## Repopulate the fuel dropdown with the propellants current research has unlocked.
+func _populate_fuels() -> void:
+	if _fuel_option == null:
+		return
+	var prev_id: String = str(_selected_fuel().get("id", ""))
+	_fuel_option.clear()
+	_fuel_map.clear()
+	for i in range(MissionData.FUELS.size()):
+		var f: Dictionary = MissionData.FUELS[i]
+		var req: String = str(f.get("requires", ""))
+		if req != "" and not ResearchTree.is_unlocked(req):
+			continue
+		_fuel_option.add_item(str(f["name"]))
+		_fuel_map.append(i)
+		if str(f["id"]) == prev_id:
+			_fuel_option.selected = _fuel_map.size() - 1
+	if _fuel_option.selected < 0 and _fuel_option.item_count > 0:
+		_fuel_option.selected = 0
+
+## The selected fuel definition (defaults to the first/chemical fuel).
+func _selected_fuel() -> Dictionary:
+	if _fuel_option == null or _fuel_option.selected < 0 or _fuel_option.selected >= _fuel_map.size():
+		return MissionData.FUELS[0]
+	return MissionData.FUELS[_fuel_map[_fuel_option.selected]]
+
+## Transfer acceleration (m/s²) the selected fuel provides.
+func _selected_accel() -> float:
+	return float(_selected_fuel().get("accel", 1.0e-2))
+
+## Called by Game.gd to refresh available fuels after a research unlock.
+func refresh_fuels() -> void:
+	_populate_fuels()
 	_update_duration()
 	_update_cost()
-
-## Push the research-gated maximum acceleration (from Game) and re-range the slider.
-func set_max_accel(a: float) -> void:
-	_max_accel = maxf(a, ACCEL_MIN)
-	if _accel_slider:
-		_accel_slider.max_value = log(_max_accel) / log(10.0)
-		_accel = clampf(_accel, ACCEL_MIN, _max_accel)
-		_accel_slider.value = log(_accel) / log(10.0)
-	_update_accel_label()
-	_update_duration()
-	_update_cost()
-
-func _update_accel_label() -> void:
-	if _accel_label:
-		_accel_label.text = _fmt_accel(_accel)
-
-## "0.001 m/s²", "0.10 g", "2.5 g" …  (GDScript's % has no %g specifier).
-func _fmt_accel(a: float) -> String:
-	if a >= STD_GRAVITY * 0.1:
-		return "%.2f g" % (a / STD_GRAVITY)
-	if a >= 0.1:
-		return "%.2f m/s²" % a
-	if a >= 0.001:
-		return "%.3f m/s²" % a
-	return "%.5f m/s²" % a
 
 func _is_local_orbit() -> bool:
 	var o_idx := origin_option.selected
@@ -402,50 +325,18 @@ func _is_local_orbit() -> bool:
 		return false
 	return PLANETS[o_idx] == TARGETS[t_idx] and arrival_option.selected == 0
 
-## Straight-line distance the ship crosses (AU): the live separation between the
-## origin and target at the chosen start date.  Falls back to the orbit radii.
-func _transfer_distance_au() -> float:
-	var o_idx := origin_option.selected
-	var t_idx := planet_option.selected
-	if o_idx < 0 or t_idx < 0:
-		return 0.0
-	var o_name: String = PLANETS[o_idx]
-	var t_name: String = TARGETS[t_idx]
-	var r1: float = float(PLANET_ORBIT_AU.get(o_name, 1.0))
-	var r2: float = float(PLANET_ORBIT_AU.get(t_name, 1.0))
-	var ol := o_name.to_lower()
-	var tl := t_name.to_lower()
-	if _planet_angles.has(ol) and _planet_angles.has(tl):
-		var offset_days: float = 0.0
-		if _calendar:
-			offset_days = float(_calendar.get_offset_days(_cur_year, _cur_month, _cur_day))
-		var a1: float = float(_planet_angles[ol]) + _mean_motion(r1) * offset_days
-		var a2: float = float(_planet_angles[tl]) + _mean_motion(r2) * offset_days
-		var p1 := Vector2(r1 * sin(a1), r1 * cos(a1))
-		var p2 := Vector2(r2 * sin(a2), r2 * cos(a2))
-		return maxf(p1.distance_to(p2), 0.001)
-	# No live data: use a representative separation (mean of closest and farthest).
-	return maxf((r1 + r2 + absf(r2 - r1)) * 0.5, 0.001)
+## Combined duration multiplier: origin infrastructure (Space Elevator) × policy.
+func _duration_mult() -> float:
+	return float(_origin_mods().get("duration", 1.0)) * _mission_dur_mult
 
 func _selected_duration_days() -> int:
-	var o_idx := origin_option.selected
-	var t_idx := planet_option.selected
-	if o_idx < 0 or t_idx < 0:
+	var o := _origin_name()
+	var t := _target_name()
+	if o == "" or t == "":
 		return 0
-	var origin_name: String = PLANETS[o_idx]
-	var target_name: String = TARGETS[t_idx]
-	# Combine the origin's infrastructure discount (Space Elevator) with the global
-	# policy multiplier (nuclear propulsion) so the shown time is the real time.
-	var dmult: float = float(_origin_mods().get("duration", 1.0)) * _mission_dur_mult
-	if origin_name == target_name:
-		# Surface-to-orbit insertion — fixed baseline, not a brachistochrone cruise.
-		if arrival_option.selected == 0:   # Orbit
-			return maxi(1, int(round(LOCAL_ORBIT_DAYS * dmult)))
-		return 0
-	# Brachistochrone: t = 2·√(D/a), floored at light-travel time D/c.
-	var d_m: float = _transfer_distance_au() * AU_METERS
-	var t_s: float = maxf(2.0 * sqrt(d_m / _accel), d_m / LIGHT_SPEED)
-	return maxi(1, int(round(t_s / 86400.0 * dmult)))
+	var arrival: String = "land" if arrival_option.selected == 1 else "orbit"
+	return LaunchPlanner.duration_days(
+		o, t, arrival, _selected_accel(), _planet_angles, _offset_days(), _duration_mult())
 
 func _update_duration() -> void:
 	var days := _selected_duration_days()
@@ -461,8 +352,8 @@ func _update_duration() -> void:
 		duration_value.text = "%s  (local orbit insertion)%s" % [_format_days(days), elevator]
 	else:
 		# Flag transfers that are pinned at the light-travel-time floor.
-		var d_m: float = _transfer_distance_au() * AU_METERS
-		var light_limited: bool = 2.0 * sqrt(d_m / _accel) <= d_m / LIGHT_SPEED
+		var light_limited: bool = LaunchPlanner.is_light_limited(
+			_origin_name(), _target_name(), _selected_accel(), _planet_angles, _offset_days())
 		var tag: String = "  (light-speed limit)" if light_limited else ""
 		duration_value.text = _format_days(days) + tag + elevator
 
@@ -482,13 +373,20 @@ func _update_cost() -> void:
 	if idx < 0 or idx >= MissionData.MISSION_TYPES.size():
 		cost_value.text = "-"
 		return
-	var txt: String = Units.format_cost(_actual_cost(idx))
-	# Surface the launch-window quality so the player can see why energy varies and
+	var fuel: Dictionary = _selected_fuel()
+	var rockets: int  = _mission_rockets(idx)
+	var fuel_amt: int = _mission_fuel(idx)
+	var have_r: int = _origin_stock("Rocket")
+	var have_f: int = _origin_stock(str(fuel["id"]))
+	var txt: String = "%d Rocket (have %d)%s\n%d %s (have %d)%s" % [
+		rockets, have_r, ("" if have_r >= rockets else "  ✗"),
+		fuel_amt, str(fuel["name"]), have_f, ("" if have_f >= fuel_amt else "  ✗")]
+	# Surface the launch-window quality so the player can see why fuel varies and
 	# can pick a better start date.
 	if not _is_local_orbit():
 		var pf: float = _path_energy_factor()
 		if pf > 1.005:
-			txt += "   (+%d%% energy — %s window)" % [
+			txt += "\n(+%d%% fuel — %s window)" % [
 				int(round((pf - 1.0) * 100.0)), _window_label(pf)]
 	# Solar Deployment: show the satellite payload and why it might be blocked.
 	if MissionData.MISSION_TYPES[idx].get("sun_only", false):
@@ -503,31 +401,35 @@ func _update_cost() -> void:
 			txt += "  — none in stock at origin"
 	cost_value.text = txt
 
-## Base mission cost scaled by destination Δv, launch window, and how hard the
-## ship burns: higher acceleration spends much more energy (∝ peak kinetic energy),
-## so a near-light dash costs orders of magnitude more than an efficient cruise.
-func _actual_cost(mission_idx: int) -> Dictionary:
-	var base: Dictionary = MissionData.MISSION_TYPES[mission_idx].get("cost", {})
-	# Scale propellant (minerals) and energy by the destination's Δv difficulty —
-	# a Neptune transfer burns far more than a local orbit insertion.
-	var diff: float = _difficulty_factor()
-	var cost: Dictionary = {}
-	for k: String in base:
-		cost[k] = float(base[k]) * diff
-	# The actual path between the planets (launch-window phasing) scales the energy
-	# the trajectory demands — a badly-aligned target needs a less efficient burn.
-	if cost.has("energy"):
-		cost["energy"] = float(cost["energy"]) * _path_energy_factor()
-	# Acceleration premium: energy grows with how hard the ship thrusts above the
-	# efficient low-thrust floor (1.0× at ACCEL_MIN).
-	if cost.has("energy"):
-		var accel_premium: float = pow(_accel / ACCEL_MIN, ACCEL_ENERGY_EXP)
-		cost["energy"] = float(cost["energy"]) * accel_premium
-	# Origin-infrastructure discount (e.g. a Space Elevator), then round to ints.
-	var cmult: float = float(_origin_mods().get("cost", 1.0))
-	for k: String in cost:
-		cost[k] = maxi(0, int(round(float(cost[k]) * cmult)))
-	return cost
+## Rockets (vehicle mass) the mission needs, via LaunchPlanner with the origin's
+## infrastructure discount (e.g. a Space Elevator).
+func _mission_rockets(mission_idx: int) -> int:
+	var o := _origin_name()
+	var t := _target_name()
+	if o == "" or t == "":
+		return 1
+	return LaunchPlanner.rockets(mission_idx, o, t, float(_origin_mods().get("cost", 1.0)))
+
+## Fuel units the mission burns, via LaunchPlanner; consumed as the selected propellant.
+func _mission_fuel(mission_idx: int) -> int:
+	var o := _origin_name()
+	var t := _target_name()
+	if o == "" or t == "":
+		return 0
+	return LaunchPlanner.fuel(
+		mission_idx, o, t, _planet_angles, _offset_days(), float(_origin_mods().get("cost", 1.0)))
+
+## Stock of a good (rockets or a fuel) at the currently-selected origin.
+func _origin_stock(key: String) -> int:
+	var o := origin_option.selected
+	if o < 0 or o >= PLANETS.size():
+		return 0
+	return int((_launch_stock.get(PLANETS[o].to_lower(), {}) as Dictionary).get(key, 0))
+
+## Push the per-origin rocket + fuel stock (from Game.gd) for the cost readout / gate.
+func set_launch_stock(stock: Dictionary) -> void:
+	_launch_stock = stock
+	_update_cost()
 
 # ── Launch ───────────────────────────────────────────────────────────────────
 
@@ -546,7 +448,12 @@ func _on_launch_pressed() -> void:
 	if MissionData.MISSION_TYPES[m_idx].get("sun_only", false):
 		if target_name != "Sun" or _payload_batch(m_idx) <= 0:
 			return
-	var cost: Dictionary = _actual_cost(m_idx)
+	var fuel: Dictionary = _selected_fuel()
+	var rockets: int  = _mission_rockets(m_idx)
+	var fuel_amt: int = _mission_fuel(m_idx)
+	# Don't fly if the origin can't supply the vehicle or its fuel.
+	if _origin_stock("Rocket") < rockets or _origin_stock(str(fuel["id"])) < fuel_amt:
+		return
 	var start_offset: int = 0
 	if _calendar:
 		start_offset = _calendar.get_offset_days(_cur_year, _cur_month, _cur_day)
@@ -556,7 +463,9 @@ func _on_launch_pressed() -> void:
 		"target":       target_name.to_lower(),
 		"start_offset": start_offset,
 		"duration":     duration,
-		"actual_cost":  cost,
+		"rockets":      rockets,
+		"fuel_id":      str(fuel["id"]),
+		"fuel_amount":  fuel_amt,
 		"arrival":      "land" if arrival_option.selected == 1 else "orbit",
 	})
 

@@ -623,12 +623,13 @@ size_flags_vertical = 3
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="PlanetBar" type="HBoxContainer" parent="main_ui" unique_id=400001]
+[node name="PlanetBar" type="VBoxContainer" parent="main_ui" unique_id=400001]
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
-offset_top = -68.0
-offset_right = 648.0
+offset_top = -610.0
+offset_right = 72.0
+grow_vertical = 0
 
 [node name="sun_button" type="Button" parent="main_ui/PlanetBar" unique_id=400002]
 custom_minimum_size = Vector2(64, 64)

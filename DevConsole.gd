@@ -103,6 +103,7 @@ func _run(cmd: String) -> void:
 			_log("  [color=#ffd24a]solar[/color] | redgiant  — extinction: solar envelope expansion")
 			_log("  [color=#ffd24a]nebula[/color]            — extinction: planetary nebula")
 			_log("  [color=#ffd24a]extinct[/color] [cause…]  — generic extinction with a custom cause")
+			_log("  [color=#ffd24a]sandbox[/color]           — (re)write the god-mode sandbox save slot")
 			_log("  [color=#ffd24a]clear[/color]             — clear this log")
 			_log("  [color=#ffd24a]close[/color]             — close the console")
 		"impact":
@@ -120,6 +121,9 @@ func _run(cmd: String) -> void:
 		"extinct":
 			var cause := " ".join(args) if not args.is_empty() else "Console-triggered extinction"
 			_extinct(cause, "Extinction triggered from the developer console.")
+		"sandbox":
+			SandboxSave.write()
+			_ok("wrote sandbox save → load \"%s\" from the start menu" % SandboxSave.SLOT_NAME)
 		"clear":
 			_output.clear()
 		"close":

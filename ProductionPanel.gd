@@ -42,6 +42,9 @@ var _add_button:     Button       = null
 var _job_list:       VBoxContainer = null
 var _inputs_label:   Label        = null
 var _outputs_label:  Label        = null
+var _mc_label:       Label        = null
+## planet_lower → { "capacity": work/day, "demand": work/day }, pushed by Game.gd.
+var _mc_state:       Dictionary   = {}
 
 # ── Log-scale helpers ────────────────────────────────────────────────────────────
 
@@ -95,9 +98,34 @@ func set_job_status(job_id: int, running: bool, missing_input: String = "") -> v
 	if running:
 		lbl.text    = "● running"
 		lbl.modulate = Color(0.35, 0.80, 0.45)
+	elif missing_input == "capacity":
+		# Throttled by the world's Manufacturing Capacity, not an input shortage.
+		lbl.text    = "⚙ capacity limited"
+		lbl.modulate = Color(0.70, 0.80, 0.95)
 	else:
 		lbl.text    = "⚠ missing: %s" % missing_input if missing_input != "" else "⚠ stalled"
 		lbl.modulate = Color(0.90, 0.55, 0.20)
+
+## Push the per-planet Manufacturing Capacity state (from Game.gd) for the readout.
+func set_mc_state(state: Dictionary) -> void:
+	_mc_state = state
+	_update_mc_label()
+
+## Refresh the capacity readout for the currently-selected location.
+func _update_mc_label() -> void:
+	if _mc_label == null or _planet_option == null:
+		return
+	var idx := _planet_option.selected
+	if idx < 0 or idx >= PLANETS.size():
+		_mc_label.text = ""
+		return
+	var info: Dictionary = _mc_state.get(str(PLANETS[idx]).to_lower(), {})
+	var cap: float = float(info.get("capacity", 0.0))
+	var used: float = float(info.get("demand", 0.0))
+	_mc_label.text = "Capacity %s / %s" % [
+		Units.format_si_verbose(used, ""), Units.format_si_verbose(cap, "")]
+	# Tint amber when demand outstrips capacity (jobs on this world are throttled).
+	_mc_label.modulate = Color(0.95, 0.65, 0.30) if used > cap + 0.5 else Color(0.70, 0.80, 0.95)
 
 ## Returns a serialisable copy of the current job list.
 func get_jobs() -> Array:
@@ -149,6 +177,7 @@ func _build_ui() -> void:
 	_planet_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for p in PLANETS:
 		_planet_option.add_item(p)
+	_planet_option.item_selected.connect(func(_i): _update_mc_label())
 	form.add_child(_planet_option)
 
 	_form_label(form, "Rate:")
@@ -196,10 +225,22 @@ func _build_ui() -> void:
 	vbox.add_child(HSeparator.new())
 
 	# ── Active jobs section ──────────────────────────────────────────────────────
+	var jobs_header := HBoxContainer.new()
+	jobs_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(jobs_header)
+
 	var jobs_label := Label.new()
 	jobs_label.text = "Active Production"
 	jobs_label.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(jobs_label)
+	jobs_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	jobs_header.add_child(jobs_label)
+
+	# Per-world Manufacturing Capacity readout for the selected location.
+	_mc_label = Label.new()
+	_mc_label.add_theme_font_size_override("font_size", 11)
+	_mc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_mc_label.modulate = Color(0.70, 0.80, 0.95)
+	jobs_header.add_child(_mc_label)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL

@@ -11,6 +11,10 @@ const GAME_SCENE := "res://node_3d.tscn"
 
 func _ready() -> void:
 	_ensure_save_dir()
+	# Make the god-mode sandbox slot available if it isn't already (non-destructive —
+	# never overwrites an existing file, so a player can save over the slot if they want).
+	if not FileAccess.file_exists(SandboxSave.SAVE_PATH):
+		SandboxSave.write()
 	_refresh_save_list()
 
 

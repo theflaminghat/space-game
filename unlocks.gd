@@ -3,6 +3,9 @@ class_name BuildingUnlocks
 const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Solar Farm":      "",
 	"Mine":            "",
+	"Workshop":          "",
+	"Factory":           "mass_production_systems",
+	"Automated Factory": "autonomous_factories",
 	"Nuclear Plant":   "nuclear_power",
 	"Research Lab":    "",
 	"Automated Mine":  "industrial_robotics",
@@ -10,9 +13,13 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Colony Dome":     "space_habitation_systems",
 	"Fusion Reactor":  "fusion_engineering",
 	"AI Research Hub": "machine_learning_systems",
+	"Orbital Laser":   "space_power_infrastructure",
 	"Space Elevator":  "nanostructured_materials",
 	"Matter Depot":    "",
 	"Battery Bank":    "",
+	"Flywheel Array":  "",
+	"Pumped Hydro Storage": "",
 	"Orbital Vault":   "automated_logistics",
 	"Orbital Battery": "automated_logistics",
+	"Superconducting Storage Ring": "superconducting_systems",
 }

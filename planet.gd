@@ -23,6 +23,16 @@ var _rings: MeshInstance3D = null    # planetary rings (gas giants only)
 var _blur_torus: MeshInstance3D = null  # translucent motion-blur ring shown post-freeze
 var _body_visual_radius: float = 0.0    # apparent radius (game units); sizes the blur tube
 
+## Cosmetic moons orbiting this body in its local (scaled) frame, so they track and
+## size with the planet automatically.  Each entry: { node, radius, speed, angle, incl }.
+var _moons: Array = []
+
+## How many moons each body shows, by lowercase name.  Roughly mirrors the major
+## satellites of each world; bodies absent here (Mercury, Venus, the Sun) get none.
+const MOON_COUNTS := {
+	"earth": 1, "mars": 2, "jupiter": 4, "saturn": 4, "uranus": 3, "neptune": 2,
+}
+
 ## Per-gas-giant ring appearance.  Radii are multiples of the planet's own
 ## radius; tilt matches each body's real axial tilt (Uranus rings are nearly
 ## perpendicular to the ecliptic).  Alpha sets overall ring prominence.
@@ -448,6 +458,7 @@ func _process(delta: float) -> void:
 		_create_blur_torus()
 		if type == Type.GAS_GIANT:
 			_create_rings()
+		_create_moons()
 		_sync_visibility()
 
 	# Stellar evolution — update once per year so it has zero per-frame cost.
@@ -478,6 +489,12 @@ func _process(delta: float) -> void:
 		var angular_velocity: float = (TAU / (EARTH_ORBIT_DAYS * SolarSystem.seconds_per_day)) * speed
 		orbit_angle += angular_velocity * delta
 		_update_position()
+
+	# Moons spin at a steady real-time rate (cosmetic), decoupled from the wildly
+	# varying sim timescale.  Only reached when the system is active and unpaused, so
+	# they hold still exactly when the planet does.
+	if not _moons.is_empty():
+		_update_moons(delta)
 
 # ── Keplerian position update ─────────────────────────────────────────────────
 
@@ -530,6 +547,67 @@ func _update_position() -> void:
 		0.0,
 		orbit_radius * cos(orbit_angle)
 	)
+
+# ── Moons ─────────────────────────────────────────────────────────────────────
+
+## Spawn this body's cosmetic moons as children, so they live in the planet's scaled
+## local frame: the body has radius 0.5 here, so orbits a few units out read as a few
+## body-radii and scale with the planet.  Variety is seeded from the name so it's
+## stable across runs and doesn't disturb the global RNG.
+func _create_moons() -> void:
+	var count: int = int(MOON_COUNTS.get(name.to_lower(), 0))
+	if count <= 0:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(str(name))
+	for i in range(count):
+		var radius: float = 1.3 + 0.55 * float(i) + rng.randf_range(-0.1, 0.1)
+		var msize: float  = clampf(0.22 - 0.02 * float(i), 0.08, 0.22)
+
+		var moon := MeshInstance3D.new()
+		moon.name = "%s_moon_%d" % [name, i]
+		var sphere := SphereMesh.new()
+		sphere.radius = 0.5
+		sphere.height = 1.0
+		sphere.radial_segments = 12
+		sphere.rings = 6
+		moon.mesh = sphere
+		moon.scale = Vector3(msize, msize, msize)
+		moon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+		var mat := StandardMaterial3D.new()
+		var g: float = rng.randf_range(0.55, 0.80)
+		mat.albedo_color = Color(g, g, g * 0.96)
+		# A little self-emission keeps moons readable even on the night side / when the
+		# scene has no light reaching them.
+		mat.emission_enabled = true
+		mat.emission = Color(g, g, g)
+		mat.emission_energy_multiplier = 0.18
+		moon.set_surface_override_material(0, mat)
+		add_child(moon)
+
+		_moons.append({
+			"node":   moon,
+			"radius": radius,
+			"speed":  rng.randf_range(0.5, 1.3) * (1.0 if i % 2 == 0 else -1.0),
+			"angle":  rng.randf_range(0.0, TAU),
+			"incl":   rng.randf_range(-0.35, 0.35),
+		})
+	_update_moons(0.0)
+
+## Advance each moon along its tilted circular orbit in the planet's local frame.
+func _update_moons(delta: float) -> void:
+	for m in _moons:
+		var a: float = float(m["angle"]) + float(m["speed"]) * delta
+		m["angle"] = a
+		var r: float = float(m["radius"])
+		var incl: float = float(m["incl"])
+		var z: float = r * sin(a)
+		(m["node"] as Node3D).position = Vector3(
+			r * cos(a),
+			z * sin(incl),
+			z * cos(incl)
+		)
 
 ## Returns the planet's current visual distance from the orbit centre.
 ## For Keplerian orbits this varies with true anomaly; for circular fallback
