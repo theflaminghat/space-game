@@ -12,6 +12,8 @@ var _storage_minerals_label: Label = null
 var _storage_energy_label:   Label = null
 ## Manufacturing Capacity readout ("used / capacity"), added to stats_grid in _ready.
 var _mc_label: Label = null
+var _construction_key: Label = null
+var _construction_label: Label = null
 
 # Composition section (replaces the Tree node at runtime).
 var _composition_scroll:    ScrollContainer = null
@@ -210,6 +212,20 @@ func _ready() -> void:
 	_mc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	stats_grid.add_child(_mc_label)
 
+	# ── Construction row (hidden unless this world is building something) ──────
+	# Build speed is gated by Manufacturing capacity, so what's rising and how far
+	# along it is lives right under the MC readout.
+	_construction_key = Label.new()
+	_construction_key.text = "Construction"
+	_construction_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_grid.add_child(_construction_key)
+	_construction_label = Label.new()
+	_construction_label.text = ""
+	_construction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	stats_grid.add_child(_construction_label)
+	_construction_key.hide()
+	_construction_label.hide()
+
 	# ── Storage capacity rows ─────────────────────────────────────────────────
 	var _stor_min_key := Label.new()
 	_stor_min_key.text = "Matter Storage"
@@ -278,6 +294,14 @@ func _fmt_population(n: int) -> String:
 			out = "," + out
 	return out
 
+## Compact human-readable build ETA (game-days → days / months / years).
+func _fmt_build_eta(days: float) -> String:
+	if days < 60.0:
+		return "%d days" % int(ceil(days))
+	if days < 730.0:
+		return "%d months" % int(ceil(days / 30.0))
+	return "%.1f years" % (days / 365.25)
+
 func set_planet_info(data: Dictionary) -> void:
 	var planet_name: String = str(data.get("name", ""))
 
@@ -300,12 +324,41 @@ func set_planet_info(data: Dictionary) -> void:
 		if mc_cap > 0.0:
 			_mc_label.text = "%s / %s" % [
 				Units.format_si_verbose(mc_used, ""), Units.format_si_verbose(mc_cap, "")]
+			# Show the labour drag when the workforce can't fully staff built capacity.
+			var staffing: float = float(data.get("labor_staffing", 1.0))
+			if staffing < 0.99:
+				_mc_label.text += "  · labour %d%%" % int(round(staffing * 100.0))
 			# Amber when demand outstrips capacity (jobs on this world are throttled).
 			_mc_label.modulate = Color(0.95, 0.65, 0.30) if mc_used > mc_cap + 0.5 \
 				else Color(0.85, 0.85, 0.85)
 		else:
 			_mc_label.text = "-"
 			_mc_label.modulate = Color(0.85, 0.85, 0.85)
+
+	# Construction status — what this world's manufacturing capacity is currently raising.
+	if _construction_label:
+		var con: Array = data.get("construction", [])
+		if con.is_empty():
+			_construction_label.text = ""
+			_construction_label.hide()
+			if _construction_key:
+				_construction_key.hide()
+		else:
+			if _construction_key:
+				_construction_key.show()
+			var front: Dictionary = con[0]
+			var pct: int = int(round(float(front.get("frac", 0.0)) * 100.0))
+			var txt: String = "Building %s  %d%%" % [str(front.get("name", "")), pct]
+			var eta: float = float(front.get("eta_days", -1.0))
+			if eta >= 0.0:
+				txt += "  (~%s)" % _fmt_build_eta(eta)
+			else:
+				txt += "  (waiting on capacity)"   # recipes are using all this world's MC
+			if con.size() > 1:
+				txt += "  +%d queued" % (con.size() - 1)
+			_construction_label.text = txt
+			_construction_label.modulate = Color(0.95, 0.70, 0.30)
+			_construction_label.show()
 
 	var mined: Dictionary = data.get("mined_resources",   {})
 	var inv:   Dictionary = data.get("compound_inventory", {})
@@ -335,8 +388,7 @@ func set_planet_info(data: Dictionary) -> void:
 		for compound: String in _inv_rate_labels:
 			var rate: float = float(mined.get(compound, 0.0))
 			(_inv_rate_labels[compound] as Label).text = "+%s/s" % Units.format_si(rate, "g")
-
-	show()
+	# Visibility is managed by the parent TabContainer / Game (this is a tab page now).
 
 ## Full rebuild of the inventory section.  Called only when the selected planet changes.
 func _rebuild_inventory(mined: Dictionary, inv: Dictionary) -> void:

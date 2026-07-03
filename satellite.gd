@@ -32,6 +32,11 @@ enum State { TRANSFER, ORBIT, LANDING, DONE }
 # ── Public config (set by spawner before begin_transfer) ─────────────────────────
 var arrival_mode: String = "orbit"
 var orbit_center: Node3D = null
+## For arrival_mode == "swarm": the fixed swarm-slot world position the craft flies to,
+## then removes itself (the deployed collector takes its place).
+var swarm_target_pos: Vector3 = Vector3.ZERO
+var _is_swarm:  bool    = false
+var _start_pos: Vector3 = Vector3.ZERO   # departure position, captured at launch
 
 # ── Live planet references ───────────────────────────────────────────────────────
 var _origin: Planet = null
@@ -103,6 +108,15 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 	_started      = true
 	_sweep_init   = false   # seeded on the first _transfer_point() call below
 
+	# Swarm deployment: fly straight to the reserved slot, then vanish (the collector
+	# appears there).  Handled before the origin==target shortcut below.
+	_is_swarm  = arrival_mode == "swarm"
+	_start_pos = origin.global_position
+	if _is_swarm:
+		_state = State.TRANSFER
+		_set_craft_pos(_swarm_point(0.0))
+		return
+
 	# Local orbit insertion: the target *is* the origin planet, so there's no
 	# interplanetary cruise — settle straight into a parking orbit so the craft is
 	# visible orbiting from the moment it launches.
@@ -144,6 +158,16 @@ func _process(delta: float) -> void:
 func _process_transfer(delta_days: float) -> void:
 	_elapsed_days += delta_days
 	var p: float = clampf(_elapsed_days / _flight_days, 0.0, 1.0)
+
+	# Swarm deployment: glide to the slot, then disappear as the collector materialises.
+	if _is_swarm:
+		_set_craft_pos(_swarm_point(p))
+		if p >= 1.0:
+			arrived.emit("swarm")
+			_state = State.DONE
+			queue_free()
+		return
+
 	_set_craft_pos(_transfer_point(p))
 
 	if p >= 1.0:
@@ -155,6 +179,12 @@ func _process_transfer(delta_days: float) -> void:
 		else:
 			_state       = State.ORBIT
 			_orbit_angle = _orbit_entry_angle
+
+## Straight, eased glide from the departure point to the reserved swarm slot.  The slot
+## holds a fixed world position while unrevealed, so the craft lands exactly where the
+## deployed collector will appear.
+func _swarm_point(p: float) -> Vector3:
+	return _start_pos.lerp(swarm_target_pos, smoothstep(0.0, 1.0, p))
 
 ## Hohmann half-ellipse whose far end is recomputed every frame from the target's
 ## current radius & angle, so the craft homes onto the moving planet.

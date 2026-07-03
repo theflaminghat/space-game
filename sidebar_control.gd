@@ -15,6 +15,8 @@ extends HBoxContainer
 ## beside the other full-area panels in this HBoxContainer.
 var star_map: StarMapPanel = null
 var automation_panel: AutomationPanel = null
+## Merged planet panel (info + build + population tabs), created and assigned by Game.
+var planet_tabs: Control = null
 ## The cloned "automation" sidebar button, hidden until Industrial AI is researched.
 var automation_button: Button = null
 
@@ -61,8 +63,10 @@ func hide_all() -> void:
 	statistics.hide()
 	timeline_panel.hide()
 	politics_page.hide()
-	planet_info_page.hide()
-	build_panel.hide()
+	# The planet info + build panels are now tabs of one wrapper (set by Game); hide the whole
+	# thing rather than the individual tab pages (hiding those confuses the TabContainer).
+	if planet_tabs:
+		planet_tabs.hide()
 	launch_panel.hide()
 	production_panel.hide()
 	if star_map:

@@ -14,17 +14,26 @@ signal colonize_requested(star_name: String, gamma_max: float, accel: float)
 ## Fire the orbital laser at a star system (a light-speed white pulse crosses to it).
 ## `power` is the energy multiplier the player dialled in (≥1).
 signal laser_requested(star_name: String, power: float)
-## Launch a von Neumann berserker swarm at a star system (a slower self-replicating weapon).
-signal berserker_requested(star_name: String)
+## Launch a von Neumann berserker swarm at a star system, at a chosen max γ / acceleration
+## (same flight model as a colony ship).
+signal berserker_requested(star_name: String, gamma_max: float, accel: float)
+## Fire a relativistic kinetic missile at a star system, at a chosen max γ / acceleration.
+signal missile_requested(star_name: String, gamma_max: float, accel: float)
+## Send a lightweight recon probe to a star at a chosen max γ / acceleration (like a colony
+## ship, but it gathers full intel on arrival instead of settling).
+signal probe_requested(star_name: String, gamma_max: float, accel: float)
+## Transmit a diplomatic message to a detected alien system.
+## kind ∈ {"contact", "ally", "trade", "war"}.
+signal message_requested(star_name: String, kind: String)
 
-## Laser energy scales with distance² (the beam spreads, so delivering a lethal flux
-## across light-years costs enormously more).  Shared with Game for the cost readout.
-const LASER_ENERGY_PER_LY2: float = 5.0e7
+## Laser cost is a FLAT base energy (independent of distance) — scaled only by the power
+## multiplier the player dials in.  Shared with Game for the cost readout.
+const LASER_BASE_ENERGY: float = 1.0e9
 ## Berserker swarm cruise speed (fraction of c) — slow, but self-replicating on arrival.
 const BERSERKER_BETA: float = 0.3
 
-static func laser_energy(dist_ly: float) -> float:
-	return LASER_ENERGY_PER_LY2 * dist_ly * dist_ly
+static func laser_energy(_dist_ly: float) -> float:
+	return LASER_BASE_ENERGY
 
 # ── Relativistic flight model (shared with Game so cost/time match what's shown) ──
 # A colony ship accelerates at its chosen max acceleration `a` up to its max speed β,
@@ -34,18 +43,32 @@ static func laser_energy(dist_ly: float) -> float:
 const C_MS: float    = 2.998e8      # m/s
 const LY_M: float    = 9.4607e15    # metres per light-year
 const YEAR_S: float  = 3.1557e7     # seconds per year
-## Speed is parameterised by the Lorentz factor γ (not β), so the player can dial in
-## arbitrarily relativistic cruise speeds — right up to the GZK limit — without β losing
-## all precision against 1.0.  The GZK cutoff (~5×10¹⁹ eV protons) is γ ≈ E/(m_p c²).
-const GZK_GAMMA: float = 5.3e10
+## Speed is parameterised by the Lorentz factor γ (not β) for precision near c.  The cruise
+## speed is capped at 99.99% c (γ ≈ 70.71) — the top of the speed slider.
+const MAX_BETA:  float = 0.9999
+const MAX_GAMMA: float = 70.7127   # 1 / sqrt(1 − 0.9999²)
 ## Standard colony-ship rest mass (kg) and the factor converting real joules to the
 ## game's energy units — both tuned so a near-c dash needs a built-out grid's reserves.
 const SHIP_MASS: float           = 2.0e7
 const ENERGY_GAME_PER_JOULE: float = 5.0e-17
+## Rest-mass fractions (vs a colony ship) of the craft that share the colony flight model,
+## so their relativistic-KE energy cost scales with how heavy they are.
+const MISSILE_MASS_FRAC:   float = 0.15
+const BERSERKER_MASS_FRAC: float = 0.02
+const PROBE_MASS_FRAC:     float = 0.004
+
+## Relativistic launch-energy for a craft of the given mass fraction, via the shared flight
+## model — same speed/accel logic as a colony ship, just scaled by rest mass.
+static func projectile_energy(dist_ly: float, gamma_max: float, accel: float, mass_frac: float) -> float:
+	return float(plan_flight(dist_ly, gamma_max, accel)["energy"]) * mass_frac
 
 ## β (fraction of c) for a Lorentz factor γ.  Saturates to 1.0 in float for huge γ.
 static func beta_from_gamma(g: float) -> float:
 	return sqrt(maxf(1.0 - 1.0 / (g * g), 0.0))
+
+## "% c" speed string for a Lorentz factor γ (shared with Game for launch/impact notices).
+static func fmt_beta(g: float) -> String:
+	return "%.2f%% c" % (beta_from_gamma(g) * 100.0)
 
 ## Plan a flight of `dist_ly` light-years with max Lorentz factor γ (cruise speed) and
 ## max acceleration `a` (m/s²): accelerate to γ, coast, decelerate to rest.  Returns the
@@ -54,7 +77,7 @@ static func beta_from_gamma(g: float) -> float:
 static func plan_flight(dist_ly: float, gamma_max: float, accel: float) -> Dictionary:
 	var dist_m: float = maxf(dist_ly, 1.0e-4) * LY_M
 	var a: float = maxf(accel, 1.0e-4)
-	var gv: float = clampf(gamma_max, 1.0001, GZK_GAMMA)
+	var gv: float = clampf(gamma_max, 1.0001, MAX_GAMMA)
 	# Relativistic distance to reach γ from rest at constant proper accel: (c²/a)(γ−1).
 	var d_accel: float = (C_MS * C_MS / a) * (gv - 1.0)
 	var reaches: bool = (2.0 * d_accel) <= dist_m
@@ -67,8 +90,12 @@ static func plan_flight(dist_ly: float, gamma_max: float, accel: float) -> Dicti
 		# Distance-limited: accelerate over half the trip, decelerate over the other.
 		g_peak = 1.0 + a * (dist_m * 0.5) / (C_MS * C_MS)
 	var b_peak: float = beta_from_gamma(g_peak)
-	# Energy = relativistic KE at peak, spent on the burn AND the matching deceleration.
-	var joules: float = 2.0 * (g_peak - 1.0) * SHIP_MASS * C_MS * C_MS
+	# Energy is the drive's rating for the COMMANDED cruise γ (relativistic KE for the burn
+	# plus the matching deceleration), so it scales smoothly with the speed slider across its
+	# whole range.  Using g_peak instead made the cost plateau the moment a short/low-accel hop
+	# became range-limited — the "energy stops changing near 60% c" behaviour.  Reachability
+	# only affects the actual peak reached and the arrival time (see "reaches" below).
+	var joules: float = 2.0 * (gv - 1.0) * SHIP_MASS * C_MS * C_MS
 	var energy: float = joules * ENERGY_GAME_PER_JOULE
 	# Coordinate-frame time: each constant-accel leg takes (c/a)·γ·β; plus any coast.
 	var t_leg: float = (C_MS / a) * g_peak * b_peak           # one accel/decel leg
@@ -245,12 +272,23 @@ var _avail_energy: float = 0.0       # current energy, for the launch affordabil
 var _dash_phase: float = 0.0         # animates the travel-line dashes
 var _cosmic_scale: float = 1.0       # proper-distance multiplier for unbound galaxies (≥1)
 var _attacks: Array = []             # [{ "target": name, "progress": 0..1, "kind": "laser"|"berserker" }]
+var _incoming: Array = []            # [{ "source": name, "target": "sol"|name, "progress": 0..1 }]
 var _can_laser: bool = false         # an Orbital Laser is built
 var _can_berserker: bool = false     # von Neumann (self-replicating industry) researched
+var _can_missile: bool = false       # relativistic missiles/probes (Relativistic Navigation)
+var _can_colonize: bool = false      # Relativistic Navigation researched (interstellar flight)
+var _intel: Dictionary = {}          # star → {alignment, dyson, telescopes, lasers, detail, diplo, probed}
+var _missile_btn: Button = null
+var _probe_btn: Button = null
+var _contact_btn: Button = null
+var _ally_btn: Button = null
+var _trade_btn: Button = null
+var _war_btn: Button = null
 
 ## Launch sub-panel (built in _ready, shown when a colonisable star is selected).
 var _launch_ui:     PanelContainer = null
 var _launch_title:  Label   = null
+var _intel_label:   Label   = null   # known infrastructure of a detected alien system
 var _speed_slider:  HSlider = null
 var _accel_slider:  HSlider = null   # log₁₀ of max acceleration in m/s²
 var _launch_info:   Label   = null
@@ -277,10 +315,13 @@ func _build_launch_ui() -> void:
 	# Docked bottom-right and lifted off the bottom edge, clear of the bottom-left planet
 	# column and the lower edge of the panel.
 	_launch_ui.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	_launch_ui.offset_left = -480
-	_launch_ui.offset_right = -96
-	_launch_ui.offset_top = -184
-	_launch_ui.offset_bottom = -56
+	# Fixed width so the info text (which wraps) can't resize the panel horizontally.
+	_launch_ui.custom_minimum_size = Vector2(384, 0)
+	_launch_ui.offset_left = -540
+	_launch_ui.offset_right = -156
+	# Raised well off the bottom edge (it grows upward from offset_bottom as content is added).
+	_launch_ui.offset_top = -420
+	_launch_ui.offset_bottom = -220
 	_launch_ui.hide()
 	add_child(_launch_ui)
 
@@ -297,6 +338,15 @@ func _build_launch_ui() -> void:
 	_launch_title.modulate = Color(0.9, 0.95, 1.0)
 	vb.add_child(_launch_title)
 
+	# Known infrastructure of a detected alien system (multi-line list; hidden otherwise).
+	_intel_label = Label.new()
+	_intel_label.add_theme_font_size_override("font_size", 11)
+	_intel_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_intel_label.custom_minimum_size = Vector2(360, 0)
+	_intel_label.modulate = Color(0.85, 0.80, 0.62)
+	_intel_label.hide()
+	vb.add_child(_intel_label)
+
 	var speed_row := HBoxContainer.new()
 	speed_row.add_theme_constant_override("separation", 8)
 	var sl := Label.new()
@@ -305,11 +355,11 @@ func _build_launch_ui() -> void:
 	sl.add_theme_font_size_override("font_size", 11)
 	speed_row.add_child(sl)
 	# Cruise speed as log₁₀(γ−1): from γ≈1.001 up to the GZK limit (γ ≈ 5.3×10¹⁰), so the
-	# player can request arbitrarily relativistic speeds — energy/accel are the real cap.
+	# player can request cruise speeds up to 99.99% c (γ ≈ 70.71) — energy/accel are the real cap.
 	_speed_slider = HSlider.new()
 	_speed_slider.min_value = -3.0
-	_speed_slider.max_value = log(GZK_GAMMA - 1.0) / log(10.0)
-	_speed_slider.step = 0.05
+	_speed_slider.max_value = log(MAX_GAMMA - 1.0) / log(10.0)
+	_speed_slider.step = 0.02
 	_speed_slider.value = -1.0    # γ ≈ 1.1
 	_speed_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_speed_slider.value_changed.connect(func(_v): _update_launch_ui())
@@ -339,6 +389,10 @@ func _build_launch_ui() -> void:
 	_launch_info = Label.new()
 	_launch_info.add_theme_font_size_override("font_size", 11)
 	_launch_info.modulate = Color(0.75, 0.82, 0.95)
+	# Wrap within a fixed width so long flight/intel text can't stretch the panel horizontally.
+	_launch_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_launch_info.custom_minimum_size = Vector2(360, 0)
+	_launch_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_child(_launch_info)
 
 	_launch_btn = Button.new()
@@ -346,7 +400,30 @@ func _build_launch_ui() -> void:
 	_launch_btn.pressed.connect(_on_launch_pressed)
 	vb.add_child(_launch_btn)
 
-	# ── Weapons ──────────────────────────────────────────────────────────────
+	# ── Recon + relativistic weapons: full-width buttons stacked under the colony ship,
+	# all using the same speed/accel sliders as the colony flight. ─────────────────────
+	_probe_btn = Button.new()
+	_probe_btn.text = "Send recon probe"
+	_probe_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_probe_btn.add_theme_color_override("font_color", Color(0.7, 0.9, 0.85))
+	_probe_btn.pressed.connect(_on_probe_pressed)
+	vb.add_child(_probe_btn)
+
+	_berserker_btn = Button.new()
+	_berserker_btn.text = "Send berserkers"
+	_berserker_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_berserker_btn.add_theme_color_override("font_color", Color(1.0, 0.7, 0.6))
+	_berserker_btn.pressed.connect(_on_berserker_pressed)
+	vb.add_child(_berserker_btn)
+
+	_missile_btn = Button.new()
+	_missile_btn.text = "Fire missile"
+	_missile_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_missile_btn.add_theme_color_override("font_color", Color(1.0, 0.8, 0.55))
+	_missile_btn.pressed.connect(_on_missile_pressed)
+	vb.add_child(_missile_btn)
+
+	# ── Orbital laser: light-speed beam with its own power dial (flat cost). ───────────
 	var power_row := HBoxContainer.new()
 	power_row.add_theme_constant_override("separation", 8)
 	var pl := Label.new()
@@ -364,25 +441,51 @@ func _build_launch_ui() -> void:
 	power_row.add_child(_laser_power_slider)
 	vb.add_child(power_row)
 
-	var weapons := HBoxContainer.new()
-	weapons.add_theme_constant_override("separation", 6)
 	_laser_btn = Button.new()
 	_laser_btn.text = "Fire laser"
 	_laser_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_laser_btn.add_theme_color_override("font_color", Color(1.0, 0.9, 0.9))
 	_laser_btn.pressed.connect(_on_laser_pressed)
-	weapons.add_child(_laser_btn)
-	_berserker_btn = Button.new()
-	_berserker_btn.text = "Send berserkers"
-	_berserker_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_berserker_btn.add_theme_color_override("font_color", Color(1.0, 0.7, 0.6))
-	_berserker_btn.pressed.connect(_on_berserker_pressed)
-	weapons.add_child(_berserker_btn)
-	vb.add_child(weapons)
+	vb.add_child(_laser_btn)
+
+	var diplo := HBoxContainer.new()
+	diplo.add_theme_constant_override("separation", 6)
+	_contact_btn = _diplo_button("Contact", func(): _emit_message("contact"))
+	_ally_btn    = _diplo_button("Alliance", func(): _emit_message("ally"))
+	_trade_btn   = _diplo_button("Trade", func(): _emit_message("trade"))
+	_war_btn     = _diplo_button("Declare war", func(): _emit_message("war"))
+	diplo.add_child(_contact_btn)
+	diplo.add_child(_ally_btn)
+	diplo.add_child(_trade_btn)
+	diplo.add_child(_war_btn)
+	vb.add_child(diplo)
+
+func _diplo_button(label: String, handler: Callable) -> Button:
+	var b := Button.new()
+	b.text = label
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.add_theme_font_size_override("font_size", 11)
+	b.pressed.connect(handler)
+	return b
+
+func _emit_message(kind: String) -> void:
+	var n := selected_star()
+	if n != "":
+		message_requested.emit(n, kind)
+
+func _on_missile_pressed() -> void:
+	var n := selected_star()
+	if n != "" and not _colonized.has(n):
+		missile_requested.emit(n, _selected_gamma(), _selected_accel())
+
+func _on_probe_pressed() -> void:
+	var n := selected_star()
+	if n != "":
+		probe_requested.emit(n, _selected_gamma(), _selected_accel())
 
 ## Animate the in-transit dashed lines + attack pulses while the map is visible.
 func _process(delta: float) -> void:
-	if visible and (not _missions.is_empty() or not _attacks.is_empty()):
+	if visible and (not _missions.is_empty() or not _attacks.is_empty() or not _incoming.is_empty()):
 		_dash_phase = fmod(_dash_phase + delta * 24.0, 1.0e6)
 		queue_redraw()
 
@@ -442,10 +545,26 @@ func set_attacks(attacks: Array) -> void:
 	_attacks = attacks
 	queue_redraw()
 
-## Push which weapons are available (Orbital Laser built / berserkers researched).
-func set_weapon_caps(can_laser: bool, can_berserker: bool) -> void:
+## Push incoming hostile relativistic missiles: [{ source, target ("sol"|star), progress }].
+func set_incoming(incoming: Array) -> void:
+	_incoming = incoming
+	queue_redraw()
+
+## Push which weapons are available (Orbital Laser built / berserkers / relativistic missiles).
+func set_weapon_caps(can_laser: bool, can_berserker: bool, can_missile: bool) -> void:
 	_can_laser = can_laser
 	_can_berserker = can_berserker
+	_can_missile = can_missile
+	_update_launch_ui()
+
+## Push per-system alien intel (light-delayed, telescope-limited) for the info readout.
+func set_alien_intel(intel: Dictionary) -> void:
+	_intel = intel
+	_update_launch_ui()
+
+## Whether interstellar colony launches are unlocked (Relativistic Navigation researched).
+func set_interstellar_unlocked(unlocked: bool) -> void:
+	_can_colonize = unlocked
 	_update_launch_ui()
 
 ## Distance (ly) of the selected star, or 0.
@@ -469,6 +588,11 @@ func _update_launch_ui() -> void:
 		_launch_ui.hide()
 		return
 	_launch_ui.show()
+	# Known-infrastructure listing for a detected alien system (shown for any selection above).
+	if _intel_label:
+		var block := _intel_block(name)
+		_intel_label.text = block
+		_intel_label.visible = block != ""
 	var dist: float = _selected_dist()
 	if _colonized.has(name):
 		_launch_title.text = "%s  —  colonised" % name
@@ -489,20 +613,33 @@ func _update_launch_ui() -> void:
 	_launch_info.text = "%s  ·  %s  ·  %s travel  ·  %s energy %s" % [
 		speed_str, _fmt_accel(accel), _fmt_years(years), Units.format_si(cost, "J"),
 		"" if cost <= _avail_energy else "  ✗ insufficient"]
+	if not _can_colonize:
+		# Interstellar flight not yet unlocked — show the target's data but block the launch.
+		_launch_btn.disabled = true
+		_launch_btn.text = "Interstellar flight — research Relativistic Navigation"
+		_update_weapon_buttons(dist, false)
+		return
 	var affordable := cost <= _avail_energy
 	_launch_btn.disabled = not affordable
 	_launch_btn.text = "Launch colony ship" if affordable else "Not enough energy"
 	_update_weapon_buttons(dist, false)
 
-## Enable/label the laser + berserker buttons for the current target.
+## Enable/label the weapon, probe, and diplomacy buttons for the current target.
 func _update_weapon_buttons(dist: float, colonised: bool) -> void:
 	if _laser_btn == null:
 		return
+	var name := selected_star()
+	var has_intel: bool = _intel.has(name)
+	# Diplomacy is available only with a DETECTED alien system; probes/weapons need the tech.
+	for db: Button in [_contact_btn, _ally_btn, _trade_btn, _war_btn]:
+		if db:
+			db.disabled = colonised or not has_intel
+	if _probe_btn:
+		_probe_btn.disabled = colonised or not _can_missile
+		_probe_btn.text = "Send recon probe" if _can_missile else "Recon probe — research"
 	if colonised:
-		_laser_btn.disabled = true
-		_laser_btn.text = "Fire laser"
-		_berserker_btn.disabled = true
-		_berserker_btn.text = "Send berserkers"
+		for wb: Button in [_laser_btn, _berserker_btn, _missile_btn]:
+			wb.disabled = true
 		return
 	if not _can_laser:
 		_laser_btn.disabled = true
@@ -513,12 +650,53 @@ func _update_weapon_buttons(dist: float, colonised: bool) -> void:
 		_laser_btn.disabled = not ok
 		_laser_btn.text = "Fire laser ×%.1f (%s)" % [_laser_power(), Units.format_si(lc, "J")] if ok \
 			else "Laser ×%.1f — need %s" % [_laser_power(), Units.format_si(lc, "J")]
+	# Berserkers + missiles now use the same speed/accel sliders and flight model as a colony
+	# ship — cost is their relativistic launch energy at the dialled-in γ/acceleration.
+	var g: float = _selected_gamma()
+	var acc: float = _selected_accel()
 	if not _can_berserker:
 		_berserker_btn.disabled = true
 		_berserker_btn.text = "Berserkers — research"
 	else:
-		_berserker_btn.disabled = false
-		_berserker_btn.text = "Send berserkers"
+		var bc: float = StarMapPanel.projectile_energy(dist, g, acc, BERSERKER_MASS_FRAC)
+		var okb: bool = bc <= _avail_energy
+		_berserker_btn.disabled = not okb
+		_berserker_btn.text = "Send berserkers (%s)" % Units.format_si(bc, "J") if okb \
+			else "Berserkers — need %s" % Units.format_si(bc, "J")
+	if not _can_missile:
+		_missile_btn.disabled = true
+		_missile_btn.text = "Missile — research"
+	else:
+		var mc: float = StarMapPanel.projectile_energy(dist, g, acc, MISSILE_MASS_FRAC)
+		var okm: bool = mc <= _avail_energy
+		_missile_btn.disabled = not okm
+		_missile_btn.text = "Fire missile (%s)" % Units.format_si(mc, "J") if okm \
+			else "Missile — need %s" % Units.format_si(mc, "J")
+
+## Multi-line intel block for a detected alien system: alignment/diplomacy header plus a list
+## of its known infrastructure (fields the telescopes can't yet resolve read "unknown"; a
+## returned probe reveals everything).  Returns "" for a system with no intel.
+func _intel_block(name: String) -> String:
+	if not _intel.has(name):
+		return ""
+	var d: Dictionary = _intel[name]
+	var probed: bool = bool(d.get("probed", false))
+	var detail: float = float(d.get("detail", 0.0))
+	var lines: Array = []
+	var head: String = "Alien civilisation: %s" % str(d.get("alignment", "unknown"))
+	var diplo: String = str(d.get("diplo", ""))
+	if diplo != "":
+		head += "  [%s]" % diplo
+	lines.append(head)
+	lines.append("Known infrastructure%s:" % ("" if probed else " (light-delayed)"))
+	var dyson: String = ("%d%%" % int(round(float(d.get("dyson", 0.0)) * 100.0))) \
+		if (probed or detail > 0.2) else "unknown"
+	var scopes: String = ("%d" % int(d.get("telescopes", 0))) if (probed or detail > 0.5) else "unknown"
+	var lasers: String = ("%d" % int(d.get("lasers", 0))) if (probed or detail > 0.8) else "unknown"
+	lines.append("  • Dyson swarm: %s" % dyson)
+	lines.append("  • Orbital telescopes: %s" % scopes)
+	lines.append("  • Orbital lasers: %s" % lasers)
+	return "\n".join(lines)
 
 ## Laser energy multiplier from the power slider (≥1).
 func _laser_power() -> float:
@@ -532,16 +710,11 @@ func _on_laser_pressed() -> void:
 func _on_berserker_pressed() -> void:
 	var n := selected_star()
 	if n != "" and not _colonized.has(n):
-		berserker_requested.emit(n)
+		berserker_requested.emit(n, _selected_gamma(), _selected_accel())
 
-## Speed readout from γ: "% c" while it's meaningful, then γ (with a GZK-limit flag).
+## Speed readout from γ as a fraction of c (cruise is capped at 99.99% c).
 func _fmt_speed(g: float) -> String:
-	if g < 100.0:
-		return "%.2f%% c" % (beta_from_gamma(g) * 100.0)
-	var s := "γ %s" % Units.format_si(g, "")
-	if g >= GZK_GAMMA * 0.5:
-		s += " (GZK limit)"
-	return s
+	return "%.2f%% c" % (beta_from_gamma(g) * 100.0)
 
 ## "0.10 m/s² (0.01 g)" style label for the acceleration slider readout.
 func _fmt_accel(a: float) -> String:
@@ -646,6 +819,24 @@ func _draw_berserker_swarm(from: Vector2, to: Vector2, progress: float) -> void:
 	var head := from + dir * (total * clampf(progress, 0.0, 1.0))
 	draw_circle(head, 6.0, Color(1.0, 0.30, 0.30, 0.25))
 	draw_circle(head, 3.5, Color(1.0, 0.45, 0.35, 0.95))
+
+## Incoming relativistic missile: a faint red trajectory from the hostile source to the
+## target, with a sharp bright head and a short trailing streak at the missile's progress.
+func _draw_incoming_missile(from: Vector2, to: Vector2, progress: float) -> void:
+	var d := to - from
+	var total := d.length()
+	if total < 1.0:
+		return
+	var dir := d / total
+	# Faint full trajectory so the player can trace where it's coming from.
+	draw_line(from, to, Color(1.0, 0.25, 0.22, 0.28), 1.0, true)
+	var p := clampf(progress, 0.0, 1.0)
+	var head := from + dir * (total * p)
+	# Bright leading streak (the missile), tapering back along its path.
+	var tail := head - dir * minf(26.0, total * p)
+	draw_line(tail, head, Color(1.0, 0.35, 0.28, 0.95), 2.5, true)
+	draw_circle(head, 4.5, Color(1.0, 0.55, 0.35, 0.30))
+	draw_circle(head, 2.4, Color(1.0, 0.85, 0.60, 1.0))
 
 # ── Projection ────────────────────────────────────────────────────────────────
 
@@ -780,7 +971,9 @@ func _draw() -> void:
 		var ha := TAU * float(i) / 64.0
 		hpts.append(_project(Vector3(cos(ha), sin(ha), 0.0) * horizon_rd, b, center, scale))
 	draw_polyline(hpts, HORIZON_COLOR, 1.5, true)
-	draw_string(_font, _project(Vector3(horizon_rd, 0.0, 0.0), b, center, scale) + Vector2(3, -3),
+	# Raised by the label's own height so it sits clear above the horizon ring.
+	var horizon_label_y: float = -3.0 - _font.get_height(10)
+	draw_string(_font, _project(Vector3(horizon_rd, 0.0, 0.0), b, center, scale) + Vector2(3, horizon_label_y),
 		"Hubble horizon", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, HORIZON_COLOR)
 
 	# Nearby galaxies — out in the far decades, drawn as tilted disk glyphs.  Unbound
@@ -835,8 +1028,8 @@ func _draw() -> void:
 			draw_circle(sp, rad + 6.0, Color(1.0, 1.0, 1.0, 0.22), true, -1.0, true)
 			draw_arc(sp, rad + 6.0, 0.0, TAU, 40, Color(0.9, 0.95, 1.0, 0.9), 1.5, true)
 		_draw_soft_star(sp, rad, col)
-		# Alien presence highlight: red glow/ring for an aggressive force, blue for a
-		# peaceful one (always named so the player can see who's out there).
+		# Alien presence highlight: red = aggressive, blue = peaceful, yellow = alignment
+		# still unknown (always named so the player can see who's out there).
 		var fac: String = str(_factions.get(str(s["name"]), ""))
 		if fac == "aggressive":
 			draw_circle(sp, rad + 3.0, Color(1.0, 0.30, 0.30, 0.28))
@@ -844,6 +1037,9 @@ func _draw() -> void:
 		elif fac == "peaceful":
 			draw_circle(sp, rad + 3.0, Color(0.40, 0.60, 1.0, 0.28))
 			draw_arc(sp, rad + 5.5, 0.0, TAU, 32, Color(0.50, 0.70, 1.0, 0.95), 2.0, true)
+		elif fac == "unknown":
+			draw_circle(sp, rad + 3.0, Color(1.0, 0.85, 0.25, 0.22))
+			draw_arc(sp, rad + 5.5, 0.0, TAU, 32, Color(1.0, 0.88, 0.30, 0.95), 2.0, true)
 		# Colonised stars get a steady green ring (named regardless of zoom).
 		var colonised: bool = _colonized.has(str(s["name"]))
 		if colonised:
@@ -856,6 +1052,8 @@ func _draw() -> void:
 				lbl_col = Color(1.0, 0.55, 0.55, 0.95)
 			elif fac == "peaceful":
 				lbl_col = Color(0.6, 0.78, 1.0, 0.95)
+			elif fac == "unknown":
+				lbl_col = Color(1.0, 0.90, 0.50, 0.95)
 			if colonised:
 				lbl_col = Color(0.6, 0.95, 0.7, 0.95)
 			var la: float = 1.0 if (i == _selected or always) else alpha
@@ -879,10 +1077,35 @@ func _draw() -> void:
 			continue
 		var adst := _project(_log_pos(STARS[aidx]["pos"]), b, center, scale)
 		var ap := float(atk.get("progress", 0.0))
-		if str(atk.get("kind", "")) == "laser":
-			_draw_laser_pulse(center, adst, ap, float(atk.get("power", 1.0)))
-		else:
-			_draw_berserker_swarm(center, adst, ap)
+		match str(atk.get("kind", "")):
+			"laser":
+				_draw_laser_pulse(center, adst, ap, float(atk.get("power", 1.0)))
+			"missile":
+				_draw_incoming_missile(center, adst, ap)   # relativistic kinetic missile
+			_:
+				_draw_berserker_swarm(center, adst, ap)
+
+	# Incoming relativistic missiles: a red streak from the hostile source toward the target
+	# (Sol at centre, or one of our colonies), with a bright head at the missile's progress.
+	for inc: Dictionary in _incoming:
+		var sidx := _star_index(str(inc.get("source", "")))
+		if sidx < 0:
+			continue
+		var src_px := _project(_log_pos(STARS[sidx]["pos"]), b, center, scale)
+		var tgt_name := str(inc.get("target", "sol"))
+		var tgt_px := center
+		if tgt_name != "sol":
+			var tidx := _star_index(tgt_name)
+			if tidx >= 0:
+				tgt_px = _project(_log_pos(STARS[tidx]["pos"]), b, center, scale)
+		var ip := float(inc.get("progress", 0.0))
+		match str(inc.get("kind", "missile")):
+			"berserker":
+				_draw_berserker_swarm(src_px, tgt_px, ip)   # slow red self-replicating swarm
+			"laser":
+				_draw_laser_pulse(src_px, tgt_px, ip, 1.0)   # white light-speed pulse
+			_:
+				_draw_incoming_missile(src_px, tgt_px, ip)   # relativistic kinetic missile
 
 	# The Sun, fixed at the centre of the map.
 	draw_circle(center, 10.0, Color(1.0, 0.85, 0.3, 0.22))
@@ -912,6 +1135,8 @@ func _draw() -> void:
 			lines.append("⚠ Aggressive alien force")
 		elif sfac == "peaceful":
 			lines.append("◇ Peaceful alien contact")
+		elif sfac == "unknown":
+			lines.append("? Alien presence — alignment unknown")
 		var box := Rect2(Vector2(12, size.y - (16.0 * lines.size() + 16.0) - 12.0),
 			Vector2(248, 16.0 * lines.size() + 16.0))
 		draw_rect(box, Color(0.06, 0.08, 0.14, 0.92))

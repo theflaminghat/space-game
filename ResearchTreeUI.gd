@@ -6,6 +6,8 @@ const NODE_W: float = 200.0
 const NODE_H: float = 56.0
 const TIER_GAP_X: float = 220.0
 const NODE_GAP_Y: float = 90.0
+## Multiplier applied to every node's stored y so rows sit further apart vertically.
+const V_SPACING_MULT: float = 1.15
 
 const TREE_LEFT_PAD: float = 40.0
 const TREE_TOP_PAD: float = 90.0
@@ -283,10 +285,10 @@ func _populate_tree() -> void:
 	var max_x: float = -999999.0
 	var max_y: float = -999999.0
 
-	# First pass: find bounds from the actual tech tree positions
+	# First pass: find bounds from the actual tech tree positions (rows spread by 15%)
 	for node_value: Variant in ResearchTree.nodes.values():
 		var node: ResearchNode = node_value as ResearchNode
-		var pos: Vector2 = node.position
+		var pos: Vector2 = Vector2(node.position.x, node.position.y * V_SPACING_MULT)
 
 		min_x = min(min_x, pos.x)
 		min_y = min(min_y, pos.y)
@@ -300,10 +302,10 @@ func _populate_tree() -> void:
 	if min_y < TREE_TOP_PAD:
 		shift.y = TREE_TOP_PAD - min_y
 
-	# Second pass: create buttons using the stored positions
+	# Second pass: create buttons using the stored positions (rows spread by 15%)
 	for node_value: Variant in ResearchTree.nodes.values():
 		var node: ResearchNode = node_value as ResearchNode
-		var pos: Vector2 = node.position + shift
+		var pos: Vector2 = Vector2(node.position.x, node.position.y * V_SPACING_MULT) + shift
 		_create_node_button(node, pos)
 
 	var canvas_width: float = max_x + shift.x + TREE_RIGHT_PAD

@@ -1079,6 +1079,35 @@ static func build() -> Array:
 		lane_pos(10, CIV, X_SPACING, Y_SPACING)
 	))
 
+	# NEW — Radio Astronomy (SETI)
+	# Wide-field radio surveys + signal processing that can resolve a non-natural
+	# electromagnetic signature from the noise.  UNLOCKS signature detection at all
+	# (telescopes are inert until this is researched) and grants a "detection" boost.
+	nodes.append(make.call(
+		"radio_astronomy",
+		"Radio Astronomy",
+		"Wide-field radio surveys and correlation processing capable of resolving faint, non-natural electromagnetic signatures against the galactic background.",
+		["information_theory"],
+		{"science": 185, "energy": 42},
+		15.0,
+		lane_pos(5, FORECAST, X_SPACING, Y_SPACING)
+	))
+
+	# NEW — Thermal Management
+	# High-emissivity radiator engineering + heat-cycle optimisation.  Grants a
+	# "heat_management" boost that raises how much waste heat the grid can shed before
+	# power is curtailed (Game._recompute_production_cache).  Paired with the Thermal
+	# Radiator building, which shares the space_power_infrastructure gate.
+	nodes.append(make.call(
+		"thermal_management",
+		"Thermal Management",
+		"High-emissivity radiator engineering and heat-cycle optimisation for shedding the waste heat of terawatt-scale industry to space.",
+		["space_power_infrastructure"],
+		{"science": 540, "energy": 300},
+		21.0,
+		lane_pos(7, ESTORAGE, X_SPACING, Y_SPACING)
+	))
+
 	# ── Boost assignments ────────────────────────────────────────────────────
 	var boost_map: Dictionary = {
 		# Compute lane → research speed
@@ -1114,6 +1143,10 @@ static func build() -> Array:
 		"predictive_modeling":        {"science_production": 0.20},
 		"institutional_science":      {"research_speed":    0.12},
 		"global_governance":          {"science_production": 0.15},
+		# NEW — Detection lane (SETI) and waste-heat management, feeding the boosts
+		# read by Game._telescope_power and Game._recompute_production_cache.
+		"radio_astronomy":            {"detection": 0.5},
+		"thermal_management":         {"heat_management": 0.6},
 	}
 	for n: ResearchNode in nodes:
 		if boost_map.has(n.id):

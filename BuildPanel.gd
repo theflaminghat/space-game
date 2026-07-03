@@ -27,7 +27,7 @@ func _gui_input(event: InputEvent) -> void:
 func set_planet(planet_name: String, catalog: Array) -> void:
 	current_planet = planet_name
 	_populate(catalog)
-	show()
+	# Visibility is managed by the parent TabContainer / Game (this is a tab page now).
 
 ## Recolour cost line items against the player's current stockpiles without
 ## rebuilding the list.  `have` maps resource/compound name → amount held.
@@ -141,6 +141,16 @@ func _populate(catalog: Array) -> void:
 		count_label.add_theme_font_size_override("font_size", 13)
 		row.add_child(count_label)
 
+		# Amber "+N" while copies of this building are still under construction.
+		var in_progress: int = building.get("in_progress", 0)
+		if in_progress > 0:
+			var building_label := Label.new()
+			building_label.text = "+%d⚙" % in_progress
+			building_label.add_theme_font_size_override("font_size", 11)
+			building_label.modulate = Color(0.95, 0.70, 0.30)
+			building_label.tooltip_text = "Under construction (limited by this world's manufacturing capacity)"
+			row.add_child(building_label)
+
 		var plus_btn := Button.new()
 		plus_btn.text               = "+"
 		plus_btn.flat               = true
@@ -179,6 +189,10 @@ func _format_effects(building: Dictionary) -> String:
 		var dpct: int = int(round((1.0 - float(building["launch_duration_mult"])) * 100.0))
 		if dpct != 0:
 			parts.append("Launch time −%d%%" % dpct)
+	if building.has("detection") and float(building["detection"]) > 0.0:
+		parts.append("Signature detection +%d" % int(round(float(building["detection"]))))
+	if building.has("radiator_capacity") and float(building["radiator_capacity"]) > 0.0:
+		parts.append("Heat radiating +%s" % Units.format_si(float(building["radiator_capacity"]), "W"))
 	return "  ".join(parts)
 
 ## Compact storage-capacity string shown in green next to storage buildings.

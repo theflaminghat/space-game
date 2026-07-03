@@ -446,6 +446,8 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -300.0
+offset_top = 52.0
+offset_bottom = 52.0
 grow_horizontal = 0
 script = ExtResource("22_5t8nk")
 
@@ -531,6 +533,7 @@ anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -400.0
+offset_top = 52.0
 grow_horizontal = 0
 script = ExtResource("31_lpnl")
 
@@ -683,6 +686,7 @@ anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -560.0
+offset_top = 52.0
 grow_horizontal = 0
 script = ExtResource("52_prodpnl")
 

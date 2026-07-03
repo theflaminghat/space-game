@@ -307,10 +307,20 @@ func _build_stats_text(stats: Dictionary, people_ever_lived: float) -> String:
 	var pop:   int   = int(stats.get("current_population", 0))
 	var cols:  int   = int(stats.get("colony_count", 0))
 	var total: float = people_ever_lived   # cumulative humans ever born
-	# One stat per line, stacked vertically.
-	return "Final population: %s\nColonies: %d\nTotal humans who ever lived: ~%s" % [
-		_fmt_pop(pop), cols, _fmt_pop_large(total)
+	var entropy: float = float(stats.get("entropy_exported", 0.0))
+	# One stat per line, stacked vertically.  Entropy exported is reported plainly beside
+	# the human totals — a number, no comment (see VOICE.md).
+	return "Final population: %s\nColonies: %d\nTotal humans who ever lived: ~%s\nEntropy exported: %s J/K" % [
+		_fmt_pop(pop), cols, _fmt_pop_large(total), _fmt_sci(entropy)
 	]
+
+## Scientific-notation string (GDScript's % has no %e, so build it from %f/%d).
+func _fmt_sci(v: float) -> String:
+	if v <= 0.0:
+		return "0"
+	var exp: int = int(floor(log(v) / log(10.0)))
+	var mant: float = v / pow(10.0, exp)
+	return "%.2fe%d" % [mant, exp]
 
 ## Format very large population figures with appropriate SI suffix.
 func _fmt_pop_large(v: float) -> String:

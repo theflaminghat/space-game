@@ -15,36 +15,40 @@ const ROT_SPEED: float = 60.0
 
 
 func move_to_planet(planet_name: String) -> void:
-	state = "planet_view"
-	set_to_zero = false
-
 	if planets_root == null:
 		push_error("planets_root is null")
 		return
-
 	var new_planet := planets_root.get_node_or_null(planet_name) as Node3D
 	if new_planet == null:
 		push_error("Planet not found: " + planet_name)
 		return
+	focus_node(new_planet)
 
-	current_planet = new_planet
+## Reparent the pivot onto ANY body (planet, moon, or the sun) so the camera orbits it.
+## Works for nested bodies (a planet's moon) because the pivot keeps local scale ONE and
+## inherits the target's world scale through the parent chain — the camera sits one
+## local unit out, which frames each body at ~2× its radius regardless of absolute size.
+func focus_node(target: Node3D) -> void:
+	state = "planet_view"
+	set_to_zero = false
+	if target == null:
+		return
 
-	if get_parent() != new_planet:
+	current_planet = target
+
+	if get_parent() != target:
 		var old_global := global_transform
 		get_parent().remove_child(self)
-		new_planet.add_child(self)
+		target.add_child(self)
 		global_transform = old_global
 
-	# Put pivot at the planet origin.
-	# Scale must be ONE — the planet's world scale is already inherited through
-	# the parent chain.  Setting scale = planet.scale here would make the pivot's
-	# world scale = planet_scale², shrinking small planets' camera distance to s²
-	# (< visual radius for any planet with s < 0.5, e.g. Mercury at 0.38).
+	# Put pivot at the body origin.  Scale must be ONE — the body's world scale is already
+	# inherited through the parent chain (setting it to the body's scale would square it).
 	position = Vector3.ZERO
 	rotation_degrees = Vector3.ZERO
 	scale = Vector3.ONE
 
-	child_node.set_radius(current_planet.scale.x)
+	child_node.set_radius(1.0)
 
 
 func _ready() -> void:

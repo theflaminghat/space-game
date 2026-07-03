@@ -18,6 +18,27 @@ const PLANET_TYPES: Dictionary = {
 	"jupiter": "gas_giant", "saturn": "gas_giant", "uranus": "gas_giant", "neptune": "gas_giant",
 }
 
+## Cosmetic moons (spawned in planet.gd as "<planet>_moon_<n>") are also buildable, rocky
+## bodies.  Display names by node id; unnamed indices fall back to "<Planet> moon N".
+const MOON_NAMES: Dictionary = {
+	"earth_moon_0": "Luna",
+	"mars_moon_0": "Phobos",   "mars_moon_1": "Deimos",
+	"jupiter_moon_0": "Io",     "jupiter_moon_1": "Europa",
+	"jupiter_moon_2": "Ganymede","jupiter_moon_3": "Callisto",
+	"saturn_moon_0": "Titan",   "saturn_moon_1": "Rhea",
+	"saturn_moon_2": "Iapetus", "saturn_moon_3": "Dione",
+	"uranus_moon_0": "Titania", "uranus_moon_1": "Oberon", "uranus_moon_2": "Miranda",
+	"neptune_moon_0": "Triton", "neptune_moon_1": "Proteus",
+}
+## Generic anorthositic-regolith crust (grams) so a moon's mines yield the same ores a
+## rocky planet does.  Shared by every moon (they have no individual PlanetData entry).
+const MOON_COMPOSITION: Dictionary = {
+	"crust": {
+		"SiO2":  4.5e24, "Al2O3": 2.6e24, "CaO":   1.6e24, "FeO":  1.5e24,
+		"MgO":   6.0e23, "TiO2":  3.0e23, "Na2O":  1.0e23, "UO2":  1.0e19, "ThO2": 3.0e19,
+	},
+}
+
 # ── Extinction-event thresholds ────────────────────────────────────────────────
 ## Year the Sun reaches Earth's orbit at RGB tip — used for the HUD warning only.
 ## Actual extinction is driven by dynamic engulfment in _check_extinction_events.
@@ -68,6 +89,11 @@ var stats := {
 	"colony_count": 0
 }
 var planet_buildings: Dictionary = {}
+## Buildings under construction, per planet: planet → Array of {building, work, progress}.
+## Construction advances at the planet's Manufacturing Capacity (work-units/day), so a
+## world's industrial power sets how fast it can raise new structures.  Materials are
+## paid when a build is queued; the structure appears only when its work is complete.
+var build_queue: Dictionary = {}
 var current_planet: String = ""
 var science_multiplier: float = 1.0   # science produced per compute per second
 var policies: Dictionary = {}         # policy_id -> bool or float
@@ -77,13 +103,107 @@ var _launch_satellites: Dictionary = {}
 ## Solar Satellites that have arrived at the Sun and joined the Dyson swarm.  The
 ## swarm renderer (init_planets.gd) reads this to light up one collector each.
 var solar_satellites_deployed: int = 0
-## Hard cap = total collector slots in the swarm (keep in sync with init_planets.gd
-## SWARM_LANES × SWARM_PER_LANE).  Each deployed satellite also feeds the grid.
-const SWARM_SAT_MAX:   int   = 6 * 24          # 144 slots
-# Each deployed collector beams back ~100 GW (on the scale of a fossil station), so a
-# full 144-satellite swarm delivers ~14.4 TW — the largest power source in the game,
-# the payoff for the long manufacture-and-launch campaign that builds it out.
-const SWARM_SAT_POWER: float = 1.0e11          # watts beamed back per deployed satellite
+## Swarm geometry (KEEP IN SYNC with init_planets.gd).  Collectors fill the swarm lane by
+## lane, innermost first; each lane fits as many panels as its circumference allows.
+const SWARM_LANES:    int   = 18
+const SWARM_INNER_AU: float = 0.10   # lanes hug the Sun, inside Mercury's orbit
+const SWARM_OUTER_AU: float = 0.26
+const SWARM_ORBIT_MULT: float = 32.0   # log-radius scale (mirror init_planets ORBIT_RADIUS_MULT)
+const SWARM_PANEL_ARC:  float = 0.30 * 1.4   # arc length per panel (PANEL_W × 1.4)
+## Solar Satellites launched toward the swarm but not yet arrived — so each new launch
+## reserves the next free slot for its rocket to fly to.
+var _pending_swarm: int = 0
+# An inner-lane collector beams back ~100 GW; solar flux falls as 1/r², so each lane
+# outward delivers proportionally less — the swarm's power grows with diminishing returns.
+const SWARM_SAT_POWER: float = 1.0e11          # watts from an innermost-lane collector
+
+## Orbital radius (AU) of swarm lane `lane` (0 = innermost).
+func _swarm_lane_au(lane: int) -> float:
+	if SWARM_LANES <= 1:
+		return SWARM_INNER_AU
+	return lerpf(SWARM_INNER_AU, SWARM_OUTER_AU, float(lane) / float(SWARM_LANES - 1))
+
+## How many panels lane `lane` fits without overlap (circumference ÷ panel arc).
+func _swarm_lane_cap(lane: int) -> int:
+	var rv: float = log(_swarm_lane_au(lane) + 1.0) * SWARM_ORBIT_MULT
+	return maxi(1, int(TAU * rv / SWARM_PANEL_ARC))
+
+## Total collector slots across all lanes (the swarm cap).
+func _swarm_max() -> int:
+	var total: int = 0
+	for lane in range(SWARM_LANES):
+		total += _swarm_lane_cap(lane)
+	return total
+
+## Universe background temperature (K) at the current year — falls as cosmic expansion
+## stretches the CMB (T ∝ 1/scale).  A colder sink lets radiators shed heat more easily.
+func _universe_temperature() -> float:
+	return maxf(CMB_TEMP_2026 / _cosmic_scale(), 1.0e-12)
+
+## Radiating-capacity multiplier from the cold of space: grows slowly as the universe
+## cools, so deep-time civilisations can shed far more heat than a 2026 one.
+func _thermal_coldness() -> float:
+	return maxf(1.0, sqrt(_cosmic_scale()))
+
+## Usable fraction of generated power given the heat it makes and what can be radiated.
+## At or under capacity everything is usable; over it, the surplus is curtailed on a
+## diminishing curve (never below a floor, so the grid never fully collapses from heat).
+func _thermal_efficiency(load: float, capacity: float) -> float:
+	if load <= capacity or load <= 0.0:
+		return 1.0
+	return maxf(THERMAL_EFF_FLOOR, sqrt(capacity / load))
+
+## Accumulate entropy exported to the cold universe: dS = Q / T, where Q is the heat
+## actually radiated this slice and T the (falling) universe temperature.  A pure counter.
+func _accumulate_entropy(delta_days: float) -> void:
+	if delta_days <= 0.0:
+		return
+	var radiated_w: float = minf(float(_cached_prod.get("energy", 0.0)), _cached_radiator_cap)
+	if radiated_w <= 0.0:
+		return
+	var joules: float = radiated_w * delta_days * DAY_SECONDS
+	entropy_exported += joules / _universe_temperature()
+
+## One-shot notices (VOICE: report the numbers, no editorial) when the grid runs hot or the
+## labour force can no longer staff built industry.  Each fires once, then re-arms on recovery.
+func _check_thermal_labor_alerts() -> void:
+	var cap: float = _cached_radiator_cap
+	var raw_load: float = _thermal_ratio * cap
+	if _thermal_ratio > 1.15:
+		if not _heat_alerted:
+			_heat_alerted = true
+			var usable_pct: int = int(round(_thermal_efficiency(raw_load, cap) * 100.0))
+			_announce("Thermal limit",
+				"Power draw %s exceeds radiating capacity %s. Usable output curtailed to %d%%." % [
+					Units.format_si_verbose(raw_load, "Watts"),
+					Units.format_si_verbose(cap, "Watts"), usable_pct],
+				"heat_%d" % year)
+	elif _thermal_ratio < 1.02:
+		_heat_alerted = false
+
+	var staffing: float = _mc_staffing()
+	if staffing < 0.6:
+		if not _labor_alerted:
+			_labor_alerted = true
+			_announce("Labour shortfall",
+				"Labour force staffs %d%% of built manufacturing capacity. Remainder idle." % \
+					int(round(staffing * 100.0)),
+				"labor_%d" % year)
+	elif staffing > 0.8:
+		_labor_alerted = false
+
+## Total power the swarm beams to the grid.  Collectors fill lane by lane (inner first),
+## and flux ∝ 1/r², so each successive lane contributes less than the one inside it.
+func _swarm_power() -> float:
+	var total: float = 0.0
+	var remaining: int = solar_satellites_deployed
+	for lane in range(SWARM_LANES):
+		if remaining <= 0:
+			break
+		var n: int = mini(remaining, _swarm_lane_cap(lane))
+		total += float(n) * SWARM_SAT_POWER * pow(SWARM_INNER_AU / _swarm_lane_au(lane), 2.0)
+		remaining -= n
+	return total
 var colonized_planets: Array = []     # planets that have received a completed Colony Ship
 
 ## Interstellar colonies and in-flight colony ships (from the star map).
@@ -93,9 +213,62 @@ var interstellar_missions: Array = []
 ## In-flight weapon strikes on star systems: [{target, kind:"laser"|"berserker",
 ## start_year, end_year}].  Laser pulses cross at light speed; berserkers crawl sub-light.
 var interstellar_attacks: Array = []
-## Alien presence at stars: star_name → "aggressive" | "peaceful".  Highlighted red /
-## blue on the star map.  Seeded per game.
+## Alien presence at stars: star_name → "aggressive" | "peaceful" (the TRUE alignment).
+## Seeded per game.  Hidden from the player until its signature is detected — see below.
 var star_factions: Dictionary = {}
+## Which alien systems' alignments the player has discovered (via colony contact).  A
+## detected-but-unvisited system shows "unknown" (yellow); contact reveals red/blue.
+var _known_alignments: Dictionary = {}
+## Year each alien system began emitting (its signature epoch).  A civilisation is only
+## detectable once its light has crossed the distance to Sol: year ≥ _alien_since + dist_ly.
+var _alien_since: Dictionary = {}
+## Alien systems whose signature the player's telescopes have picked up.  EMPTY at game
+## start — every alien civilisation is hidden until detected.  Only these appear on the map.
+var _detected_aliens: Dictionary = {}
+## Last year _process_aliens ran, so detection/expansion can batch across fast-forwarded time.
+var _alien_last_year: float = 2026.0
+## Detection & expansion tuning.
+const ALIEN_DETECT_BASE:  float = 2.0e-3   # per-year detect chance at 1 ly with base optics
+const ALIEN_SPREAD_RATE:  float = 3.0e-4   # per-year chance each alien system founds another
+const TELESCOPE_BASE_POWER: float = 1.0    # naked-eye/base astronomy every civilisation has
+
+## Hostile aggression: aggressive systems fling relativistic kinetic missiles (RKKVs) at
+## human worlds.  Rare per-system, cruising near light-speed, they arrive with only their
+## light-travel time as warning and gut whatever they hit — the pressure that makes spreading
+## across many systems worthwhile.  incoming_attacks: [{source, target, start_year, end_year}].
+var incoming_attacks: Array = []
+var _rkkv_notice_year: float = -1.0e18        # last year an "inbound" launch notice fired
+const ALIEN_AGGRESSION_RATE: float = 9.0e-5   # per aggressive system per year, chance to launch
+const RKKV_BETA:            float = 0.95      # relativistic missile cruise speed (fraction of c)
+const RKKV_HOME_SURVIVAL:   float = 0.10      # fraction of population that survives a Sol strike
+## Anti-flood caps: bound the concurrent missiles (keeps the array + per-tick work small),
+## the number of systems whose count feeds the launch rate (late-game spread fills the map),
+## and how often a launch is announced (impacts are always reported, but coalesced per tick).
+const RKKV_MAX_INFLIGHT:    int   = 6
+const RKKV_ATTACKER_CAP:    float = 4.0
+const RKKV_LAUNCH_NOTICE_GAP: float = 150.0   # min game-years between "inbound" notices
+
+## ── Alien infrastructure (deterministic from a system's age) ─────────────────────
+## Rather than storing/ticking per-system economies, each civilisation's build-out is a pure
+## function of how long it has existed.  The player observes the LIGHT-DELAYED state (what it
+## looked like `distance` years ago), resolved in detail only as far as telescopes allow.
+const ALIEN_DYSON_YEARS:   float = 2.0e6   # years for a civilisation to complete a Dyson swarm
+const ALIEN_TELESCOPE_YEARS: float = 6.0e4 # years per orbital telescope it fields
+const ALIEN_LASER_YEARS:   float = 9.0e4   # years per orbital laser (aggressive systems only)
+const INFRA_DETAIL_REACH:  float = 3.0     # telescope-power ÷ (this × ly) → 0..1 resolution
+var _infra_probed: Dictionary = {}         # star → true: a probe returned full, current intel
+
+## ── Diplomacy ───────────────────────────────────────────────────────────────────
+## Messages crawl at light speed and the reply crawls back, so a round trip is 2×distance
+## years.  outgoing_messages: [{target, kind, start_year, end_year}].  _diplo_status: star →
+## "contact" | "allied" | "trading" | "war".
+var outgoing_messages: Array = []
+var _diplo_status: Dictionary = {}
+const MSG_ALLY_ENERGY:  float = 5.0e7      # a trade/alliance overture costs a transmitter burst
+## Lightweight recon probes to other stars (cheaper than a colony ship); on arrival they
+## resolve that system's full current intel.  probe_missions: [{target, start_year, end_year}].
+var probe_missions: Array = []
+const PROBE_ENERGY_PER_LY: float = 4.0e6   # probe launch cost scales with distance
 
 ## Berserker seed launch cost (energy) and cruise speed (fraction of c).
 const BERSERKER_ENERGY: float = 5.0e6
@@ -162,6 +335,12 @@ const MEDICAL_RESEARCH: Dictionary = {
 ## Accumulated real seconds since the last autosave.
 var _autosave_accum: float = 0.0
 
+## Panel-refresh throttle: the planet-info/build panels refresh at this cadence instead of
+## every frame, and build-roster changes coalesce into one rebuild per tick (see _process).
+const UI_REFRESH_SEC: float = 0.25
+var _ui_refresh_accum: float = 0.0
+var _build_ui_dirty: bool = false
+
 # ── Game events ───────────────────────────────────────────────────────────────
 ## IDs of GameEvents.EVENTS that have already fired — prevents re-triggering.
 var _fired_events: Array = []
@@ -223,6 +402,13 @@ var _event_notif_vbox: VBoxContainer = null
 var _prod_dirty: bool = true
 var _cached_compute: float = 0.0
 var _cached_prod: Dictionary = {"science": 0.0, "minerals": 0.0, "energy": 0.0}
+## Building-derived raw sums, recomputed ONLY when the building roster changes (_prod_dirty).
+## The per-frame combine (population + boosts) reads these so it never re-loops the buildings —
+## that per-building sweep every frame was what made a heavily-built game stutter.
+var _bld_compute:  float = 0.0
+var _bld_minerals: float = 0.0
+var _bld_energy:   float = 0.0   # building energy + swarm power (pre-boost, pre-thermal)
+var _bld_radiator: float = 0.0
 
 # ── Manufacturing Capacity (MC) ───────────────────────────────────────────────
 ## Industrial throughput is per-planet: each world can only run so much manufacturing
@@ -236,6 +422,30 @@ var _cached_planet_built_mc: Dictionary = {}
 ## planet → { "capacity": work/day, "demand": work/day } from the last production tick,
 ## pushed to the ProductionPanel for its capacity readout.
 var _last_mc_state: Dictionary = {}
+
+## Manufacturing capacity a world has left after its running recipes — construction draws
+## on this, so factories and building sites compete for one finite industrial base.
+func _planet_free_mc(planet: String) -> float:
+	var cap: float = _planet_mc_capacity(planet)
+	var demand: float = float((_last_mc_state.get(planet, {}) as Dictionary).get("demand", 0.0))
+	return maxf(0.0, cap - demand)
+
+# ── Waste heat / thermodynamics ───────────────────────────────────────────────
+## Every watt the civilisation uses ends as heat that must be radiated to the cold
+## universe.  Radiating capacity is a manual/biosphere base plus Thermal Radiators, and
+## rises as cosmic expansion cools the sink.  Power drawn beyond it is curtailed (you can't
+## use energy you can't shed), so megastructures like the Dyson swarm demand radiators.
+const BASE_RADIATOR_W: float   = 8.0e12    # heat the base grid+biosphere sheds unaided (8 TW)
+const CMB_TEMP_2026:   float   = 2.725     # K, universe background temperature at epoch 2026
+const THERMAL_EFF_FLOOR: float = 0.30      # usable-power floor even when badly over capacity
+const DAY_SECONDS:     float   = 86_400.0  # simulated seconds per game-day (for J = W·s)
+## Cumulative entropy (J/K) exported to the universe — a counter that only ever grows.
+var entropy_exported: float = 0.0
+## Radiating capacity (W) and load/capacity ratio from the last production recompute.
+var _cached_radiator_cap: float = BASE_RADIATOR_W
+var _thermal_ratio: float = 0.0            # raw power draw ÷ radiating capacity
+var _heat_alerted: bool = false            # so the overheating notice fires once per episode
+var _labor_alerted: bool = false           # likewise for the labour-shortage notice
 
 ## Accumulated mass of each crust compound extracted by all mines, in grams.
 var compound_inventory: Dictionary = {}
@@ -256,6 +466,8 @@ var _automation_rules: Array = []
 ## name → BuildingData entry.  Populated once at startup so every call to
 ## _find_building_def() is O(1) instead of O(n).
 var _bdef_cache: Dictionary = {}
+## name → RecipeData entry, same idea for _find_recipe_by_name (hot in _process_production).
+var _recipe_cache: Dictionary = {}
 
 @onready var science_label: Label = $main_ui/VBoxContainer3/HBoxContainer/ScienceLabel
 @onready var research_ui: Control = $main_ui/VBoxContainer3/HBoxContainer2/research_tree
@@ -264,6 +476,10 @@ var _bdef_cache: Dictionary = {}
 @onready var planet_info_page: PanelContainer = $main_ui/PlanetInfoPage
 @onready var build_panel: PanelContainer = $main_ui/BuildPanel
 @onready var launch_panel: PanelContainer = $main_ui/LaunchPanel
+## Merged planet panel: the info page, build panel, and population stats become tabs of one
+## TabContainer (built in _setup_planet_tabs).  Game shows/hides the wrapper; tabs switch views.
+var _planet_tabs: TabContainer = null
+var _population_page: Control = null
 @onready var sidebar: SidebarControl     = $main_ui/VBoxContainer3/HBoxContainer2
 @onready var planet_bar: Control         = $main_ui/PlanetBar
 @onready var launches_button: Button     = $main_ui/VBoxContainer3/HBoxContainer2/sidebar/launches
@@ -325,10 +541,17 @@ func start_new_game() -> void:
 	active_launches = []
 	_next_launch_id = 1
 	solar_satellites_deployed = 0
+	_pending_swarm = 0
 	colonized_planets = []
 	colonized_stars = []
 	interstellar_missions = []
 	interstellar_attacks = []
+	incoming_attacks = []
+	outgoing_messages = []
+	probe_missions = []
+	_diplo_status = {}
+	_infra_probed = {}
+	_rkkv_notice_year = -1.0e18
 	_seed_star_factions()
 	# Earth's population starts diverging from the 1945 baseline immediately; after
 	# its random threshold it becomes "H. sapiens terran".
@@ -350,6 +573,10 @@ func start_new_game() -> void:
 	for _i in range(5):  earth_buildings.append("Oil Plant")
 	earth_buildings.append("Research Lab")
 	planet_buildings = {"earth": earth_buildings}
+	build_queue = {}   # nothing under construction at the start
+	entropy_exported = 0.0
+	_heat_alerted = false
+	_labor_alerted = false
 	# Starter production: a working industrial base in the production menu —
 	# quicklime → concrete, the foundation for expanding the operation.
 	_production_jobs = [
@@ -417,6 +644,9 @@ func _ready() -> void:
 		sidebar.star_map.colonize_requested.connect(_on_colonize_requested)
 		sidebar.star_map.laser_requested.connect(_on_laser_requested)
 		sidebar.star_map.berserker_requested.connect(_on_berserker_requested)
+		sidebar.star_map.missile_requested.connect(_on_missile_requested)
+		sidebar.star_map.probe_requested.connect(_on_probe_requested)
+		sidebar.star_map.message_requested.connect(_on_message_requested)
 	politics_page.policy_changed.connect(_on_policy_changed)
 	game_over_screen.restart_requested.connect(_on_restart_requested)
 	settings_menu.closed.connect(_on_settings_closed)
@@ -424,6 +654,9 @@ func _ready() -> void:
 	_setup_event_notifications()
 	_init_planet_buttons()
 	_setup_bar_backgrounds()
+	_setup_realtime_clock()
+	_setup_body_picker()
+	_setup_planet_tabs()
 
 	if GameSession.should_load_on_start and GameSession.current_save_path != "":
 		load_game(GameSession.current_save_path)
@@ -451,14 +684,156 @@ func _setup_satellite() -> void:
 ## the 3D scene.  They follow the bars' rects (set on layout + viewport resize).
 var _top_bar_bg:  Panel = null
 var _side_bar_bg: Panel = null
+## Real-world clock shown on the right of the top bar.
+var _realtime_label: Label = null
+
+## Add a wall-clock readout to the right end of the top bar (updated in _process).
+func _setup_realtime_clock() -> void:
+	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
+	if top_bar == null:
+		return
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # pushes the clock to the right
+	top_bar.add_child(spacer)
+	_realtime_label = Label.new()
+	_realtime_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_realtime_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_realtime_label.custom_minimum_size = Vector2(96, 0)
+	_realtime_label.add_theme_color_override("font_color", Color(0.8, 0.86, 0.95))
+	top_bar.add_child(_realtime_label)
+	# Small trailing spacer so the clock sits a little left of the top-bar's right edge.
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(24, 0)
+	top_bar.add_child(pad)
+	_update_realtime_clock()
+
+func _update_realtime_clock() -> void:
+	if _realtime_label == null:
+		return
+	var t: Dictionary = Time.get_time_dict_from_system()   # local {hour, minute, second}
+	var h24: int = int(t.get("hour", 0))
+	var minute: int = int(t.get("minute", 0))
+	var suffix: String = "AM" if h24 < 12 else "PM"
+	var h12: int = h24 % 12
+	if h12 == 0:
+		h12 = 12                                          # midnight/noon read as 12, not 0
+	_realtime_label.text = "%d:%02d %s" % [h12, minute, suffix]
+
+## Overlay that highlights the planet/moon/sun under the cursor with a white ring and
+## focuses the camera on it when clicked.  Sits behind the UI so panels occlude the ring.
+func _setup_body_picker() -> void:
+	var picker: Control = load("res://body_picker.gd").new()
+	$main_ui.add_child(picker)
+	$main_ui.move_child(picker, 0)   # behind the bars/panels (they draw over it)
+
+## Fold the planet-info page, build panel, and a new population-stats page into one tabbed
+## panel.  The two existing scene panels are reparented as tab pages (their references stay
+## valid); the TabContainer manages which is shown, and Game shows/hides the whole wrapper.
+func _setup_planet_tabs() -> void:
+	var tabs := TabContainer.new()
+	tabs.name = "PlanetTabs"
+	# Top-right, below the top bar (where the info page used to sit), sized for the build list.
+	tabs.anchor_left = 1.0
+	tabs.anchor_right = 1.0
+	tabs.offset_left = -728.0
+	tabs.offset_right = -8.0
+	tabs.offset_top = 52.0
+	tabs.offset_bottom = 732.0
+	tabs.visible = false
+
+	planet_info_page.get_parent().remove_child(planet_info_page)
+	planet_info_page.name = "Info"
+	tabs.add_child(planet_info_page)
+
+	build_panel.get_parent().remove_child(build_panel)
+	build_panel.name = "Infrastructure"
+	tabs.add_child(build_panel)
+
+	_population_page = load("res://PopulationStatsPage.gd").new()
+	_population_page.name = "Population"
+	tabs.add_child(_population_page)
+
+	$main_ui.add_child(tabs)
+	_planet_tabs = tabs
+	tabs.tab_changed.connect(func(_i): _refresh_planet_tabs())
+	if sidebar:
+		sidebar.planet_tabs = tabs   # so hide_all() can close the whole wrapper
+
+## Repopulate whichever planet tab is currently active (called on select + tab switch).
+func _refresh_planet_tabs() -> void:
+	if _planet_tabs == null or not _planet_tabs.visible or current_planet == "":
+		return
+	if planet_info_page.visible:
+		planet_info_page.set_planet_info(get_planet_data(current_planet))
+	if build_panel.visible:
+		build_panel.set_planet(current_planet, _get_catalog_for_display())
+	if _population_page and _population_page.visible:
+		_population_page.set_stats(_population_stats(current_planet))
+
+## Population figures for the stats tab.
+## Population stats for a SPECIFIC body.  The species population is one global pool, so it's
+## distributed across inhabited worlds by their carrying-capacity share (uninhabited bodies —
+## the Sun, un-colonised planets, moons — show zero).  Growth/life/happiness are species-wide.
+func _population_stats(body: String) -> Dictionary:
+	var total_k: float = _population_capacity()
+	var body_k: float = _body_capacity(body)
+	var inhabited: bool = body_k > 0.0
+	var global_pop: float = float(stats.get("current_population", 0))
+	var pop: float = (global_pop * body_k / total_k) if total_k > 0.0 else 0.0
+	return {
+		"population":      pop,
+		"capacity":        body_k,
+		"life_expectancy": _life_expectancy(),
+		"growth":          _growth_rate_pct(),
+		"happiness":       _happiness(),
+		"inhabited":       inhabited,
+	}
+
+## A single body's contribution to the global carrying capacity: Earth's biosphere, a
+## colonised planet's equal share of the (capped) off-world habitat pool, or 0 for anywhere
+## nobody lives.  Sums (over Earth + colonies) to _population_capacity().
+func _body_capacity(body: String) -> float:
+	var policy: float = PoliticsData.pop_capacity_mult(policies)
+	if body == "earth":
+		return EARTH_NATURAL_K * _climate_capacity_factor() * policy
+	if colonized_planets.has(body):
+		var prod: Dictionary = _get_total_production()
+		var supportable: float = minf(
+			float(prod.get("energy", 0.0)) / ENERGY_PER_CAPITA,
+			float(prod.get("minerals", 0.0)) / MINERALS_PER_CAPITA)
+		var colony_habitat: float = COLONY_HABITAT_K * float(colonized_planets.size())
+		var offworld_k: float = maxf(0.0, minf(colony_habitat, supportable)) * policy
+		return offworld_k / float(maxi(1, colonized_planets.size()))
+	return 0.0
+
+## Instantaneous net population growth rate (%/yr) from the logistic model — positive with
+## headroom below capacity, negative when the population is over a (shrunken) capacity.
+func _growth_rate_pct() -> float:
+	var k: float = _population_capacity()
+	if k <= 0.0:
+		return 0.0
+	var pop: float = float(stats.get("current_population", 0))
+	var r: float = POP_GROWTH_PER_YEAR * PoliticsData.pop_growth_mult(policies)
+	return r * (1.0 - pop / k) * 100.0
+
+## Population happiness (0–100%): comfortable when there's slack below carrying capacity and
+## life expectancy is high, dragged down by crowding past capacity and existential risk.
+func _happiness() -> float:
+	var pop: float = float(stats.get("current_population", 0))
+	var k: float = _population_capacity()
+	var strain: float = pop / maxf(k, 1.0)                          # 1.0 = at capacity
+	var comfort: float = clampf(1.0 - maxf(0.0, strain - 0.9) * 1.5, 0.0, 1.0)
+	var life: float = clampf(_life_expectancy() / 85.0, 0.0, 1.0)
+	var risk: float = clampf(PoliticsData.existential_risk(policies), 0.0, 1.0)
+	return clampf((0.55 * comfort + 0.45 * life) * (1.0 - 0.4 * risk), 0.0, 1.0) * 100.0
 
 func _setup_bar_backgrounds() -> void:
 	var canvas := $main_ui
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.06, 0.10, 0.86)
+	style.bg_color = Color(0.05, 0.06, 0.10, 1.0)
 	style.set_corner_radius_all(4)
 	style.set_border_width_all(1)
-	style.border_color = Color(0.35, 0.45, 0.65, 0.35)
+	style.border_color = Color(0.35, 0.45, 0.65, 1.0)   # opaque border
 
 	_top_bar_bg = Panel.new()
 	_top_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -503,14 +878,13 @@ func _init_planet_buttons() -> void:
 		if btn:
 			_planet_buttons[pname] = btn
 
-## Enable a body's button only once a Survey probe has been sent there (Earth is
-## always available).  Locked buttons get an explanatory tooltip.
+## Every body's button is always available — you can inspect any planet/moon/sun without
+## first sending a probe.  (Building on a world still requires a colony; see _is_body_buildable.)
 func _refresh_planet_buttons() -> void:
 	for pname: String in _planet_buttons:
-		var unlocked: bool = pname == "earth" or surveyed_planets.has(pname)
 		var btn: Button = _planet_buttons[pname]
-		btn.disabled = not unlocked
-		btn.tooltip_text = "" if unlocked else "Send a Survey probe here to unlock"
+		btn.disabled = false
+		btn.tooltip_text = ""
 
 ## Mark a body as surveyed (called when a Survey mission is launched to it) and
 ## refresh the planet bar.  No-op if already surveyed.
@@ -555,9 +929,32 @@ func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: Str
 	)
 	_launch_satellites[launch_id] = sat
 
+## A Solar Deployment craft: flies straight to its reserved swarm slot and removes
+## itself on arrival (the swarm collector takes its place — see init_planets).
+func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id: int, flight_days: float) -> void:
+	var sat := Satellite.new()
+	sat.name            = "Satellite_%d" % launch_id
+	sat.arrival_mode    = "swarm"
+	sat.swarm_target_pos = slot_pos
+	$WorldRoot.add_child(sat)
+	sat.begin_transfer(
+		$WorldRoot/Planets/sun as Node3D,
+		origin_planet,
+		origin_planet,   # target planet unused in swarm mode; pass origin to stay valid
+		flight_days
+	)
+	_launch_satellites[launch_id] = sat
+
 func _process(delta: float) -> void:
+	_update_realtime_clock()   # wall clock ticks regardless of game pause/timescale
+
 	# ── Drain one pending event notification per frame ────────────────────────
 	if not _pending_event_notifications.is_empty():
+		# Bound the backlog: a deep-time flood (e.g. relativistic-missile alerts) could queue
+		# faster than one-per-frame forever.  Keep only the most recent few popup cards — the
+		# events still land on the (also-bounded) timeline; we just don't stack thousands of cards.
+		if _pending_event_notifications.size() > 5:
+			_pending_event_notifications = _pending_event_notifications.slice(-5)
 		_show_event_card(_pending_event_notifications.pop_front())
 
 	# ── Autosave timer (runs even while paused) ───────────────────────────────
@@ -606,7 +1003,10 @@ func _process(delta: float) -> void:
 		_accumulate_compounds(delta_days)
 		_accumulate_emissions(delta_days)
 		_process_production(delta_days)
+		_process_construction(delta_days)
 		_process_automation()
+		_accumulate_entropy(delta_days)   # heat shed to the cooling universe, dS = Q/T
+		_check_thermal_labor_alerts()     # one-shot overheating / labour-shortage notices
 		# Clamp minerals and energy to their storage caps; science is never capped.
 		for resource: String in _cached_storage_caps:
 			if ResearchTree.resources.has(resource):
@@ -629,6 +1029,28 @@ func _process(delta: float) -> void:
 		if sidebar and sidebar.star_map and sidebar.star_map.visible:
 			refresh_star_map()
 
+	# ── Throttled panel refresh (once per frame, capped at ~4 Hz) ────────────────
+	# get_planet_data duplicates composition/inventory dictionaries and a BuildPanel rebuild
+	# recreates its whole node tree — doing either every frame, or once per queued/completed
+	# build, was the construction-time lag.  Coalesce roster changes into one rebuild per tick.
+	_ui_refresh_accum += delta
+	if _ui_refresh_accum >= UI_REFRESH_SEC:
+		_ui_refresh_accum = 0.0
+		# Only refresh the merged panel's ACTIVE tab, and only while it's open.
+		if _planet_tabs and _planet_tabs.visible and current_planet != "":
+			if planet_info_page.visible:
+				planet_info_page.set_planet_info(get_planet_data(current_planet))
+			elif build_panel.visible:
+				if _build_ui_dirty:
+					build_panel.set_planet(current_planet, _get_catalog_for_display())  # roster changed
+				else:
+					build_panel.refresh_affordability(_build_cost_stockpiles())          # recolour only
+			elif _population_page and _population_page.visible:
+				_population_page.set_stats(_population_stats(current_planet))
+		if _build_ui_dirty and launch_panel.visible:
+			launch_panel.set_launch_mods(_build_launch_mods_map())
+		_build_ui_dirty = false
+
 func advance_day() -> void:
 	day += 1
 
@@ -650,6 +1072,10 @@ func advance_day() -> void:
 			_check_population_splits()
 			_check_interstellar_arrivals()
 			_check_interstellar_attacks()
+			_process_aliens()
+			_check_incoming_attacks()
+			_check_probe_arrivals()
+			_check_message_arrivals()
 			_check_asteroid_impact()
 			_check_pandemic()
 			_check_nuclear_war()
@@ -658,14 +1084,6 @@ func advance_day() -> void:
 			_check_game_events("compute")
 			if timeline_panel and timeline_panel.visible:
 				timeline_panel.set_current_year(year)
-
-	if current_planet != "" and planet_info_page.visible:
-		planet_info_page.set_planet_info(get_planet_data(current_planet))
-
-	# Live-update which build-cost items the player can currently afford (recolour
-	# only — no rebuild, so the menu's scroll position is preserved).
-	if build_panel.visible:
-		build_panel.refresh_affordability(_build_cost_stockpiles())
 
 	var today_abs := _to_abs_day(year, month, day)
 	var any_completed := false
@@ -702,7 +1120,8 @@ func advance_day() -> void:
 				var payload: int = int(launch.get("payload", 0))
 				if payload > 0:
 					solar_satellites_deployed = clampi(
-						solar_satellites_deployed + payload, 0, SWARM_SAT_MAX)
+						solar_satellites_deployed + payload, 0, _swarm_max())
+					_pending_swarm = maxi(0, _pending_swarm - payload)
 					_mark_prod_dirty()   # swarm now beams back more power
 	if any_completed:
 		# Drop finished missions so active_launches stays bounded (it would otherwise
@@ -716,7 +1135,7 @@ func advance_day() -> void:
 	if launch_panel.visible:
 		launch_panel.set_game_date(year, month + 1, day + 1)
 		launch_panel.set_orbital_state(_build_orbital_state())
-		launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, SWARM_SAT_MAX)
+		launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, _swarm_max())
 		launch_panel.set_launch_stock(_build_launch_stock())
 		launch_panel.refresh_launches(_compute_launch_display_data())
 
@@ -725,6 +1144,11 @@ func _init_building_cache() -> void:
 	_bdef_cache.clear()
 	for b: Dictionary in BuildingData.BUILDINGS:
 		_bdef_cache[b["name"]] = b
+	# Recipe lookups too, so _process_production doesn't linear-scan the recipe list twice
+	# per job every frame (that scan was the frame-rate drag while production was running).
+	_recipe_cache.clear()
+	for r: Dictionary in RecipeData.RECIPES:
+		_recipe_cache[r["name"]] = r
 
 ## O(1) building-def lookup via pre-built cache.
 func _find_building_def(building_name: String) -> Dictionary:
@@ -745,7 +1169,7 @@ const _PLANET_BASE_STORAGE: Dictionary = {"minerals": 100_000.0, "energy": 100_0
 ## pool: base allocation (if colonised / Earth) + capacity from storage buildings.
 func _get_planet_storage_cap(planet_name: String) -> Dictionary:
 	var cap: Dictionary = _PLANET_BASE_STORAGE.duplicate() \
-		if (planet_name == "earth" or colonized_planets.has(planet_name)) \
+		if _is_body_buildable(planet_name) \
 		else {"minerals": 0.0, "energy": 0.0}
 	for b_name: String in planet_buildings.get(planet_name, []):
 		var stor: Dictionary = (_bdef_cache.get(b_name, {}) as Dictionary).get("storage", {})
@@ -772,16 +1196,15 @@ func _compute_storage_caps() -> Dictionary:
 					caps[resource] += float(stor[resource])
 	return caps
 
-## Rebuild _cached_compute and _cached_prod in a single pass over all buildings.
-## Called lazily by _get_compute_rate / _get_total_production when _prod_dirty.
+## Re-sum the building-derived contributions (compute/minerals/energy/MC/radiator/storage).
+## Runs ONLY when the roster changes (_prod_dirty) — NOT every frame.  Population and boosts
+## are applied cheaply afterwards by _combine_production, so this O(buildings) sweep happens
+## only on build/demolish/colony/swarm changes.
 func _recompute_production_cache() -> void:
-	# Population compute: each individual contributes the best unlocked evolution
-	# node's FLOP/s value (10^17 for all current nodes).
-	var flops_per_person: float = evolution_ui.get_unlocked_compute_per_individual()
-	var pop: float = float(stats.get("current_population", 0))
-	var compute: float = pop * flops_per_person
+	var compute:  float = 0.0
 	var minerals: float = 0.0
 	var energy:   float = 0.0
+	var radiator: float = 0.0
 	var built_mc: Dictionary = {}
 	for planet_name: String in planet_buildings:
 		var pmc: float = 0.0
@@ -792,25 +1215,44 @@ func _recompute_production_cache() -> void:
 			minerals += (prod.get("minerals", 0.0) as float)
 			energy   += (prod.get("energy",   0.0) as float)
 			pmc      += float(bdef.get("mc_capacity", 0.0))
+			radiator += float(bdef.get("radiator_capacity", 0.0))
 		built_mc[planet_name] = pmc
 	_cached_planet_built_mc = built_mc
-	# Dyson swarm: every Solar Satellite deployed to the Sun beams power to the grid.
-	energy += float(solar_satellites_deployed) * SWARM_SAT_POWER
-	compute  *= (1.0 + ResearchTree.get_boost("research_speed")) * _policy_compute_mult()
-	minerals *= (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
-	energy   *= (1.0 + ResearchTree.get_boost("energy_production"))  * _policy_energy_mult()
-	_cached_compute       = compute
-	_cached_prod          = {
-		# science_production boost scales how quickly science resources accumulate
-		# (distinct from research_speed, which scales how fast an active job progresses)
+	# Dyson swarm: collectors beam power to the grid, less per lane the farther out it sits.
+	_bld_compute  = compute
+	_bld_minerals = minerals
+	_bld_energy   = energy + _swarm_power()
+	_bld_radiator = radiator
+	# Storage caps are also roster-derived — refresh them in the same dirty pass.
+	_cached_storage_caps = _compute_storage_caps()
+	_prod_dirty = false
+
+## Cheap, O(1) per-frame combine of the cached building sums with the current population and
+## the research/policy multipliers, producing the live compute rate and production dict.
+func _combine_production() -> void:
+	var flops_per_person: float = evolution_ui.get_unlocked_compute_per_individual() \
+		if evolution_ui else 1.0e17
+	var pop: float = float(stats.get("current_population", 0))
+	var compute: float = (pop * flops_per_person + _bld_compute) \
+		* (1.0 + ResearchTree.get_boost("research_speed")) * _policy_compute_mult()
+	var minerals: float = _bld_minerals \
+		* (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
+	var energy: float = _bld_energy \
+		* (1.0 + ResearchTree.get_boost("energy_production")) * _policy_energy_mult()
+
+	# ── Waste-heat throttle ────────────────────────────────────────────────────
+	_cached_radiator_cap = (BASE_RADIATOR_W + _bld_radiator) \
+		* (1.0 + ResearchTree.get_boost("heat_management")) * _thermal_coldness()
+	_thermal_ratio = energy / maxf(_cached_radiator_cap, 1.0)
+	energy *= _thermal_efficiency(energy, _cached_radiator_cap)
+
+	_cached_compute = compute
+	_cached_prod = {
 		"science":  compute * science_multiplier * _policy_science_mult()
 					* (1.0 + ResearchTree.get_boost("science_production")),
 		"minerals": minerals,
 		"energy":   energy,
 	}
-	# Recompute storage caps in the same dirty pass so they're always current.
-	_cached_storage_caps = _compute_storage_caps()
-	_prod_dirty = false
 
 # ── Policy multipliers ────────────────────────────────────────────────────────
 # The formulas live in PoliticsData so the politics screen can display the exact
@@ -1007,6 +1449,10 @@ func _on_years_advanced_fast(years_advanced: int) -> void:
 		_check_population_splits()
 		_check_interstellar_arrivals()
 		_check_interstellar_attacks()
+		_process_aliens()
+		_check_incoming_attacks()
+		_check_probe_arrivals()
+		_check_message_arrivals()
 		_check_asteroid_impact()
 		_check_pandemic()
 		_check_nuclear_war()
@@ -1023,6 +1469,7 @@ func _process_production(delta_days: float) -> void:
 	if _production_jobs.is_empty():
 		_last_mc_state = {}
 		return
+	var panel_open: bool = production_panel.visible   # gate per-frame UI churn on visibility
 
 	# ── Per-planet Manufacturing Capacity (MC) ────────────────────────────────
 	# Each job demands "work" per day (≈ its material throughput).  A world's capacity
@@ -1087,15 +1534,18 @@ func _process_production(delta_days: float) -> void:
 				bottleneck = key
 		run_days = maxf(0.0, run_days)
 
-		var job_id := int(job.get("id", 0))
 		# Status priority: an input shortage is shown first; otherwise, if the world's
-		# manufacturing capacity is the limit, flag that; else the job runs clean.
-		if bottleneck != "":
-			production_panel.set_job_status(job_id, false, bottleneck)
-		elif mc_throttle < 0.999:
-			production_panel.set_job_status(job_id, false, "capacity")
-		else:
-			production_panel.set_job_status(job_id, true, "")
+		# manufacturing capacity is the limit, flag that; else the job runs clean.  Only
+		# pushed while the panel is open — updating (and re-shaping) hidden labels every
+		# frame per job was the main cost that made building/producing stutter.
+		if panel_open:
+			var job_id := int(job.get("id", 0))
+			if bottleneck != "":
+				production_panel.set_job_status(job_id, false, bottleneck)
+			elif mc_throttle < 0.999:
+				production_panel.set_job_status(job_id, false, "capacity")
+			else:
+				production_panel.set_job_status(job_id, true, "")
 
 		if run_days <= 0.0 or rate <= 0.0:
 			continue
@@ -1106,14 +1556,12 @@ func _process_production(delta_days: float) -> void:
 		for key: String in outputs:
 			_add_stockpile(key, float(outputs[key]) * rate * run_days, planet)
 
-	production_panel.set_mc_state(_last_mc_state)
+	if panel_open:
+		production_panel.set_mc_state(_last_mc_state)
 
-## Look up a recipe by exact name (searches the full master list).
+## O(1) recipe-def lookup via the pre-built cache (see _init_building_cache).
 func _find_recipe_by_name(name: String) -> Dictionary:
-	for r in RecipeData.RECIPES:
-		if r["name"] == name:
-			return r
-	return {}
+	return _recipe_cache.get(name, {})
 
 ## Manufacturing "work" one batch of a recipe demands per unit rate — its material
 ## throughput (sum of inputs except the energy/science it also draws from global pools),
@@ -1187,26 +1635,25 @@ func _run_build_rule(rule: Dictionary) -> void:
 	var building: String = str(rule.get("building", ""))
 	var target: int = int(rule.get("target", 0))
 	var guard: int = 0
-	while _count_building(planet, building) < target and guard < target:
+	# Count what's already standing AND what's queued, so the rule fills the queue up to
+	# the target once and then waits for construction — instead of re-queueing every frame.
+	while _count_building(planet, building) + _queued_count(planet, building) < target \
+			and guard < target:
 		if not try_build(planet, building):
 			break
 		guard += 1
 
-## Keep rule.keep missions of this kind in flight, launching while affordable/valid.
+## Keep rule.keep missions of this kind in flight, launching at most ONE per tick — so a
+## rule ramps its fleet up over successive frames (and is naturally paced by how fast the
+## origin can supply rockets/fuel) rather than spawning the whole batch in a single frame.
 func _run_launch_rule(rule: Dictionary, angles: Dictionary) -> void:
 	var mission: String = str(rule.get("mission", ""))
 	var origin: String = str(rule.get("origin", "earth"))
 	var target: String = str(rule.get("target", ""))
-	var keep: int = int(rule.get("keep", 0))
-	var active: int = _count_active_launches(mission, origin, target)
-	var guard: int = 0
-	while active < keep and guard < keep:
-		var before: int = active_launches.size()
-		_auto_launch(rule, angles)
-		if active_launches.size() == before:
-			break   # couldn't launch (unaffordable / invalid) — retry next frame
-		active += 1
-		guard += 1
+	var keep: int = maxi(1, int(rule.get("keep", 1)))
+	if _count_active_launches(mission, origin, target) >= keep:
+		return   # fleet already at strength
+	_auto_launch(rule, angles)   # one launch per tick; retries next tick if it can afford more
 
 ## Build a launch params dict from a rule (mirroring the LaunchPanel via LaunchPlanner)
 ## and submit it through the same _on_launch_requested path the manual UI uses.
@@ -1265,10 +1712,53 @@ func _fuel_accel(fuel_id: String) -> float:
 	return 1.0e-2
 
 ## The per-planet compound inventory dict for `planet` (created on first access).
+## A moon shares its parent planet's material stockpile (one colony's logistics span the
+## planet and its moons), so building on a moon draws on — and its mines feed — the parent.
 func _planet_inv(planet: String) -> Dictionary:
-	if not compound_inventory.has(planet):
-		compound_inventory[planet] = {}
-	return compound_inventory[planet]
+	var key: String = planet
+	if _is_moon(planet):
+		var parent: String = _moon_parent(planet)
+		if parent != "":
+			key = parent
+	if not compound_inventory.has(key):
+		compound_inventory[key] = {}
+	return compound_inventory[key]
+
+# ── Body helpers (planets + moons) ────────────────────────────────────────────
+
+## True when `id` is a cosmetic moon ("<planet>_moon_<n>").
+func _is_moon(id: String) -> bool:
+	return id.find("_moon_") > 0
+
+## Parent planet of a moon id, or "" when `id` is not a moon.
+func _moon_parent(id: String) -> String:
+	var idx: int = id.find("_moon_")
+	return id.substr(0, idx) if idx > 0 else ""
+
+## Any real body's info/build panel can be opened — no probe required to inspect a world.
+## (Whether you can BUILD there is a separate check; see _is_body_buildable.)
+func _is_body_selectable(id: String) -> bool:
+	return id != ""
+
+## A body that can be built on: home, a colonised planet, or a moon of one — moons inherit
+## their parent colony's foothold, so you build them out once the planet itself is settled.
+func _is_body_buildable(id: String) -> bool:
+	if id == "earth" or colonized_planets.has(id):
+		return true
+	var parent: String = _moon_parent(id)
+	return parent != "" and (parent == "earth" or colonized_planets.has(parent))
+
+## Human-readable name for a planet or moon (capitalised id, or the moon's proper name).
+func _body_display_name(id: String) -> String:
+	return str(MOON_NAMES.get(id, id.capitalize()))
+
+## Composition (with crust) for ore-mining + the panel; moons use a generic regolith.
+func _body_composition(id: String) -> Dictionary:
+	if PlanetData.PLANETS.has(id):
+		return (PlanetData.PLANETS[id] as Dictionary).get("composition_g", {})
+	if _is_moon(id):
+		return MOON_COMPOSITION
+	return {}
 
 ## Current held amount of a resource.  science/minerals/energy are global pools;
 ## every other compound is stored per-planet (mined and crafted locally).
@@ -1323,8 +1813,7 @@ func _completed_research_map() -> Dictionary:
 func _accumulate_compounds(delta_days: float) -> void:
 	var minerals_mult: float = (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
 	for planet_name: String in planet_buildings:
-		var crust_comp: Dictionary = (PlanetData.PLANETS.get(planet_name, {}) as Dictionary) \
-			.get("composition_g", {}).get("crust", {})
+		var crust_comp: Dictionary = (_body_composition(planet_name) as Dictionary).get("crust", {})
 		if crust_comp.is_empty():
 			continue
 		var mine_rate: float = 0.0
@@ -1405,30 +1894,26 @@ func _dirty_power_fraction() -> float:
 			total += e
 			if float(bdef.get("co2_per_energy", 0.0)) > 0.0:
 				dirty += e
-	total += float(solar_satellites_deployed) * SWARM_SAT_POWER   # the swarm is clean
+	total += _swarm_power()   # the swarm is clean
 	return dirty / total if total > 0.0 else 0.0
 
 # Returns compute rate (population + buildings, boosted by tech and policy).
 func _get_compute_rate() -> float:
 	if _prod_dirty:
 		_recompute_production_cache()
+	_combine_production()
 	return _cached_compute
 
 # Returns per-second production of every storable resource.
 func _get_total_production() -> Dictionary:
 	if _prod_dirty:
 		_recompute_production_cache()
+	_combine_production()
 	return _cached_prod
 
 func get_planet_data(planet_name: String) -> Dictionary:
-	var planet_names := {
-		"sun":     "Sun",
-		"mercury": "Mercury", "venus": "Venus",   "earth": "Earth",
-		"mars":    "Mars",    "jupiter": "Jupiter","saturn": "Saturn",
-		"uranus":  "Uranus",  "neptune": "Neptune",
-	}
 	var d := {
-		"name":       planet_names.get(planet_name, planet_name.capitalize()),
+		"name":       _body_display_name(planet_name),
 		# Population is global and attributed to Earth (humanity's home); colonies
 		# show 0 here.  Always a whole number of people.
 		"population": int(stats.get("current_population", 0)) if planet_name == "earth" else 0,
@@ -1460,8 +1945,7 @@ func get_planet_data(planet_name: String) -> Dictionary:
 	# Build composition with crust depleted by mining and the atmosphere's CO₂
 	# raised by combustion emissions.  Uses this planet's own inventory.
 	var inv: Dictionary = _planet_inv(planet_name)
-	var raw_comp: Dictionary = (PlanetData.PLANETS.get(planet_name, {}) as Dictionary) \
-		.get("composition_g", {})
+	var raw_comp: Dictionary = _body_composition(planet_name)
 	var added_co2: float = float(atmospheric_co2.get(planet_name, 0.0))
 	if raw_comp.is_empty():
 		d["composition_g"] = raw_comp
@@ -1487,8 +1971,7 @@ func get_planet_data(planet_name: String) -> Dictionary:
 	d["compound_inventory"] = inv.duplicate()
 
 	# Per-compound mine output: distribute mine_output_rate by crust mass fractions.
-	var crust_comp: Dictionary = (PlanetData.PLANETS.get(planet_name, {}) as Dictionary) \
-		.get("composition_g", {}).get("crust", {})
+	var crust_comp: Dictionary = (_body_composition(planet_name) as Dictionary).get("crust", {})
 	var mined: Dictionary = {}
 	if mine_output_rate > 0.0 and not crust_comp.is_empty():
 		var total_crust := 0.0
@@ -1512,6 +1995,26 @@ func get_planet_data(planet_name: String) -> Dictionary:
 	# saturated).  Factories raise the capacity.
 	d["mc_capacity"] = _planet_mc_capacity(planet_name)
 	d["mc_used"]     = float((_last_mc_state.get(planet_name, {}) as Dictionary).get("demand", 0.0))
+	# Civilisation-wide labour staffing fraction (0..1): the finite workforce can only run so
+	# much built capacity, so a shrinking population throttles every world's MC until
+	# automation research offsets it.
+	d["labor_staffing"] = _mc_staffing()
+
+	# Active construction on this world — its building speed is this planet's MC, so the
+	# panel can show what's being raised and how close it is.
+	var queue: Array = build_queue.get(planet_name, [])
+	var mc_rate: float = _planet_free_mc(planet_name)   # spare capacity after recipes
+	var con_list: Array = []
+	for job: Dictionary in queue:
+		var work: float = maxf(1.0, float(job.get("work", 1.0)))
+		var prog: float = float(job.get("progress", 0.0))
+		var eta: float = (work - prog) / mc_rate if mc_rate > 0.0 else -1.0
+		con_list.append({
+			"name": str(job.get("building", "")),
+			"frac": clampf(prog / work, 0.0, 1.0),
+			"eta_days": eta,   # of the front job; later jobs wait their turn
+		})
+	d["construction"] = con_list
 
 	# Storage — per-planet capacity and global usage for the info panel.
 	d["storage_cap"]        = _get_planet_storage_cap(planet_name)
@@ -1535,8 +2038,8 @@ func _build_cost_stockpiles() -> Dictionary:
 	return have
 
 func _get_catalog_for_display() -> Array:
-	var has_colony: bool   = current_planet == "earth" or colonized_planets.has(current_planet)
-	var planet_type: String = PLANET_TYPES.get(current_planet, "rocky")
+	var has_colony: bool   = _is_body_buildable(current_planet)
+	var planet_type: String = PLANET_TYPES.get(current_planet, "rocky")   # moons → rocky
 	var built: Array = planet_buildings.get(current_planet, [])
 	var result: Array = []
 	for b: Dictionary in BuildingData.BUILDINGS:
@@ -1567,6 +2070,7 @@ func _get_catalog_for_display() -> Array:
 		else:
 			entry["requires"] = ""
 		entry["count"] = cnt
+		entry["in_progress"] = _queued_count(current_planet, b["name"])
 		# Current stockpile (on this planet) of each cost resource so the panel can
 		# dim the ones the player can't yet afford here.
 		var have: Dictionary = {}
@@ -1584,14 +2088,19 @@ func _building_type_label(allowed_types: Array) -> String:
 	return " or ".join(names) + " planet"
 
 func select_planet(planet_name: String) -> void:
-	# Bodies stay inaccessible until a Survey probe has been sent there (Earth is
-	# home).  The planet-bar buttons enforce this too; this guards other callers.
-	if planet_name != "earth" and not surveyed_planets.has(planet_name):
+	# Any body can be inspected without a probe; only an empty id is rejected.
+	if not _is_body_selectable(planet_name):
 		return
 	current_planet = planet_name
 	sidebar.hide_all()
+	# Populate every tab up front, then reveal the merged panel (tabs switch between them).
 	planet_info_page.set_planet_info(get_planet_data(planet_name))
 	build_panel.set_planet(planet_name, _get_catalog_for_display())
+	if _population_page:
+		_population_page.set_stats(_population_stats(current_planet))
+	_build_ui_dirty = false
+	if _planet_tabs:
+		_planet_tabs.show()
 
 ## Attempt to build one `building_name` on `planet_name`.  Returns true on success,
 ## false if it's invalid, research-locked, or unaffordable (the automation executor
@@ -1601,7 +2110,7 @@ func try_build(planet_name: String, building_name: String) -> bool:
 	if building.is_empty():
 		return false
 
-	if planet_name != "earth" and not colonized_planets.has(planet_name):
+	if not _is_body_buildable(planet_name):
 		return false
 
 	var req: String = BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS.get(building_name, "")
@@ -1617,19 +2126,79 @@ func try_build(planet_name: String, building_name: String) -> bool:
 	for resource: String in cost:
 		_deduct_stockpile(resource, float(cost[resource]), planet_name)
 
+	# Queue the structure for construction rather than raising it instantly: it now takes
+	# work that the planet's Manufacturing Capacity grinds through over game-time.
+	if not build_queue.has(planet_name):
+		build_queue[planet_name] = []
+	build_queue[planet_name].append({
+		"building": building_name,
+		"work": _building_work(building),
+		"progress": 0.0,
+	})
+
+	# Panels refresh on the throttled tick in _process (coalesced), not per queued build —
+	# rebuilding the BuildPanel node tree on every try_build was a construction-lag source.
+	_build_ui_dirty = true
+	return true
+
+## Work (MC·days) needed to assemble a building: the bulk of its material bill, so larger
+## structures take proportionally longer.  A planet builds at its MC (work/day), so the
+## build time is _building_work / mc_capacity — higher industry ⇒ faster construction.
+func _building_work(building: Dictionary) -> float:
+	var w: float = 0.0
+	for key: String in (building.get("cost", {}) as Dictionary):
+		if key == "energy" or key == "science":
+			continue          # global pools, not assembled mass
+		w += float(building["cost"][key])
+	return maxf(BASE_MC * 0.25, w)   # floor so even cheap builds take a beat
+
+## Advance every planet's construction queue.  Each world pours its Manufacturing Capacity
+## (work-units/day) into its queued builds in order; a structure is raised the instant its
+## work is met, and a fast world can finish several in one time-slice.
+func _process_construction(delta_days: float) -> void:
+	if build_queue.is_empty() or delta_days <= 0.0:
+		return
+	for planet: String in build_queue.keys():
+		var jobs: Array = build_queue[planet]
+		if jobs.is_empty():
+			continue
+		# Construction uses the manufacturing capacity left AFTER recipes — a world running
+		# its factories flat-out has nothing spare to build with until it adds capacity.
+		var budget: float = _planet_free_mc(planet) * delta_days   # spare work available
+		while budget > 0.0 and not jobs.is_empty():
+			var job: Dictionary = jobs[0]
+			var need: float = float(job["work"]) - float(job["progress"])
+			if budget >= need:
+				budget -= need
+				jobs.pop_front()
+				_complete_build(planet, str(job["building"]))
+			else:
+				job["progress"] = float(job["progress"]) + budget
+				budget = 0.0
+		if jobs.is_empty():
+			build_queue.erase(planet)
+
+## Finish a construction job: the building now exists, so register it and refresh anything
+## that depends on the planet's roster (production cache, panels, star-map weapons).
+func _complete_build(planet_name: String, building_name: String) -> void:
 	if not planet_buildings.has(planet_name):
 		planet_buildings[planet_name] = []
 	planet_buildings[planet_name].append(building_name)
 	_mark_prod_dirty()
 
-	planet_info_page.set_planet_info(get_planet_data(planet_name))
-	if build_panel.visible:
-		build_panel.set_planet(planet_name, _get_catalog_for_display())
-	if launch_panel.visible:
-		launch_panel.set_launch_mods(_build_launch_mods_map())
+	# Panels refresh on the throttled tick in _process — many completions in one frame
+	# (fast-forward) collapse into a single rebuild instead of one per building.
+	_build_ui_dirty = true
 	if building_name == "Orbital Laser" and sidebar and sidebar.star_map and sidebar.star_map.visible:
 		refresh_star_map()   # the laser is now available as a star-map weapon
-	return true
+
+## How many of `building_name` are queued (under construction) on `planet_name`.
+func _queued_count(planet_name: String, building_name: String) -> int:
+	var c: int = 0
+	for job: Dictionary in build_queue.get(planet_name, []):
+		if str(job.get("building", "")) == building_name:
+			c += 1
+	return c
 
 ## Number of `building_name` currently standing on `planet_name`.
 func _count_building(planet_name: String, building_name: String) -> int:
@@ -1640,7 +2209,13 @@ func _count_building(planet_name: String, building_name: String) -> int:
 	return c
 
 func _on_build_requested(planet_name: String, building_name: String) -> void:
-	try_build(planet_name, building_name)
+	# A manual click gets instant feedback (works while paused, when the throttled tick is
+	# not running).  Automation calls try_build directly and stays coalesced/throttled.
+	if try_build(planet_name, building_name):
+		planet_info_page.set_planet_info(get_planet_data(planet_name))
+		if build_panel.visible:
+			build_panel.set_planet(planet_name, _get_catalog_for_display())
+		_build_ui_dirty = false
 
 func _on_demolish_requested(planet_name: String, building_name: String) -> void:
 	var built: Array = planet_buildings.get(planet_name, [])
@@ -1759,7 +2334,7 @@ func _on_launch_requested(params: Dictionary) -> void:
 	if mission_def.get("sun_only", false):
 		if target_name != "sun":
 			return                                    # this carrier only flies to the Sun
-		var room: int = SWARM_SAT_MAX - solar_satellites_deployed
+		var room: int = _swarm_max() - solar_satellites_deployed
 		if room <= 0:
 			return                                    # swarm already full
 		var avail: int = int(_get_stockpile(mission_def.get("payload", ""), origin_name))
@@ -1819,7 +2394,18 @@ func _on_launch_requested(params: Dictionary) -> void:
 		var origin_planet := get_node_or_null("WorldRoot/Planets/" + origin_name) as Planet
 		var target_planet := get_node_or_null("WorldRoot/Planets/" + target_name) as Planet
 		if origin_planet and target_planet:
-			_spawn_satellite(origin_planet, target_planet, arrival, launch["id"], float(duration))
+			if sat_payload > 0:
+				# Solar Deployment: the rocket flies to its reserved swarm slot and, on
+				# arrival, becomes the deployed collector there.
+				var reserved: int = solar_satellites_deployed + _pending_swarm
+				_pending_swarm += 1
+				var planets := get_node_or_null("WorldRoot/Planets")
+				var slot_pos: Vector3 = origin_planet.global_position
+				if planets and planets.has_method("swarm_slot_world_pos"):
+					slot_pos = planets.swarm_slot_world_pos(reserved)
+				_spawn_swarm_satellite(origin_planet, slot_pos, launch["id"], float(duration))
+			else:
+				_spawn_satellite(origin_planet, target_planet, arrival, launch["id"], float(duration))
 
 ## Best (lowest) launch cost & duration multipliers a planet's infrastructure
 ## grants (e.g. a Space Elevator).  Returns {"cost": float, "duration": float};
@@ -1878,7 +2464,7 @@ func refresh_launch_panel() -> void:
 	launch_panel.set_mission_duration_mult(_policy_mission_dur_mult())
 	launch_panel.refresh_fuels()
 	launch_panel.set_orbital_state(_build_orbital_state())
-	launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, SWARM_SAT_MAX)
+	launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, _swarm_max())
 	launch_panel.set_launch_stock(_build_launch_stock())
 	launch_panel.refresh_launches(_compute_launch_display_data())
 
@@ -1897,6 +2483,8 @@ func _star_distance_ly(star_name: String) -> float:
 func _on_colonize_requested(star_name: String, gamma_max: float, accel: float) -> void:
 	if star_name == "" or colonized_stars.has(star_name):
 		return
+	if not ResearchTree.is_unlocked("relativistic_navigation"):
+		return   # interstellar flight is gated on Relativistic Navigation research
 	for m in interstellar_missions:
 		if str(m.get("target", "")) == star_name:
 			return   # already en route
@@ -1939,6 +2527,7 @@ func _check_interstellar_arrivals() -> void:
 		if float(year) >= float(m.get("end_year", INF)):
 			var target: String = str(m.get("target", ""))
 			if target != "" and not colonized_stars.has(target):
+				_reveal_alignment(target)   # first contact: the system's alignment is now known
 				colonized_stars.append(target)
 				_announce("Interstellar Colony",
 					"A self-sustaining human colony is established around %s. Inhabited star systems: %d." % [
@@ -1963,6 +2552,11 @@ func _cosmic_scale() -> float:
 func refresh_star_map() -> void:
 	if sidebar == null or sidebar.star_map == null:
 		return
+	# Skip the full rebuild while the map is closed — attack/arrival resolutions call this
+	# every tick, and in the late game (many in-flight strikes) that was the frame-rate drag.
+	# It's repopulated the moment the panel is opened (sidebar._on_starmap_pressed).
+	if not sidebar.star_map.visible:
+		return
 	sidebar.star_map.set_cosmic_scale(_cosmic_scale())
 	var colo: Dictionary = {}
 	for s in colonized_stars:
@@ -1977,8 +2571,16 @@ func refresh_star_map() -> void:
 		var p: float = StarMapPanel.flight_progress(
 			tf, float(m.get("accel_time_frac", 0.5)), float(m.get("accel_dist_frac", 0.5)))
 		disp.append({"target": str(m.get("target", "")), "progress": p})
+	# Recon probes ride the same accel→coast→decel dashed line as colony ships.
+	for m in probe_missions:
+		var psy: float = float(m.get("start_year", year))
+		var pey: float = float(m.get("end_year", year))
+		var ptf: float = 0.0 if pey <= psy else clampf((float(year) - psy) / (pey - psy), 0.0, 1.0)
+		var pp: float = StarMapPanel.flight_progress(
+			ptf, float(m.get("accel_time_frac", 0.5)), float(m.get("accel_dist_frac", 0.5)))
+		disp.append({"target": str(m.get("target", "")), "progress": pp})
 	sidebar.star_map.set_interstellar_state(colo, disp, ResearchTree.resources.get("energy", 0.0))
-	sidebar.star_map.set_star_factions(star_factions)
+	sidebar.star_map.set_star_factions(_displayed_factions())
 	# In-flight weapon strikes (laser pulses + berserker swarms) with their progress.
 	var atk: Array = []
 	for a in interstellar_attacks:
@@ -1988,20 +2590,314 @@ func refresh_star_map() -> void:
 		atk.append({"target": str(a.get("target", "")), "progress": p,
 			"kind": str(a.get("kind", "laser")), "power": float(a.get("power", 1.0))})
 	sidebar.star_map.set_attacks(atk)
-	sidebar.star_map.set_weapon_caps(_has_orbital_laser(), _has_berserkers())
+	# Incoming relativistic missiles: a red streak from the hostile source toward the target.
+	var inc: Array = []
+	for a in incoming_attacks:
+		var sy: float = float(a.get("start_year", year))
+		var ey: float = float(a.get("end_year", year))
+		var p: float = 0.0 if ey <= sy else clampf((float(year) - sy) / (ey - sy), 0.0, 1.0)
+		inc.append({"source": str(a.get("source", "")), "target": str(a.get("target", "sol")),
+			"progress": p, "kind": str(a.get("kind", "missile"))})
+	sidebar.star_map.set_incoming(inc)
+	sidebar.star_map.set_alien_intel(_alien_intel())
+	sidebar.star_map.set_weapon_caps(_has_orbital_laser(), _has_berserkers(), _has_player_missiles())
+	sidebar.star_map.set_interstellar_unlocked(ResearchTree.is_unlocked("relativistic_navigation"))
 
-## Seed alien presence at a handful of stars (aggressive = red, peaceful = blue).
+## What the star map should show: only DETECTED alien systems.  A detected system whose
+## alignment the player hasn't confirmed by contact shows "unknown" (yellow); confirmed ones
+## show their true alignment.  Undetected civilisations are omitted entirely (hidden).
+func _displayed_factions() -> Dictionary:
+	var out: Dictionary = {}
+	for name: String in star_factions:
+		if not _detected_aliens.has(name):
+			continue
+		out[name] = str(star_factions[name]) if _known_alignments.has(name) else "unknown"
+	return out
+
+## Reveal a system's true alignment (called on first contact — a colony ship arriving).
+## Contact also counts as a detection, so a system you reach is always shown.
+func _reveal_alignment(star_name: String) -> void:
+	if star_factions.has(star_name):
+		_known_alignments[star_name] = true
+		_detected_aliens[star_name] = true
+
+## Seed alien presence at a handful of stars.  Alignment is hidden until contact and the
+## systems themselves are hidden until detected — _detected_aliens starts empty.  Signature
+## epochs are set in the past so their light is already en route (detection depends on optics).
 func _seed_star_factions() -> void:
 	star_factions = {}
+	_known_alignments = {}
+	_alien_since = {}
+	_detected_aliens = {}
+	_alien_last_year = float(year)
 	var names: Array = []
 	for s in StarMapPanel.STARS:
 		names.append(str(s["name"]))
 	names.shuffle()
 	for i in range(names.size()):
-		if i < 3:
-			star_factions[names[i]] = "aggressive"
-		elif i < 6:
-			star_factions[names[i]] = "peaceful"
+		if i >= 6:
+			break
+		var nm: String = names[i]
+		star_factions[nm] = "aggressive" if i < 3 else "peaceful"
+		# Founded in the past, so its signal is already crossing to us — some may be
+		# detectable early with good optics, others still en route.
+		_alien_since[nm] = float(year) - _star_distance_ly(nm) - randf_range(0.0, 800.0)
+
+## 3-D map position of a star (game units), or ZERO if unknown.
+func _star_pos(star_name: String) -> Vector3:
+	for s: Dictionary in StarMapPanel.STARS:
+		if str(s["name"]) == star_name:
+			return s["pos"]
+	return Vector3.ZERO
+
+## Combined signature-detection power: base astronomy + every telescope building's
+## "detection" contribution, scaled by detection research.  ZERO until Radio Astronomy is
+## researched — SETI is a gated capability, so no alien signature can be resolved before it.
+func _telescope_power() -> float:
+	if not ResearchTree.is_unlocked("radio_astronomy"):
+		return 0.0
+	var p: float = TELESCOPE_BASE_POWER
+	for planet: String in planet_buildings:
+		for b_name: String in planet_buildings[planet]:
+			p += float((_bdef_cache.get(b_name, {}) as Dictionary).get("detection", 0.0))
+	return p * (1.0 + ResearchTree.get_boost("detection"))
+
+## Deterministic alien infrastructure at a given OBSERVATION year: pass (year − distance) to
+## get the light-delayed state the player can actually see.  {dyson: 0..1, telescopes, lasers}.
+func _alien_infra_at(star: String, obs_year: float) -> Dictionary:
+	var age: float = obs_year - float(_alien_since.get(star, obs_year))
+	if age <= 0.0:
+		return {"dyson": 0.0, "telescopes": 0, "lasers": 0}
+	var lasers: int = 0
+	if str(star_factions.get(star, "peaceful")) == "aggressive":
+		lasers = int(age / ALIEN_LASER_YEARS)   # only hostiles ring their world with weapons
+	return {
+		"dyson":      clampf(age / ALIEN_DYSON_YEARS, 0.0, 1.0),
+		"telescopes": int(age / ALIEN_TELESCOPE_YEARS),
+		"lasers":     lasers,
+	}
+
+## Intel to show for every DETECTED alien system: the light-delayed infrastructure, resolved
+## only as far as the player's telescopes reach (a returned probe overrides both the delay and
+## the limit with full current intel).  star → {alignment, dyson, telescopes, lasers, detail,
+## diplo, probed}.  Everything here is speed-of-light limited.
+func _alien_intel() -> Dictionary:
+	var out: Dictionary = {}
+	var tel: float = _telescope_power()
+	for star: String in star_factions:
+		if not _detected_aliens.has(star):
+			continue
+		var dist: float = _star_distance_ly(star)
+		var probed: bool = _infra_probed.has(star)
+		var obs_year: float = float(year) if probed else float(year) - dist
+		var infra: Dictionary = _alien_infra_at(star, obs_year)
+		var detail: float = 1.0 if probed \
+			else clampf(tel / maxf(dist * INFRA_DETAIL_REACH, 1.0), 0.0, 1.0)
+		out[star] = {
+			"alignment":  str(star_factions[star]) if _known_alignments.has(star) else "unknown",
+			"dyson":      float(infra["dyson"]),
+			"telescopes": int(infra["telescopes"]),
+			"lasers":     int(infra["lasers"]),
+			"detail":     detail,
+			"diplo":      str(_diplo_status.get(star, "")),
+			"probed":     probed,
+		}
+	return out
+
+## Systems that will fire on human worlds: the innately aggressive ones plus any the player
+## has declared war on, minus any that are allied.
+func _hostile_systems() -> Array:
+	var out: Array = []
+	for star: String in star_factions:
+		if str(_diplo_status.get(star, "")) == "allied":
+			continue
+		if str(star_factions[star]) == "aggressive" or str(_diplo_status.get(star, "")) == "war":
+			out.append(star)
+	return out
+
+## Advance the alien simulation: detect signatures that have reached us, and let alien
+## civilisations expand to new systems.  Batches across however many years elapsed, so it
+## behaves the same at 1× and when fast-forwarding millions of years per frame.
+func _process_aliens() -> void:
+	if game_over:
+		return
+	var dyears: float = float(year) - _alien_last_year
+	if dyears <= 0.0:
+		return
+	_alien_last_year = float(year)
+	_detect_alien_signatures(dyears)
+	_spread_aliens(dyears)
+	_launch_alien_attacks(dyears)
+
+## Roll to pick up each undetected alien signature whose light has had time to arrive.
+func _detect_alien_signatures(dyears: float) -> void:
+	var tel: float = _telescope_power()
+	var newly: int = 0
+	for star: String in star_factions.keys():
+		if _detected_aliens.has(star):
+			continue
+		var dist: float = _star_distance_ly(star)
+		# The signal can't be seen until its light has crossed the gulf to Sol.
+		if float(year) < float(_alien_since.get(star, 0.0)) + dist:
+			continue
+		var p_year: float = clampf(ALIEN_DETECT_BASE * tel / maxf(dist, 1.0), 0.0, 0.9)
+		var p: float = 1.0 - pow(1.0 - p_year, minf(dyears, 1.0e6))
+		if randf() < p:
+			_detected_aliens[star] = true
+			newly += 1
+			if newly <= 3:   # avoid a flood of cards when a huge time-slice reveals many
+				_announce("Signature detected",
+					"A non-thermal electromagnetic signature resolves at %s (%.1f ly). Emission predates detection by ≥%d yr (light-travel time)." % [
+						star, dist, int(dist)],
+					"detect_%s_%d" % [star, year])
+
+## Alien civilisations expand: each occupied system has a per-year chance to found a colony
+## at the nearest unoccupied star (their "resources" scale with how many systems they hold,
+## so growth compounds).  Batched over the elapsed years and capped by available stars.
+func _spread_aliens(dyears: float) -> void:
+	if star_factions.is_empty():
+		return
+	var targets: Array = []
+	for s: Dictionary in StarMapPanel.STARS:
+		var nm: String = str(s["name"])
+		if not star_factions.has(nm) and not colonized_stars.has(nm):
+			targets.append(nm)
+	if targets.is_empty():
+		return
+	var expected: float = float(star_factions.size()) * ALIEN_SPREAD_RATE * dyears
+	var count: int = int(expected)
+	if randf() < (expected - float(count)):   # fractional remainder → probabilistic +1
+		count += 1
+	count = mini(count, targets.size())
+	var sources: Array = star_factions.keys()
+	for _i in range(count):
+		if targets.is_empty():
+			break
+		var src: String = str(sources[randi() % sources.size()])
+		var align: String = str(star_factions[src])
+		var spos: Vector3 = _star_pos(src)
+		var best: int = 0
+		var best_d: float = INF
+		for ti in range(targets.size()):
+			var d: float = spos.distance_to(_star_pos(str(targets[ti])))
+			if d < best_d:
+				best_d = d
+				best = ti
+		var tgt: String = str(targets[best])
+		targets.remove_at(best)
+		star_factions[tgt] = align
+		_alien_since[tgt] = float(year)   # a fresh signature begins here, en route to Sol
+
+## Aggressive civilisations fling relativistic kinetic missiles at human worlds.  Each
+## aggressive system has a small per-year chance to launch at Sol or one of our colonies;
+## the missile crosses at RKKV_BETA and is resolved by _check_incoming_attacks on arrival.
+func _launch_alien_attacks(dyears: float) -> void:
+	# Hard-cap the number of missiles in flight — this bounds the array, the per-tick
+	# resolution work, and the event/timeline spam even when aliens have overrun the map.
+	if star_factions.is_empty() or incoming_attacks.size() >= RKKV_MAX_INFLIGHT:
+		return
+	var hostiles: Array = _hostile_systems()   # aggressive + war-declared, minus allied
+	if hostiles.is_empty():
+		return
+	var targets: Array = ["sol"]           # the home system is always a target
+	for cs in colonized_stars:
+		targets.append(str(cs))
+	# The launch rate is capped so late-game spread (dozens of hostile systems) doesn't
+	# multiply into a barrage; and the batch can never overshoot the in-flight ceiling.
+	var attackers: float = minf(float(hostiles.size()), RKKV_ATTACKER_CAP)
+	var expected: float = attackers * ALIEN_AGGRESSION_RATE * dyears
+	var count: int = int(expected)
+	if randf() < (expected - float(count)):
+		count += 1
+	count = mini(count, RKKV_MAX_INFLIGHT - incoming_attacks.size())
+	if count <= 0:
+		return
+	for _i in range(count):
+		var src: String = str(hostiles[randi() % hostiles.size()])
+		var tgt: String = str(targets[randi() % targets.size()])
+		# STARS positions are in light-years (|pos| == the star's distance), so the
+		# separation between two of them is already a distance in ly.
+		var dist: float = _star_distance_ly(src) if tgt == "sol" \
+			else _star_pos(src).distance_to(_star_pos(tgt))
+		if dist <= 0.0:
+			dist = _star_distance_ly(src)
+		# Weapon choice: a system that has built orbital lasers may fire one (light speed);
+		# otherwise a relativistic missile, or occasionally a slow self-replicating berserker.
+		var kind: String = "missile"
+		var roll: float = randf()
+		if int(_alien_infra_at(src, float(year))["lasers"]) > 0 and roll < 0.40:
+			kind = "laser"
+		elif roll < 0.55:
+			kind = "berserker"
+		var beta: float = 1.0 if kind == "laser" else (0.3 if kind == "berserker" else RKKV_BETA)
+		incoming_attacks.append({
+			"source": src, "target": tgt, "kind": kind,
+			"start_year": float(year), "end_year": float(year) + dist / beta,
+		})
+	# One throttled "inbound" notice (not one per missile) — impacts are always reported.
+	if float(year) - _rkkv_notice_year >= RKKV_LAUNCH_NOTICE_GAP:
+		_rkkv_notice_year = float(year)
+		var note: String = "%d relativistic projectiles are tracked inbound toward human worlds." % count \
+			if count > 1 else "A relativistic projectile is tracked inbound toward a human world."
+		_announce("Relativistic projectiles inbound", note, "rkkv_notice_%d" % year)
+
+## Resolve relativistic missiles whose arrival year has passed.  A colony strike wipes that
+## colony out; a Sol strike guts the home population.  Impacts are COALESCED into at most two
+## announcements per tick so a fast-forward cluster can't flood the timeline.
+func _check_incoming_attacks() -> void:
+	if incoming_attacks.is_empty():
+		return
+	var still: Array = []
+	var sol_hits: int = 0
+	var colonies_lost: Array = []
+	for a in incoming_attacks:
+		if float(year) < float(a.get("end_year", INF)):
+			still.append(a)
+			continue
+		var tgt: String = str(a.get("target", "sol"))
+		if tgt == "sol":
+			sol_hits += 1
+		elif colonized_stars.has(tgt):
+			colonized_stars.erase(tgt)
+			colonies_lost.append(tgt)
+		# else: the colony was already gone before impact — the mass strikes empty space.
+	var resolved: bool = still.size() != incoming_attacks.size()
+	incoming_attacks = still
+	if sol_hits > 0:
+		# A relativistic kinetic impact sterilises the whole home system — all life is killed.
+		# The species only endures if it has already spread to other stars; trigger_game_over
+		# handles that (survives with a colony elsewhere, otherwise extinction).
+		stats["current_population"] = MIN_POPULATION
+		_devastate_home()
+		trigger_game_over("Relativistic bombardment",
+			"A relativistic kinetic impact strikes the home system, sterilising every world in it. Inhabited worlds in Sol: 0.")
+	if not colonies_lost.is_empty():
+		var desc: String = "The colony at %s is annihilated. Inhabited star systems: %d." % [
+			str(colonies_lost[0]), colonized_stars.size()] if colonies_lost.size() == 1 \
+			else "%d colonies are annihilated by relativistic impacts. Inhabited star systems: %d." % [
+				colonies_lost.size(), colonized_stars.size()]
+		_announce("Relativistic impact — colony lost", desc, "rkkv_hit_colony_%d" % year)
+	if resolved:
+		refresh_star_map()
+
+## A relativistic impact on the home system destroys a chunk of Earth's infrastructure,
+## durably lowering its energy/mineral output — and therefore carrying capacity — until the
+## player rebuilds.  At least one Biomass Burner is spared so energy can't collapse entirely.
+func _devastate_home() -> void:
+	var built: Array = planet_buildings.get("earth", [])
+	if built.is_empty():
+		return
+	var survivors: Array = []
+	var kept_burner: bool = false
+	for b in built:
+		if b == "Biomass Burner" and not kept_burner:
+			survivors.append(b)   # keep one burner (soft-lock guard)
+			kept_burner = true
+		elif randf() < 0.65:      # ~35% of everything else is wiped out
+			survivors.append(b)
+	planet_buildings["earth"] = survivors
+	_mark_prod_dirty()
+	_build_ui_dirty = true
 
 # ── Orbital laser ─────────────────────────────────────────────────────────────
 
@@ -2043,9 +2939,10 @@ func _on_laser_requested(star_name: String, power: float) -> void:
 		"laser_%s_%d" % [star_name, year])
 	refresh_star_map()
 
-## Launch a von Neumann berserker swarm at a star system — a slow, self-replicating
-## weapon that consumes the target on arrival.
-func _on_berserker_requested(star_name: String) -> void:
+## Launch a von Neumann berserker swarm at a star system.  Uses the same speed/accel flight
+## model as a colony ship (player dials in max γ and acceleration); cost is its relativistic
+## launch energy scaled by the swarm seed's small rest mass.
+func _on_berserker_requested(star_name: String, gamma_max: float, accel: float) -> void:
 	if game_over or star_name == "" or not _has_berserkers():
 		return
 	if _attack_in_flight(star_name):
@@ -2053,20 +2950,189 @@ func _on_berserker_requested(star_name: String) -> void:
 	var dist: float = _star_distance_ly(star_name)
 	if dist <= 0.0:
 		return
-	if ResearchTree.resources.get("energy", 0.0) < BERSERKER_ENERGY:
+	var plan: Dictionary = StarMapPanel.plan_flight(dist, gamma_max, accel)
+	var cost: float = float(plan["energy"]) * StarMapPanel.BERSERKER_MASS_FRAC
+	if ResearchTree.resources.get("energy", 0.0) < cost:
 		return
 	ResearchTree.resources["energy"] = maxf(0.0,
-		float(ResearchTree.resources.get("energy", 0.0)) - BERSERKER_ENERGY)
-	var years: float = dist / BERSERKER_BETA
+		float(ResearchTree.resources.get("energy", 0.0)) - cost)
+	var years: float = float(plan["years"])
 	interstellar_attacks.append({
 		"target": star_name, "kind": "berserker",
 		"start_year": float(year), "end_year": float(year) + years,
 	})
 	_announce("Berserkers Launched",
-		"A von Neumann berserker seed accelerates toward %s. It will arrive in ~%s and replicate." % [
-			star_name, Units.format_si(years, "yr")],
+		"A von Neumann berserker seed accelerates toward %s at %s. Arrival in ~%s; it will replicate." % [
+			star_name, StarMapPanel.fmt_beta(float(plan["peak_gamma"])), Units.format_si(years, "yr")],
 		"berserker_%s_%d" % [star_name, year])
 	refresh_star_map()
+
+## Relativistic weaponry (player missiles + recon probes) unlock with interstellar flight.
+func _has_player_missiles() -> bool:
+	return ResearchTree.is_unlocked("relativistic_navigation")
+
+## Fire a relativistic kinetic missile at a star system: crosses at RKKV_BETA and annihilates
+## whatever force is there on arrival.  Cost scales with distance² (aiming a relativistic mass
+## across light-years is exacting).
+func _on_missile_requested(star_name: String, gamma_max: float, accel: float) -> void:
+	if game_over or star_name == "" or not _has_player_missiles():
+		return
+	if _attack_in_flight(star_name):
+		return
+	var dist: float = _star_distance_ly(star_name)
+	if dist <= 0.0:
+		return
+	var plan: Dictionary = StarMapPanel.plan_flight(dist, gamma_max, accel)
+	var cost: float = float(plan["energy"]) * StarMapPanel.MISSILE_MASS_FRAC
+	if ResearchTree.resources.get("energy", 0.0) < cost:
+		return
+	ResearchTree.resources["energy"] = maxf(0.0,
+		float(ResearchTree.resources.get("energy", 0.0)) - cost)
+	var years: float = float(plan["years"])
+	interstellar_attacks.append({
+		"target": star_name, "kind": "missile",
+		"start_year": float(year), "end_year": float(year) + years,
+	})
+	_announce("Relativistic missile launched",
+		"A relativistic kinetic missile accelerates toward %s at %s. Impact in ~%s." % [
+			star_name, StarMapPanel.fmt_beta(float(plan["peak_gamma"])), Units.format_si(years, "yr")],
+		"pmissile_%s_%d" % [star_name, year])
+	refresh_star_map()
+
+## Send a lightweight recon probe to a star.  It travels (relativistically) and, on arrival,
+## resolves that system's full current infrastructure and alignment — the only way to see past
+## the telescope/light-delay fog before you commit a colony ship.
+func _on_probe_requested(star_name: String, gamma_max: float, accel: float) -> void:
+	if game_over or star_name == "" or not _has_player_missiles():
+		return
+	if _infra_probed.has(star_name):
+		return
+	for m in probe_missions:
+		if str(m.get("target", "")) == star_name:
+			return   # one probe per target at a time
+	var dist: float = _star_distance_ly(star_name)
+	if dist <= 0.0:
+		return
+	var plan: Dictionary = StarMapPanel.plan_flight(dist, gamma_max, accel)
+	var cost: float = float(plan["energy"]) * StarMapPanel.PROBE_MASS_FRAC
+	if ResearchTree.resources.get("energy", 0.0) < cost:
+		return
+	ResearchTree.resources["energy"] = maxf(0.0,
+		float(ResearchTree.resources.get("energy", 0.0)) - cost)
+	var years: float = float(plan["years"])
+	probe_missions.append({
+		"target": star_name, "start_year": float(year), "end_year": float(year) + years,
+		"accel_time_frac": float(plan.get("accel_time_frac", 0.5)),
+		"accel_dist_frac": float(plan.get("accel_dist_frac", 0.5)),
+	})
+	_announce("Recon probe launched",
+		"A lightweight probe departs Sol for %s. Arrival in ~%s; it will resolve the system's full state." % [
+			star_name, Units.format_si(years, "yr")],
+		"probe_%s_%d" % [star_name, year])
+	refresh_star_map()
+
+## Resolve probes that have arrived: full current intel on their target (overrides the
+## telescope/light-delay limit for that system henceforth).
+func _check_probe_arrivals() -> void:
+	if probe_missions.is_empty():
+		return
+	var still: Array = []
+	for m in probe_missions:
+		if float(year) >= float(m.get("end_year", INF)):
+			var t: String = str(m.get("target", ""))
+			_infra_probed[t] = true
+			if star_factions.has(t):
+				_detected_aliens[t] = true
+				_reveal_alignment(t)
+				_announce("Probe report — %s" % t,
+					"The probe resolves %s: a %s civilisation, full infrastructure recorded." % [
+						t, str(star_factions[t])],
+					"probe_report_%s_%d" % [t, year])
+			else:
+				_announce("Probe report — %s" % t,
+					"The probe resolves %s: no civilisation present." % t,
+					"probe_report_%s_%d" % [t, year])
+		else:
+			still.append(m)
+	probe_missions = still
+	refresh_star_map()
+
+## Transmit a message to a detected alien system.  It (and any reply) travel at light speed,
+## so the outcome resolves after a round trip of 2×distance years.
+func _on_message_requested(star_name: String, kind: String) -> void:
+	if game_over or star_name == "" or not _detected_aliens.has(star_name) or not star_factions.has(star_name):
+		return
+	for m in outgoing_messages:
+		if str(m.get("target", "")) == star_name:
+			return   # a message is already in transit to this system
+	var dist: float = _star_distance_ly(star_name)
+	if dist <= 0.0:
+		return
+	if kind != "war":
+		if ResearchTree.resources.get("energy", 0.0) < MSG_ALLY_ENERGY:
+			return
+		ResearchTree.resources["energy"] = maxf(0.0,
+			float(ResearchTree.resources.get("energy", 0.0)) - MSG_ALLY_ENERGY)
+	outgoing_messages.append({
+		"target": star_name, "kind": kind,
+		"start_year": float(year), "end_year": float(year) + 2.0 * dist,   # there and back
+	})
+	_announce("Transmission sent",
+		"%s message dispatched to %s (%.1f ly). A reply, if any, returns in ~%s." % [
+			kind.capitalize(), star_name, dist, Units.format_si(2.0 * dist, "yr")],
+		"msg_%s_%s_%d" % [kind, star_name, year])
+	refresh_star_map()
+
+## Resolve message round-trips whose reply has arrived.
+func _check_message_arrivals() -> void:
+	if outgoing_messages.is_empty():
+		return
+	var still: Array = []
+	for m in outgoing_messages:
+		if float(year) >= float(m.get("end_year", INF)):
+			_resolve_message(str(m.get("target", "")), str(m.get("kind", "contact")))
+		else:
+			still.append(m)
+	outgoing_messages = still
+	refresh_star_map()
+
+## Apply a diplomatic reply.  Peaceful systems accept alliance/trade; aggressive ones rebuff
+## (and an overture to a hostile can turn it openly warlike).  Any contact reveals alignment.
+func _resolve_message(star: String, kind: String) -> void:
+	if not star_factions.has(star):
+		return   # the system is gone
+	_reveal_alignment(star)
+	var align: String = str(star_factions[star])
+	match kind:
+		"contact":
+			if _diplo_status.get(star, "") == "":
+				_diplo_status[star] = "contact"
+			_announce("Reply from %s" % star,
+				"Contact established. Alignment resolved: %s." % align, "reply_%s_%d" % [star, year])
+		"ally":
+			if align == "peaceful":
+				_diplo_status[star] = "allied"
+				_announce("Reply from %s" % star, "%s accepts an alliance." % star, "reply_%s_%d" % [star, year])
+			else:
+				_diplo_status[star] = "war"
+				_announce("Reply from %s" % star,
+					"%s rebuffs the overture and turns openly hostile." % star, "reply_%s_%d" % [star, year])
+		"trade":
+			if align == "peaceful":
+				if _diplo_status.get(star, "") != "allied":
+					_diplo_status[star] = "trading"
+				ResearchTree.resources["science"]  = float(ResearchTree.resources.get("science", 0.0)) + 5.0e12
+				ResearchTree.resources["energy"]    = float(ResearchTree.resources.get("energy", 0.0)) + 2.0e9
+				ResearchTree.resources["minerals"]  = float(ResearchTree.resources.get("minerals", 0.0)) + 5.0e8
+				_announce("Reply from %s" % star,
+					"%s agrees to trade. A cache of science, energy, and materials is received." % star,
+					"reply_%s_%d" % [star, year])
+			else:
+				_announce("Reply from %s" % star, "%s refuses to trade." % star, "reply_%s_%d" % [star, year])
+		"war":
+			_diplo_status[star] = "war"
+			_announce("Reply from %s" % star,
+				"%s registers your declaration of war." % star, "reply_%s_%d" % [star, year])
 
 ## Is there already a weapon strike in flight to this star?  (Prevents double-firing.)
 func _attack_in_flight(star_name: String) -> bool:
@@ -2087,15 +3153,21 @@ func _check_interstellar_attacks() -> void:
 			var kind: String = str(a.get("kind", "laser"))
 			var had: bool = star_factions.has(target)
 			star_factions.erase(target)   # the force there is wiped out
+			_diplo_status.erase(target)
+			_infra_probed.erase(target)
+			var outcome: String = "The force there is obliterated." if had else "It strikes empty space."
 			if kind == "berserker":
 				_announce("Berserker Strike",
-					"The berserker swarm reaches %s and devours the system. %s" % [
-						target, "The hostile force is annihilated." if had else "Nothing organised remained."],
+					"The berserker swarm reaches %s and devours the system. %s" % [target,
+						"The hostile force is annihilated." if had else "Nothing organised remained."],
 					"berserker_hit_%s_%d" % [target, year])
+			elif kind == "missile":
+				_announce("Relativistic Impact",
+					"The relativistic missile shatters %s. %s" % [target, outcome],
+					"pmissile_hit_%s_%d" % [target, year])
 			else:
 				_announce("Laser Strike",
-					"The laser pulse lances %s. %s" % [
-						target, "The force there is obliterated." if had else "It strikes empty space."],
+					"The laser pulse lances %s. %s" % [target, outcome],
 					"laser_hit_%s_%d" % [target, year])
 		else:
 			still.append(a)
@@ -2139,6 +3211,8 @@ func save_game(path: String = "") -> void:
 		"production_jobs":    production_panel.get_jobs(),
 		"automation_rules":   _automation_rules,
 		"planet_buildings":   planet_buildings,
+		"build_queue":        build_queue,
+		"entropy_exported":   entropy_exported,
 		"resources":          ResearchTree.resources,
 		"active_launches":    active_launches,
 		"next_launch_id":     _next_launch_id,
@@ -2147,7 +3221,16 @@ func save_game(path: String = "") -> void:
 		"colonized_stars":    colonized_stars,
 		"interstellar_missions": interstellar_missions,
 		"interstellar_attacks":  interstellar_attacks,
+		"incoming_attacks":      incoming_attacks,
+		"outgoing_messages":     outgoing_messages,
+		"probe_missions":        probe_missions,
+		"diplo_status":          _diplo_status,
+		"infra_probed":          _infra_probed,
 		"star_factions":      star_factions,
+		"known_alignments":   _known_alignments,
+		"alien_since":        _alien_since,
+		"detected_aliens":    _detected_aliens,
+		"alien_last_year":    _alien_last_year,
 		"colonized_year":     _colonized_year,
 		"split_thresholds":   _split_thresholds,
 		"colony_parent":      _colony_parent,
@@ -2231,12 +3314,17 @@ func load_game(path: String = "") -> void:
 				_migrated_arrays += 1
 		if _migrated_arrays > 0:
 			solar_satellites_deployed = clampi(
-				solar_satellites_deployed + _migrated_arrays * 24, 0, SWARM_SAT_MAX)
+				solar_satellites_deployed + _migrated_arrays * 24, 0, _swarm_max())
 		# Guarantee Earth keeps at least one Biomass Burner (soft-lock guard).
 		var _earth: Array = planet_buildings.get("earth", [])
 		if not _earth.has("Biomass Burner"):
 			_earth.append("Biomass Burner")
 			planet_buildings["earth"] = _earth
+
+	build_queue = data["build_queue"] if (data.has("build_queue") and data["build_queue"] is Dictionary) else {}
+	entropy_exported = float(data.get("entropy_exported", 0.0))
+	_heat_alerted = false
+	_labor_alerted = false
 
 	if data.has("resources") and data["resources"] is Dictionary:
 		for key in data["resources"]:
@@ -2246,6 +3334,11 @@ func load_game(path: String = "") -> void:
 		active_launches = data["active_launches"]
 	else:
 		active_launches = []
+	# Reserved swarm slots = Solar Deployment crafts still in flight.
+	_pending_swarm = 0
+	for _l in active_launches:
+		if _l.get("status", "") == "active" and int(_l.get("payload", 0)) > 0:
+			_pending_swarm += int(_l.get("payload", 0))
 
 	if data.has("next_launch_id"):
 		_next_launch_id = int(data["next_launch_id"])
@@ -2269,12 +3362,50 @@ func load_game(path: String = "") -> void:
 	if data.has("interstellar_attacks") and data["interstellar_attacks"] is Array:
 		for a in data["interstellar_attacks"]:
 			interstellar_attacks.append((a as Dictionary).duplicate())
+	incoming_attacks = []
+	if data.has("incoming_attacks") and data["incoming_attacks"] is Array:
+		for a in data["incoming_attacks"]:
+			incoming_attacks.append((a as Dictionary).duplicate())
+	outgoing_messages = []
+	if data.has("outgoing_messages") and data["outgoing_messages"] is Array:
+		for a in data["outgoing_messages"]:
+			outgoing_messages.append((a as Dictionary).duplicate())
+	probe_missions = []
+	if data.has("probe_missions") and data["probe_missions"] is Array:
+		for a in data["probe_missions"]:
+			probe_missions.append((a as Dictionary).duplicate())
+	_diplo_status = {}
+	if data.has("diplo_status") and data["diplo_status"] is Dictionary:
+		for k: String in data["diplo_status"]:
+			_diplo_status[k] = str(data["diplo_status"][k])
+	_infra_probed = {}
+	if data.has("infra_probed") and data["infra_probed"] is Dictionary:
+		for k: String in data["infra_probed"]:
+			_infra_probed[k] = true
 	star_factions = {}
 	if data.has("star_factions") and data["star_factions"] is Dictionary:
 		for k: String in data["star_factions"]:
 			star_factions[k] = str(data["star_factions"][k])
 	else:
 		_seed_star_factions()   # older save: assign fresh alien presence
+	_known_alignments = {}
+	if data.has("known_alignments") and data["known_alignments"] is Dictionary:
+		for k: String in data["known_alignments"]:
+			_known_alignments[k] = true
+	# Alien detection/expansion state.  Older saves (star_factions but no signature epochs)
+	# fall back to fresh epochs so their signals are still en route.
+	_alien_since = {}
+	if data.has("alien_since") and data["alien_since"] is Dictionary:
+		for k: String in data["alien_since"]:
+			_alien_since[k] = float(data["alien_since"][k])
+	else:
+		for k: String in star_factions:
+			_alien_since[k] = float(year) - _star_distance_ly(k) - randf_range(0.0, 800.0)
+	_detected_aliens = {}
+	if data.has("detected_aliens") and data["detected_aliens"] is Dictionary:
+		for k: String in data["detected_aliens"]:
+			_detected_aliens[k] = true
+	_alien_last_year = float(data.get("alien_last_year", float(year)))
 
 	_colonized_year   = {}
 	_split_thresholds = {}
@@ -2471,7 +3602,9 @@ func _update_population(delta_days: float) -> void:
 	new_pop = floorf(maxf(MIN_POPULATION, new_pop))
 	if new_pop != pop:
 		stats["current_population"] = new_pop
-		_mark_prod_dirty()   # population feeds the compute rate
+		# No _mark_prod_dirty here: population only feeds compute, which _combine_production
+		# recomputes cheaply every frame from the cached building sums — so a changing
+		# population no longer triggers an O(all-buildings) cache rebuild each frame.
 
 func _refresh_stats() -> void:
 	stats["year"]             = year
@@ -2483,6 +3616,11 @@ func _refresh_stats() -> void:
 	stats["life_expectancy"]  = _life_expectancy()
 	stats["ai_autonomy"]      = PoliticsData.ai_autonomy(policies)
 	stats["existential_risk"] = PoliticsData.existential_risk(policies)
+	stats["radiator_capacity"] = _cached_radiator_cap
+	stats["waste_heat"]        = _thermal_ratio * _cached_radiator_cap   # raw power draw (W)
+	stats["thermal_ratio"]     = _thermal_ratio
+	stats["entropy_exported"]  = entropy_exported
+	stats["labor_staffing"]    = _mc_staffing()
 
 func _fmt_year_hud() -> String:
 	if SolarSystem.seconds_per_day < FAST_THRESHOLD:
@@ -2508,8 +3646,9 @@ func _update_hud() -> void:
 		# Each rate unit:    compute → FLOP/s  |  minerals → Grams/s  |  energy → Watts
 		var min_cap: float = _cached_storage_caps.get("minerals", 0.0)
 		var en_cap:  float = _cached_storage_caps.get("energy",   0.0)
+		var raw_load: float = _thermal_ratio * _cached_radiator_cap   # power drawn before curtailment
 		science_label.text = (
-			"Compute: %s  |  Matter: %s / %s (+%s)  |  Energy: %s / %s (+%s)" % [
+			"Compute: %s  |  Matter: %s / %s (+%s)  |  Energy: %s / %s (+%s)  |  Heat: %s / %s" % [
 				Units.format_si_verbose(compute_rate, "FLOP/s"),
 				Units.format_si_verbose(ResearchTree.resources.get("minerals", 0.0), "Grams"),
 				Units.format_si_verbose(min_cap, "Grams"),
@@ -2517,8 +3656,13 @@ func _update_hud() -> void:
 				Units.format_si_verbose(ResearchTree.resources.get("energy",   0.0), "Joules"),
 				Units.format_si_verbose(en_cap, "Joules"),
 				Units.format_si_verbose(prod.get("energy",   0.0), "Watts"),
+				Units.format_si_verbose(raw_load, "Watts"),
+				Units.format_si_verbose(_cached_radiator_cap, "Watts"),
 			]
 		)
+		# Amber the readout when the grid is radiating-limited (draw over capacity).
+		science_label.modulate = Color(0.95, 0.65, 0.30) if _thermal_ratio > 1.02 \
+			else Color(1.0, 1.0, 1.0)
 		# Science lives on the research panel now, not the top bar.
 		if research_ui and research_ui.has_method("set_science"):
 			research_ui.set_science(

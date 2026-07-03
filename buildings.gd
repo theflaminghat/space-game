@@ -147,6 +147,28 @@ const BUILDINGS := [
 		"cost": {"Concrete": 3_000, "Glass": 3_000, "Cu": 1_500, "energy": 20_000},
 		"production": {"compute": 10.0}},
 
+	# ── Signature detection (finding alien civilisations) ─────────────────────
+	# "detection" raises the per-year chance of resolving an alien system's signature
+	# once its light has reached Sol.  A ground Observatory is buildable from the start;
+	# the space telescope (above the atmosphere) and the deep-space array see far more.
+	{"name": "Observatory",
+		"allowed_types": ["rocky"],
+		"cost": {"Concrete": 6_000, "Glass": 4_000, "Cu": 2_000, "energy": 15_000},
+		"production": {},
+		"detection": 4.0},
+	# Radio Telescope Array — dishes + correlator electronics; picks up faint transmissions.
+	{"name": "Radio Telescope Array",
+		"allowed_types": ["rocky"],
+		"cost": {"Steel": 40_000, "Cu": 20_000, "Microchip": 4_000, "energy": 60_000},
+		"production": {},
+		"detection": 16.0},
+	# Space Telescope — an orbiting observatory above the atmosphere's blur and noise.
+	{"name": "Space Telescope",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Steel": 120_000, "Glass": 60_000, "Superconductor": 8_000, "Microchip": 20_000, "energy": 300_000},
+		"production": {},
+		"detection": 60.0},
+
 	# ── Tier 2 ────────────────────────────────────────────────────────────────
 	# Automated Mine — robotic excavators + conveyors (10× basic mine).
 	# Steel chassis, control microchips, plastic conveyor components.
@@ -207,6 +229,16 @@ const BUILDINGS := [
 		"allowed_types": ["rocky"],
 		"cost": {"Microchip": 20_000, "Steel": 12_000, "Cu": 10_000, "Plastic": 5_000, "energy": 250_000},
 		"production": {"compute": 80.0}},
+
+	# Thermal Radiator — a field of high-emissivity panels that dumps the civilisation's
+	# waste heat to space.  "radiator_capacity" (W) adds to how much power the grid can draw
+	# before it runs radiating-limited and its output is curtailed — essential once a Dyson
+	# swarm's tens of terawatts arrive.  Steel structure, ceramic-coated emitter surface.
+	{"name": "Thermal Radiator",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Steel": 1_200_000, "Ceramic": 400_000, "Cu": 100_000, "energy": 200_000},
+		"production": {},
+		"radiator_capacity": 4.0e12},   # +4 TW of heat-shedding capacity
 
 	# ── Megastructure infrastructure ──────────────────────────────────────────
 	# Space Elevator — a tether from the surface to beyond geostationary altitude.

@@ -33,6 +33,26 @@ const MOON_COUNTS := {
 	"earth": 1, "mars": 2, "jupiter": 4, "saturn": 4, "uranus": 3, "neptune": 2,
 }
 
+## Orbital infrastructure lanes.  Each buildable orbital structure gets its OWN ring around
+## the planet (distinct radius = separate lane) and its own placeholder-textured mesh, so a
+## planet's orbital build-out is visible the way the Dyson swarm is around the Sun.  One
+## instance orbits per building of that type the player has raised there.
+const INFRA_LANES := [
+	{"type": "Orbital Laser",    "radius": 0.95, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
+	{"type": "Space Telescope",  "radius": 1.20, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
+	{"type": "Thermal Radiator", "radius": 1.45, "color": Color(0.95, 0.75, 0.40), "mesh": "flat"},
+	{"type": "Orbital Vault",    "radius": 1.70, "color": Color(0.72, 0.74, 0.80), "mesh": "box"},
+	{"type": "Orbital Battery",  "radius": 1.95, "color": Color(0.50, 0.95, 0.62), "mesh": "box"},
+]
+const INFRA_MAX_PER_LANE: int = 64   # cap per lane (MultiMesh instance budget)
+
+## Shared magenta-free grey checkerboard placeholder texture (built once, tinted per lane).
+static var _placeholder_tex: ImageTexture = null
+
+## Per-lane runtime state: [{ mm, type, radius, phase, motion, incl }].
+var _infra: Array = []
+var _infra_poll: float = 0.0
+
 ## Per-gas-giant ring appearance.  Radii are multiples of the planet's own
 ## radius; tilt matches each body's real axial tilt (Uranus rings are nearly
 ## perpendicular to the ecliptic).  Alpha sets overall ring prominence.
@@ -335,53 +355,48 @@ func _create_blur_torus() -> void:
 	get_parent().add_child(_blur_torus)
 
 func _create_orbit_line() -> void:
-	var segments := 128
-	var pts := _orbit_path_points(segments)
+	# A thin, translucent 3-D torus swept along the orbit path: a tube with a small circular
+	# cross-section (radius + vertical), so it reads as an orbit line but has real volume and
+	# stays visible from any camera angle (Vulkan 1-px LINE_STRIP disappears at distance).
+	const PATH_SEGS: int = 160
+	const RING_SEGS: int = 6
+	const TUBE_R:    float = 0.05   # cross-section radius (game units)
+	var pts := _orbit_path_points(PATH_SEGS)
+	var up := Vector3(0.0, 1.0, 0.0)
+
+	var verts := PackedVector3Array()
 	var r_max: float = 0.0
-	for p in pts:
-		r_max = maxf(r_max, Vector2(p.x, p.z).length())
-
-	# Build a triangle-based ribbon instead of line primitives.
-	# Vulkan (Godot 4 Forward+) draws PRIMITIVE_LINE_STRIP as 1-px lines that
-	# disappear at any distance or with MSAA enabled.  Two interlocking ribbons
-	# — one flat in the XZ plane (visible top-down), one vertical (visible from
-	# the side) — stay visible from every camera angle.
-	const FLAT_W: float = 0.02   # XZ-plane ribbon half-width (game units)
-	const VERT_H: float = 0.02   # vertical ribbon half-height (game units)
-
-	var tri_verts := PackedVector3Array()
-	tri_verts.resize(segments * 12)  # 2 ribbons × 2 triangles × 3 verts per segment
-	var vi: int = 0
-
-	for i in range(segments):
-		var p1: Vector3 = pts[i]
-		var p2: Vector3 = pts[i + 1]
-		var d: Vector3  = p2 - p1
-		if d.length_squared() < 1e-12:
-			vi += 12
-			continue
-		d = d.normalized()
-		var perp: Vector3 = Vector3(-d.z, 0.0, d.x) * FLAT_W
-		var up:   Vector3 = Vector3(0.0, VERT_H, 0.0)
-
-		# Flat XZ ribbon
-		tri_verts[vi]     = p1 - perp; tri_verts[vi + 1] = p1 + perp; tri_verts[vi + 2] = p2 - perp
-		tri_verts[vi + 3] = p1 + perp; tri_verts[vi + 4] = p2 + perp; tri_verts[vi + 5] = p2 - perp
-		# Vertical ribbon
-		tri_verts[vi + 6]  = p1 - up; tri_verts[vi + 7]  = p1 + up; tri_verts[vi + 8]  = p2 - up
-		tri_verts[vi + 9]  = p1 + up; tri_verts[vi + 10] = p2 + up; tri_verts[vi + 11] = p2 - up
-		vi += 12
+	for i in range(PATH_SEGS):
+		var p0: Vector3 = pts[i]
+		var p1: Vector3 = pts[i + 1]
+		# Cross-section frame: the point's own radial (XZ) direction + world up, so the tube
+		# hugs the orbit plane with a small vertical thickness.
+		var s0: Vector3 = Vector3(p0.x, 0.0, p0.z)
+		s0 = s0.normalized() if s0.length_squared() > 1e-9 else Vector3(1, 0, 0)
+		var s1: Vector3 = Vector3(p1.x, 0.0, p1.z)
+		s1 = s1.normalized() if s1.length_squared() > 1e-9 else Vector3(1, 0, 0)
+		r_max = maxf(r_max, Vector2(p0.x, p0.z).length())
+		for j in range(RING_SEGS):
+			var a0 := TAU * float(j)     / float(RING_SEGS)
+			var a1 := TAU * float(j + 1) / float(RING_SEGS)
+			var o00 := p0 + (cos(a0) * s0 + sin(a0) * up) * TUBE_R
+			var o01 := p0 + (cos(a1) * s0 + sin(a1) * up) * TUBE_R
+			var o10 := p1 + (cos(a0) * s1 + sin(a0) * up) * TUBE_R
+			var o11 := p1 + (cos(a1) * s1 + sin(a1) * up) * TUBE_R
+			verts.append(o00); verts.append(o10); verts.append(o11)
+			verts.append(o00); verts.append(o11); verts.append(o01)
 
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = tri_verts
+	arrays[Mesh.ARRAY_VERTEX] = verts
 
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.55, 0.70, 1.0, 1.0)
+	mat.albedo_color = Color(0.55, 0.70, 1.0, 0.35)   # translucent blue
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
 	mesh.surface_set_material(0, mat)
 
@@ -389,9 +404,10 @@ func _create_orbit_line() -> void:
 	_orbit_line.mesh = mesh
 	_orbit_line.name = name + "_orbit_line"
 	_orbit_line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var ext: float = r_max + TUBE_R
 	_orbit_line.custom_aabb = AABB(
-		Vector3(-r_max, -VERT_H, -r_max),
-		Vector3(r_max * 2.0, VERT_H * 2.0, r_max * 2.0)
+		Vector3(-ext, -TUBE_R, -ext),
+		Vector3(ext * 2.0, TUBE_R * 2.0, ext * 2.0)
 	)
 	get_parent().add_child(_orbit_line)
 
@@ -459,7 +475,13 @@ func _process(delta: float) -> void:
 		if type == Type.GAS_GIANT:
 			_create_rings()
 		_create_moons()
+		_create_infra_lanes()
 		_sync_visibility()
+
+	# Orbital infrastructure: refresh counts + orbit them every frame (even while paused, so
+	# newly-built structures appear immediately).  Cheap — small counts, polled on a throttle.
+	if not _infra.is_empty():
+		_update_infra(delta)
 
 	# Stellar evolution — update once per year so it has zero per-frame cost.
 	if type == Type.STAR:
@@ -608,6 +630,124 @@ func _update_moons(delta: float) -> void:
 			z * sin(incl),
 			z * cos(incl)
 		)
+
+# ── Orbital infrastructure lanes ───────────────────────────────────────────────
+
+## Grey checkerboard placeholder texture, built once and shared by every planet's lanes.
+static func _get_placeholder_tex() -> ImageTexture:
+	if _placeholder_tex != null:
+		return _placeholder_tex
+	var s: int = 16
+	var img := Image.create(s, s, false, Image.FORMAT_RGBA8)
+	for y in range(s):
+		for x in range(s):
+			var on: bool = (((x >> 2) + (y >> 2)) & 1) == 0
+			img.set_pixel(x, y, Color(0.85, 0.85, 0.90) if on else Color(0.32, 0.32, 0.38))
+	_placeholder_tex = ImageTexture.create_from_image(img)
+	return _placeholder_tex
+
+## Placeholder mesh per infrastructure kind — a simple distinguishable stand-in shape.
+func _infra_mesh(kind: String) -> Mesh:
+	match kind:
+		"cyl":
+			var c := CylinderMesh.new()
+			c.top_radius = 0.06; c.bottom_radius = 0.06; c.height = 0.26
+			c.radial_segments = 8; c.rings = 1
+			return c
+		"flat":
+			var f := BoxMesh.new(); f.size = Vector3(0.34, 0.03, 0.24); return f
+		"rod":
+			var r := BoxMesh.new(); r.size = Vector3(0.10, 0.10, 0.30); return r
+		_:
+			var b := BoxMesh.new(); b.size = Vector3(0.18, 0.16, 0.18); return b
+
+## Material: placeholder checker texture tinted with the lane's colour + faint self-glow
+## so the structures read in the scene's limited lighting.
+func _infra_material(color: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _get_placeholder_tex()
+	m.albedo_color   = color
+	m.metallic       = 0.3
+	m.roughness      = 0.7
+	m.emission_enabled = true
+	m.emission       = color
+	m.emission_energy_multiplier = 0.15
+	return m
+
+## Build one MultiMesh lane per orbital-infrastructure type (all under this planet, in its
+## local scaled frame like the moons).  Each lane starts empty; _update_infra reveals one
+## instance per built structure of that type.
+func _create_infra_lanes() -> void:
+	if type == Type.STAR:
+		return   # the Sun's orbital build-out is the Dyson swarm (see init_planets.gd)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(str(name) + "_infra")
+	for spec: Dictionary in INFRA_LANES:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = _infra_mesh(str(spec["mesh"]))
+		mm.instance_count = INFRA_MAX_PER_LANE
+		mm.visible_instance_count = 0
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "%s_infra_%s" % [name, str(spec["type"]).replace(" ", "_")]
+		mmi.multimesh = mm
+		mmi.material_override = _infra_material(spec["color"])
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ext: float = float(spec["radius"]) + 0.5
+		mmi.custom_aabb = AABB(Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
+		add_child(mmi)
+		_infra.append({
+			"mm":     mm,
+			"type":   str(spec["type"]),
+			"radius": float(spec["radius"]),
+			"phase":  rng.randf() * TAU,
+			"motion": rng.randf_range(0.15, 0.5) * (1.0 if rng.randf() < 0.5 else -1.0),
+			"incl":   rng.randf_range(-0.30, 0.30),
+		})
+	_update_infra(0.0)
+
+## Poll how many of each orbital structure the planet has (throttled) and lay the visible
+## instances out evenly around their lane, advancing the shared lane angle each frame.
+func _update_infra(delta: float) -> void:
+	_infra_poll += delta
+	var repoll: bool = _infra_poll >= 0.5
+	if repoll:
+		_infra_poll = 0.0
+	var game: Node = get_tree().current_scene
+	var pname: String = str(name).to_lower()
+	# Freeze the orbital spin while the game is paused (counts still refresh so newly-built
+	# structures appear); only advance the lane angle when the simulation is actually running.
+	var running: bool = SolarSystem.solar_system_active \
+		and not SolarSystem.paused and not SolarSystem.ui_paused
+	# The lanes are children of the (scaled) planet, so cancel the planet's scale in each
+	# instance's basis — the structures render at a constant world size regardless of how
+	# big the planet is (their orbit radius still scales, so they hug each world).
+	var inv_s: float = 1.0 / maxf(scale.x, 0.0001)
+	for lane: Dictionary in _infra:
+		var mm: MultiMesh = lane["mm"]
+		if running:
+			lane["phase"] = fposmod(float(lane["phase"]) + float(lane["motion"]) * delta, TAU)
+		if repoll and game and game.has_method("_count_building"):
+			mm.visible_instance_count = mini(
+				int(game._count_building(pname, str(lane["type"]))), INFRA_MAX_PER_LANE)
+		var count: int = mm.visible_instance_count
+		if count <= 0:
+			continue
+		var r: float = float(lane["radius"])
+		var incl: float = float(lane["incl"])
+		var base: float = float(lane["phase"])
+		for i in range(count):
+			var th: float = base + TAU * float(i) / float(count)   # evenly spaced around the ring
+			var z: float = r * sin(th)
+			var pos := Vector3(r * cos(th), z * sin(incl), z * cos(incl))
+			# Orient each structure's up-axis outward (radially), like a real satellite bus.
+			var radial: Vector3 = pos.normalized() if pos.length_squared() > 1e-9 else Vector3.UP
+			var ref: Vector3 = Vector3.UP if absf(radial.y) < 0.95 else Vector3.RIGHT
+			var t1: Vector3 = radial.cross(ref).normalized()
+			var t2: Vector3 = radial.cross(t1)
+			# Basis scaled by inv_s → constant world-space structure size on any planet.
+			mm.set_instance_transform(i,
+				Transform3D(Basis(t1 * inv_s, radial * inv_s, t2 * inv_s), pos))
 
 ## Returns the planet's current visual distance from the orbit centre.
 ## For Keplerian orbits this varies with true anomaly; for circular fallback

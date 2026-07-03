@@ -22,11 +22,11 @@ const MISSION_TYPES := [
 	{"name": "Research Probe",  "rockets": 2,  "fuel": 16},
 	# Cargo resupply to an established colony.
 	{"name": "Supply Run",      "rockets": 4,  "fuel": 50},
-	# Heavy-lift carrier that ferries a batch of Solar Satellites to the Sun.  Only
-	# valid with the Sun as target; the satellites are an extra payload on top of the
-	# rocket + fuel cost.
-	{"name": "Solar Deployment", "rockets": 6, "fuel": 80,
-		"payload": "SolarSatellite", "payload_per_launch": 12, "sun_only": true},
+	# Carrier that ferries a single Solar Satellite to the Sun and slots it into the
+	# swarm.  Only valid with the Sun as target; each panel is deployed individually
+	# (one collector per launch), so the swarm is built out one piece at a time.
+	{"name": "Solar Deployment", "rockets": 2, "fuel": 20,
+		"payload": "SolarSatellite", "payload_per_launch": 1, "sun_only": true},
 ]
 
 # Selectable propellants.  The player chooses one per launch; its `accel` (m/s²) drives

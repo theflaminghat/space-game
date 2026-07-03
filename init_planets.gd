@@ -40,16 +40,25 @@ const KIRKWOOD_GAPS: Array = [
 ## cross like a 3D swarm.  Each collector is one Solar Satellite the player has
 ## manufactured and launched to the Sun: satellites fill the evenly-spaced slots of
 ## one lane, and once a lane is full new arrivals spill into the next lane.
-const SWARM_LANES:    int   = 6
-const SWARM_PER_LANE: int   = 24
-const SWARM_MAX:      int   = SWARM_LANES * SWARM_PER_LANE   # 144 collector slots
-const SWARM_INNER_AU: float = 0.15
-const SWARM_OUTER_AU: float = 0.35
-## Step (coprime to SWARM_PER_LANE) used to fill a lane's slots in a spread-out
-## order, so a half-full lane still looks evenly distributed rather than clustered.
-const SWARM_SPREAD_STEP: int = 13
+const SWARM_LANES:    int   = 18    # more lanes, each packed with as many panels as fit
+const SWARM_INNER_AU: float = 0.10   # hugs the Sun, inside Mercury's orbit
+const SWARM_OUTER_AU: float = 0.26
 const PANEL_W:    float = 0.30   # collector panel width (game units)
 const PANEL_THIN: float = 0.04   # panel thickness
+## Arc length each panel occupies on its ring (panel width + a clear gap), so a lane fits
+## TAU·radius / this collectors without overlapping.  Bigger (outer) lanes hold more.
+const SWARM_PANEL_ARC: float = PANEL_W * 1.4
+## Golden angle (rad) — used to spread lane orbital planes evenly over the sphere.
+const GOLDEN_ANGLE: float = 2.399963229728653
+
+## Per-lane capacities and the cumulative start index of each lane (built in _build_swarm).
+var _lane_cap:    PackedInt32Array = PackedInt32Array()
+var _lane_start:  PackedInt32Array = PackedInt32Array()
+## For each collector index, which evenly-spaced slot (0..cap) it occupies.  The fill order
+## bisects the largest gap each step, so any number of deployed panels is spread as evenly
+## as possible around the ring (and the full ring is perfectly uniform).
+var _slot_seq:    PackedInt32Array = PackedInt32Array()
+var _swarm_max:   int = 0                                 # total collector slots
 const SWARM_POLL_SEC: float = 0.5   # how often to re-read the deployed-satellite count
 
 # ── Per-asteroid orbital state (flat parallel arrays for cache efficiency) ──────
@@ -75,9 +84,13 @@ var _mm_nodes:    Array[MultiMeshInstance3D] = []
 var _swarm_mm:  MultiMesh = null
 var _swarm_mmi: MultiMeshInstance3D = null
 var _sw_lane:   PackedInt32Array   = PackedInt32Array()   # lane index per collector
-var _sw_phase:  PackedFloat32Array = PackedFloat32Array() # current orbital phase (rad)
+var _sw_phase:  PackedFloat32Array = PackedFloat32Array() # FIXED base slot phase (rad)
 var _lane_rvis:   PackedFloat32Array = PackedFloat32Array()  # visual radius per lane
 var _lane_motion: PackedFloat32Array = PackedFloat32Array()  # mean motion (rad/day) per lane
+## Shared accumulated rotation per lane.  Every collector in a lane orbits by this same
+## angle on top of its fixed slot, so the ring stays perfectly evenly spaced no matter
+## when each panel was revealed (advancing per-panel independently desynchronised them).
+var _lane_angle:  PackedFloat32Array = PackedFloat32Array()
 var _lane_basis:  Array[Basis] = []                          # incl+node rotation per lane
 var _swarm_poll_accum: float = 0.0
 
@@ -292,9 +305,10 @@ func _process(delta: float) -> void:
 	if _swarm_poll_accum >= SWARM_POLL_SEC:
 		_swarm_poll_accum = 0.0
 		_refresh_swarm_count()
-	var vis: int = _swarm_mm.visible_instance_count
-	for i in range(vis):
-		_sw_phase[i] = fposmod(_sw_phase[i] + _lane_motion[_sw_lane[i]] * delta_days, TAU)
+	# Advance the whole lane by one shared angle (not each visible panel separately, which
+	# desynchronised panels revealed at different times and wrecked the even spacing).
+	for lane in range(_lane_angle.size()):
+		_lane_angle[lane] = fposmod(_lane_angle[lane] + _lane_motion[lane] * delta_days, TAU)
 	_update_swarm_transforms()
 
 
@@ -370,8 +384,33 @@ func _asteroid_tint(rng: RandomNumberGenerator) -> Color:
 # ── Dyson swarm ────────────────────────────────────────────────────────────────
 
 func _build_swarm() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 0xD7507A   # fixed → deterministic swarm layout
+	# Per-lane geometry: radius, mean motion, orbital-plane orientation, and a fit-based
+	# capacity — each ring holds as many panels as its circumference fits without overlap,
+	# so the bigger (outer) lanes carry more collectors than the inner ones.
+	_swarm_max = 0
+	for lane in range(SWARM_LANES):
+		var t: float = float(lane) / float(maxi(1, SWARM_LANES - 1))   # 0..1
+		var a_au: float = lerpf(SWARM_INNER_AU, SWARM_OUTER_AU, t)
+		var rv: float = log(a_au + 1.0) * ORBIT_RADIUS_MULT
+		_lane_rvis.append(rv)
+		_lane_motion.append(TAU / (EARTH_ORBIT_DAYS * pow(a_au, 1.5)))
+		_lane_angle.append(0.0)
+		# Spread each lane's orbital plane over the whole sphere (spherical-Fibonacci
+		# lattice of plane normals) so the rings wrap the Sun from every direction — a
+		# 3-D shell, not a flat disk.  Because every lane sits at its own radius and the
+		# panels are radially thin, rings in different planes never actually collide.
+		var yv: float = 1.0 - 2.0 * (float(lane) + 0.5) / float(SWARM_LANES)   # 1 → −1
+		var rr: float = sqrt(maxf(0.0, 1.0 - yv * yv))
+		var phi: float = GOLDEN_ANGLE * float(lane)
+		var normal := Vector3(rr * cos(phi), yv, rr * sin(phi)).normalized()   # plane normal
+		var ref := Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT
+		var u := normal.cross(ref).normalized()                               # in-plane axis
+		var w := normal.cross(u).normalized()                                 # in-plane axis
+		_lane_basis.append(Basis(u, normal, w))
+		var cap: int = maxi(1, int(TAU * rv / SWARM_PANEL_ARC))   # collectors that fit
+		_lane_cap.append(cap)
+		_lane_start.append(_swarm_max)
+		_swarm_max += cap
 
 	# One shared thin panel mesh; a single MultiMesh → one draw call.
 	var panel := BoxMesh.new()
@@ -380,8 +419,8 @@ func _build_swarm() -> void:
 	_swarm_mm = MultiMesh.new()
 	_swarm_mm.transform_format = MultiMesh.TRANSFORM_3D
 	_swarm_mm.mesh = panel
-	_swarm_mm.instance_count = SWARM_MAX
-	_swarm_mm.visible_instance_count = 0   # nothing until Orbital Arrays exist
+	_swarm_mm.instance_count = _swarm_max
+	_swarm_mm.visible_instance_count = 0   # nothing until collectors are deployed
 
 	_swarm_mmi = MultiMeshInstance3D.new()
 	_swarm_mmi.name = "DysonSwarm"
@@ -393,35 +432,89 @@ func _build_swarm() -> void:
 		Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
 	add_child(_swarm_mmi)
 
-	# Per-lane geometry: radius, mean motion, and an inclination+node rotation so
-	# the lanes tilt and cross like a real swarm shell.
-	for lane in range(SWARM_LANES):
-		var t: float = float(lane) / float(maxi(1, SWARM_LANES - 1))   # 0..1
-		var a_au: float = lerpf(SWARM_INNER_AU, SWARM_OUTER_AU, t)
-		_lane_rvis.append(log(a_au + 1.0) * ORBIT_RADIUS_MULT)
-		_lane_motion.append(TAU / (EARTH_ORBIT_DAYS * pow(a_au, 1.5)))
-		var incl: float = deg_to_rad(lerpf(5.0, 55.0, t))
-		var node: float = rng.randf() * TAU
-		_lane_basis.append(Basis(Vector3.UP, node) * Basis(Vector3.RIGHT, incl))
-
-	# Slots laid out lane-major: instance indices [0..SWARM_PER_LANE) are lane 0,
-	# the next block is lane 1, and so on.  Because visible_instance_count reveals
-	# instances in index order, satellites fill one lane completely before the next.
-	# Within a lane the fill order is spread (coprime step) so a partly-filled lane
-	# still looks evenly distributed around its ring rather than bunched in an arc.
-	_sw_lane.resize(SWARM_MAX)
-	_sw_phase.resize(SWARM_MAX)
+	# Slots laid out lane-major (lane 0's slots first, then lane 1's …).  Because
+	# visible_instance_count reveals instances in index order, collectors fill one lane
+	# completely before the next; within a lane the bisection order (_even_order) spreads
+	# the fill so a partly-filled ring still looks evenly distributed, never bunched.
+	_sw_lane.resize(_swarm_max)
+	_sw_phase.resize(_swarm_max)
+	_slot_seq.resize(_swarm_max)
 	var idx: int = 0
 	for lane in range(SWARM_LANES):
-		for fill in range(SWARM_PER_LANE):
+		var cap: int = _lane_cap[lane]
+		var order: PackedInt32Array = _even_order(cap)
+		for fill in range(cap):
 			_sw_lane[idx] = lane
-			var slot: int = (fill * SWARM_SPREAD_STEP) % SWARM_PER_LANE
-			_sw_phase[idx] = fposmod(
-				TAU * float(slot) / float(SWARM_PER_LANE) + float(lane) * 0.37, TAU)
+			_slot_seq[idx] = order[fill]
+			_sw_phase[idx] = _slot_phase(lane, fill)
 			idx += 1
 
 	_refresh_swarm_count()
 	_update_swarm_transforms()
+
+## A fill order over `n` evenly-spaced slots that keeps every prefix as uniform as
+## possible: each new slot lands in the middle of the currently-largest gap.  So three
+## panels sit ~120° apart, four ~90°, and so on — never clustered.
+func _even_order(n: int) -> PackedInt32Array:
+	var order := PackedInt32Array()
+	if n <= 0:
+		return order
+	var used := PackedByteArray()
+	used.resize(n)
+	order.append(0)
+	used[0] = 1
+	var occ := [0]                       # occupied slots, kept sorted
+	while order.size() < n:
+		var m: int = occ.size()
+		var best_gap: int = -1
+		var best_mid: int = -1
+		for j in range(m):
+			var a: int = occ[j]
+			var b: int = occ[(j + 1) % m] + (n if j + 1 == m else 0)
+			var gap: int = b - a
+			if gap > best_gap:
+				@warning_ignore("integer_division")
+				var mid: int = ((a + b) / 2) % n
+				if used[mid] == 0:
+					best_gap = gap
+					best_mid = mid
+		if best_mid < 0:                 # all midpoints taken — take any free slot
+			for s in range(n):
+				if used[s] == 0:
+					best_mid = s
+					break
+		order.append(best_mid)
+		used[best_mid] = 1
+		occ.append(best_mid)
+		occ.sort()
+	return order
+
+## Base orbital phase (rad) of the `fill`-th collector to enter `lane` — its assigned
+## evenly-spaced slot, so panels never overlap (one per TAU/cap arc) and any partial
+## count is spread evenly around the ring.
+func _slot_phase(lane: int, fill: int) -> float:
+	var cap: int = _lane_cap[lane]
+	var slot: int = _slot_seq[_lane_start[lane] + fill]
+	return fposmod(TAU * float(slot) / float(cap) + float(lane) * 0.37, TAU)
+
+## Lane that holds collector `index` (lane-major), via the cumulative start offsets.
+func _lane_of_index(index: int) -> int:
+	for lane in range(SWARM_LANES - 1, -1, -1):
+		if index >= _lane_start[lane]:
+			return lane
+	return 0
+
+## World position of collector `index` at its base phase — the spot a rocket flies to
+## before it transforms into a deployed panel.  Unrevealed slots hold this static
+## position (they don't orbit until they become visible).
+func swarm_slot_world_pos(index: int) -> Vector3:
+	if index < 0 or index >= _swarm_max:
+		return global_position
+	var lane: int = _lane_of_index(index)
+	var fill: int = index - _lane_start[lane]
+	var rv: float = _lane_rvis[lane]
+	var th: float = _slot_phase(lane, fill) + _lane_angle[lane]   # current (rotated) slot spot
+	return to_global(_lane_basis[lane] * Vector3(rv * cos(th), 0.0, rv * sin(th)))
 
 ## Reposition every visible collector at its current orbital phase, oriented so the
 ## flat panel faces the Sun (its thin axis points radially).
@@ -432,20 +525,27 @@ func _update_swarm_transforms() -> void:
 	for i in range(vis):
 		var lane: int = _sw_lane[i]
 		var rv: float = _lane_rvis[lane]
-		var th: float = _sw_phase[i]
-		var pos: Vector3 = _lane_basis[lane] * Vector3(rv * cos(th), 0.0, rv * sin(th))
-		var radial: Vector3 = pos.normalized()
-		var ref: Vector3 = Vector3.UP if absf(radial.y) < 0.95 else Vector3.RIGHT
-		var t1: Vector3 = radial.cross(ref).normalized()
-		var t2: Vector3 = radial.cross(t1)
-		var b := Basis(t1 * PANEL_W, radial * PANEL_THIN, t2 * PANEL_W)
+		var th: float = _sw_phase[i] + _lane_angle[lane]   # fixed slot + shared lane rotation
+		var lb: Basis = _lane_basis[lane]
+		var pos: Vector3 = lb * Vector3(rv * cos(th), 0.0, rv * sin(th))
+		# Orient the panel so its width runs ALONG the ring (the orbit tangent) and its
+		# thin axis points at the Sun, so each panel's along-track footprint is exactly
+		# PANEL_W — narrower than the slot spacing, so neighbours never overlap.
+		var radial:  Vector3 = (lb * Vector3(cos(th), 0.0, sin(th)))
+		var tangent: Vector3 = (lb * Vector3(-sin(th), 0.0, cos(th)))
+		var across:  Vector3 = radial.cross(tangent).normalized()
+		var b := Basis(tangent * PANEL_W, radial * PANEL_THIN, across * PANEL_W)
 		_swarm_mm.set_instance_transform(i, Transform3D(b, pos))
 
 ## Show one collector per Solar Satellite the player has deployed to the Sun.
 func _refresh_swarm_count() -> void:
 	if _swarm_mm == null:
 		return
-	_swarm_mm.visible_instance_count = clampi(_deployed_satellite_count(), 0, SWARM_MAX)
+	_swarm_mm.visible_instance_count = clampi(_deployed_satellite_count(), 0, _swarm_max)
+
+## Total collector slots across all lanes (queried by Game for the swarm cap).
+func get_swarm_max() -> int:
+	return _swarm_max
 
 ## How many Solar Satellites have arrived at the Sun (read from Game).
 func _deployed_satellite_count() -> int:

@@ -5,9 +5,10 @@ extends Control
 ## Linear zone: 1940 … LOG_CUTOFF_YEAR at PX_PER_YEAR pixels/year.
 const START_YEAR      := 1940
 const LOG_CUTOFF_YEAR := 2_500      # switch to log scale after this year
-const PX_PER_YEAR     := 8.0
-## Logarithmic zone: 200 px per decade (10× jump) beyond LOG_CUTOFF_YEAR.
-const LOG_SCALE_PX    := 200.0
+const PX_PER_YEAR     := 5.0        # compressed so the near-term doesn't dwarf deep time
+## Logarithmic zone: fixed pixels PER ORDER OF MAGNITUDE beyond LOG_CUTOFF_YEAR — widened so
+## the exponential era (millions → trillions of years) is spread out and readable.
+const LOG_SCALE_PX    := 360.0
 
 # ── Layout constants ───────────────────────────────────────────────────────────
 const MARGIN_L     := 40.0
@@ -22,8 +23,18 @@ const CARD_GAP     := 10
 ## Current in-game year; drives the green "now" marker.
 var _current_year: int = 1945
 
-## Game events added at runtime (each dict must contain a "year" key).
+## Game events added at runtime (each dict must contain a "year" key).  Bounded so a deep-time
+## flood of alerts (e.g. relativistic-missile events) can't grow the node/rebuild cost without
+## limit — the oldest live events fall off; the fixed history events are never dropped.
+const MAX_LIVE_EVENTS := 200
 var _live_events: Array = []
+var _live_ids: Dictionary = {}     # id → true, for O(1) duplicate rejection
+## Card rebuilds are deferred: only when the panel is actually visible, and at most a few times
+## a second, so adding events (even one per frame at fast-forward) never rebuilds the whole
+## node tree per event.
+const REBUILD_SEC := 0.25
+var _layout_dirty: bool = false
+var _rebuild_accum: float = 0.0
 
 ## Pre-computed card positions so _draw() and _build_cards() stay in sync.
 ## Each element: { card_x, card_y, year_x, above }
@@ -51,12 +62,17 @@ func _year_to_x(y: int) -> float:
 
 ## Short human-readable year label used in card headers and ruler ticks.
 func _fmt_year(y: int) -> String:
-	if y >= 1_000_000_000:
-		return "%.2fB" % (float(y) / 1_000_000_000.0)
-	if y >= 1_000_000:
-		return "%.1fM" % (float(y) / 1_000_000.0)
-	if y >= 10_000:
-		return "%.1fK" % (float(y) / 1_000.0)
+	var f := float(y)
+	if f >= 1.0e15:
+		return "%.1fQa" % (f / 1.0e15)   # quadrillion years
+	if f >= 1.0e12:
+		return "%.1fT" % (f / 1.0e12)    # trillion years
+	if f >= 1.0e9:
+		return "%.2fB" % (f / 1.0e9)
+	if f >= 1.0e6:
+		return "%.1fM" % (f / 1.0e6)
+	if f >= 1.0e4:
+		return "%.1fK" % (f / 1.0e3)
 	return str(y)
 
 ## Returns the category color from whichever palette defines it.
@@ -253,9 +269,12 @@ func _draw() -> void:
 		var far_year := LOG_CUTOFF_YEAR
 		for ev in _live_events:
 			far_year = max(far_year, int(ev["year"]))
+		# One tick per order of magnitude, out past the deep-time (heat-death) scales.
 		var decade_ticks: Array[int] = [
 			10_000, 100_000, 1_000_000, 10_000_000,
 			100_000_000, 1_000_000_000, 10_000_000_000,
+			100_000_000_000, 1_000_000_000_000,
+			10_000_000_000_000, 100_000_000_000_000,
 		]
 		for lt: int in decade_ticks:
 			if lt > far_year:
@@ -301,18 +320,35 @@ func _draw() -> void:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-## Add a live game event to the timeline.  The dict must contain at least
-## "year", "title", "desc", and "category".  Duplicate IDs are ignored.
+## Add a live game event to the timeline.  The dict must contain at least "year", "title",
+## "desc", and "category".  Duplicate IDs are ignored.  Cheap — O(1) append; the (bounded)
+## card tree is rebuilt lazily by _process only while the panel is visible.
 func add_event(ev: Dictionary) -> void:
 	var ev_id: String = ev.get("id", "")
 	if ev_id != "":
-		for existing: Dictionary in _live_events:
-			if existing.get("id", "") == ev_id:
-				return   # already on the timeline
+		if _live_ids.has(ev_id):
+			return   # already on the timeline
+		_live_ids[ev_id] = true
 	_live_events.append(ev)
-	_compute_layout()
-	_build_cards()
-	queue_redraw()
+	if _live_events.size() > MAX_LIVE_EVENTS:
+		var dropped: Dictionary = _live_events.pop_front()   # oldest live event falls off
+		var did: String = dropped.get("id", "")
+		if did != "":
+			_live_ids.erase(did)
+	_layout_dirty = true
+
+## Rebuild the card tree lazily: only when it's visible (skip entirely while the panel is
+## closed) and at most every REBUILD_SEC, coalescing bursts of events into one rebuild.
+func _process(delta: float) -> void:
+	if not _layout_dirty or not is_visible_in_tree():
+		return
+	_rebuild_accum += delta
+	if _rebuild_accum >= REBUILD_SEC:
+		_rebuild_accum = 0.0
+		_layout_dirty = false
+		_compute_layout()
+		_build_cards()
+		queue_redraw()
 
 func set_current_year(y: int) -> void:
 	_current_year = y
