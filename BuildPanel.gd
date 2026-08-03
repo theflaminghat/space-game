@@ -1,7 +1,10 @@
 extends PanelContainer
 
-signal build_requested(planet_name: String, building_name: String)
-signal demolish_requested(planet_name: String, building_name: String)
+## Each carries how many to act on, so a batch is one request rather than N clicks.
+signal build_requested(planet_name: String, building_name: String, count: int)
+signal demolish_requested(planet_name: String, building_name: String, count: int)
+## Retrofit standing copies of this building into the next level up.
+signal upgrade_requested(planet_name: String, building_name: String, count: int)
 
 @onready var build_list: VBoxContainer = $MarginContainer/VBoxContainer/ScrollContainer/BuildList
 
@@ -11,6 +14,19 @@ var current_planet: String = ""
 ## without rebuilding the whole list (which would reset scroll position).
 ## Each entry: { "label": Label, "key": String, "amount": float }
 var _cost_items: Array = []
+
+## Per-LEVEL mutable widgets, keyed by full building name ("Mine", "Mine II"), so a build,
+## demolish, or upgrade can patch counts and button states in place instead of tearing down and
+## recreating the whole list (which was the frame-stutter on every build).
+## Each: { count, build[], demolish[], upgrade[], available, min_count }.
+var _rows: Dictionary = {}
+## Per-FAMILY header widgets, keyed by base name, holding the total standing across all levels
+## and the shared construction badge.  Each: { total: Label, badge: Label }.
+var _families: Dictionary = {}
+
+## Batch sizes offered for build / demolish / upgrade.  Catalogue entries are single buildings,
+## so infrastructure is raised by the hundred and one-at-a-time clicking is not a real option.
+const BATCH_SIZES: Array = [1, 10, 100]
 
 # Cost-label colours: normal grey when affordable, darker when the player is short.
 const COST_OK:    Color = Color(0.75, 0.75, 0.75)
@@ -36,130 +52,333 @@ func refresh_affordability(have: Dictionary) -> void:
 		var enough: bool = float(have.get(item["key"], 0.0)) >= float(item["amount"])
 		(item["label"] as Label).modulate = COST_OK if enough else COST_SHORT
 
+## Fast in-place update after a build/demolish: patch counts, construction badges, the demolish
+## button's disabled state, and affordability — recreating no nodes.  Falls back to a full rebuild
+## only when the row set or a building's availability changed (a planet/research/colony change
+## reshapes the list).  This is what keeps building from stuttering every click.
+func apply_counts(catalog: Array) -> void:
+	if catalog.size() != _rows.size():
+		_populate(catalog)
+		return
+	var have_all: Dictionary = {}
+	var fam_total: Dictionary = {}    # base name → standing across every level
+	var fam_queued: Dictionary = {}   # base name → under construction across every level
+	for building: Dictionary in catalog:
+		var bname: String = str(building["name"])
+		if not _rows.has(bname):
+			_populate(catalog)
+			return
+		var r: Dictionary = _rows[bname]
+		if bool(building.get("available", true)) != bool(r["available"]):
+			_populate(catalog)   # cost/requirement layout differs — structure changed
+			return
+		var count: int = int(building.get("count", 0))
+		(r["count"] as Label).text = str(count)
+		# Each batch button is gated on whether that many can actually be acted on.
+		var dem: Array = r["demolish"]
+		var ups: Array = r["upgrade"]
+		var can_up: bool = bool(building.get("can_upgrade", false))
+		for i in range(BATCH_SIZES.size()):
+			var n: int = int(BATCH_SIZES[i])
+			if i < dem.size():
+				(dem[i] as Button).disabled = count - n < int(r["min_count"])
+			if i < ups.size():
+				(ups[i] as Button).disabled = not can_up or count < n
+		for k: String in (building.get("have", {}) as Dictionary):
+			have_all[k] = building["have"][k]
+		# Roll this level up into its family's header figures.
+		var base: String = str(building.get("base_name", bname))
+		fam_total[base]  = int(fam_total.get(base, 0)) + count
+		fam_queued[base] = int(fam_queued.get(base, 0)) + int(building.get("in_progress", 0))
+	for base: String in _families:
+		var f: Dictionary = _families[base]
+		(f["total"] as Label).text = str(int(fam_total.get(base, 0)))
+		var badge: Label = f["badge"]
+		var q: int = int(fam_queued.get(base, 0))
+		badge.text = "+%d⚙" % q
+		badge.visible = q > 0
+	refresh_affordability(have_all)
+
 func _populate(catalog: Array) -> void:
 	_cost_items.clear()
+	_rows.clear()
+	_families.clear()
 	for child in build_list.get_children():
 		child.queue_free()
 
+	# Group twice: by category for the sections, then by BASE NAME so every level of a building
+	# lands in the same card.  Dictionary keys keep insertion order, so families appear in
+	# catalogue order and levels in level order.
+	var by_cat: Dictionary = {}
 	for building in catalog:
-		var available: bool = building.get("available", true)
-		var count:     int  = building.get("count", 0)
-		# Non-buildable = inherited starter infrastructure (the 1945 power plants):
-		# can't be constructed, but CAN be demolished down to min_count.
-		var buildable: bool = building.get("buildable", true)
-		var min_count: int  = building.get("min_count", 0)
+		var cat: String = str(building.get("category", "other"))
+		var base: String = str(building.get("base_name", building["name"]))
+		if not by_cat.has(cat):
+			by_cat[cat] = {}
+		var fams: Dictionary = by_cat[cat]
+		if not fams.has(base):
+			fams[base] = []
+		(fams[base] as Array).append(building)
 
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 4)
+	var cats: Array = []
+	for c: String in BuildingData.CATEGORY_ORDER:
+		if by_cat.has(c):
+			cats.append(c)
+	for c: String in by_cat:
+		if c not in BuildingData.CATEGORY_ORDER:
+			cats.append(c)
 
-		# ── Name + production ──────────────────────────────────────────────────
-		var info_box := VBoxContainer.new()
-		info_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		info_box.size_flags_vertical   = Control.SIZE_SHRINK_CENTER
-		info_box.add_theme_constant_override("separation", 0)
+	for cat: String in cats:
+		var fams2: Dictionary = by_cat[cat]
+		_add_category_header(cat, fams2.size())   # count families, not individual levels
+		for base: String in fams2:
+			var tiers: Array = fams2[base]
+			tiers.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+				return int(a.get("level", 1)) < int(b.get("level", 1)))
+			_add_building_card(base, tiers)
 
-		var name_label := Label.new()
-		name_label.text = building["name"]
-		if not available and count == 0:
-			name_label.modulate = Color(0.55, 0.55, 0.55)
-		info_box.add_child(name_label)
+## Section heading above each group of buildings.
+func _add_category_header(cat: String, count: int) -> void:
+	var header := Label.new()
+	header.text = "%s  (%d)" % [
+		str(BuildingData.CATEGORY_LABELS.get(cat, cat.capitalize())), count]
+	header.add_theme_font_size_override("font_size", 12)
+	header.add_theme_color_override("font_color",
+		BuildingData.CATEGORY_COLORS.get(cat, Color(0.70, 0.75, 0.85)))
+	build_list.add_child(header)
 
-		var prod_text := _format_production(building.get("production", {}))
-		if prod_text != "":
-			var prod_label := Label.new()
-			prod_label.text = prod_text
-			prod_label.add_theme_font_size_override("font_size", 10)
-			prod_label.modulate = Color(0.50, 0.72, 0.95) if (available or count > 0) \
-				else Color(0.45, 0.45, 0.45)
-			info_box.add_child(prod_label)
+## One building FAMILY as a single collapsible card: the header carries the base name and the
+## total standing across every level, and the body lists each level in turn with its own output,
+## cost, and controls.  Grouping them keeps the catalogue the same length it was before levels
+## existed, and puts a building's whole upgrade path in one place.
+func _add_building_card(base_name: String, tiers: Array) -> void:
+	var total: int = 0
+	var queued: int = 0
+	var any_live: bool = false
+	for t: Dictionary in tiers:
+		total  += int(t.get("count", 0))
+		queued += int(t.get("in_progress", 0))
+		if bool(t.get("available", true)) or int(t.get("count", 0)) > 0:
+			any_live = true
 
-		# Special infrastructure effects (e.g. Space Elevator launch discounts).
-		var eff_text := _format_effects(building)
-		if eff_text != "":
-			var eff_label := Label.new()
-			eff_label.text = eff_text
-			eff_label.add_theme_font_size_override("font_size", 10)
-			eff_label.modulate = Color(0.45, 0.85, 0.80) if (available or count > 0) \
-				else Color(0.40, 0.45, 0.45)
-			info_box.add_child(eff_label)
+	var card := VBoxContainer.new()
+	card.add_theme_constant_override("separation", 0)
 
-		row.add_child(info_box)
+	# Header: expander + name, then the construction badge and the family total.
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 4)
 
-		# ── Cost or requirement ────────────────────────────────────────────────
-		# Non-buildable plants have an empty cost and fall through to the cost
-		# branch, which simply shows nothing (no label).
-		if available:
-			# One label per cost item so resources the player can't afford can be
-			# dimmed individually.
-			var cost: Dictionary = building.get("cost", {})
-			var have: Dictionary = building.get("have", {})
-			var cost_box := HBoxContainer.new()
-			cost_box.add_theme_constant_override("separation", 8)
-			for key: String in cost:
-				var amount: float = float(cost[key])
-				if amount <= 0.0:
-					continue
-				var affordable: bool = float(have.get(key, 0.0)) >= amount
-				var item := Label.new()
-				item.text = Units.format_cost_component(key, amount)
-				item.add_theme_font_size_override("font_size", 11)
-				# Affordable → normal grey; short → noticeably darker.
-				item.modulate = COST_OK if affordable else COST_SHORT
-				cost_box.add_child(item)
-				_cost_items.append({"label": item, "key": key, "amount": amount})
-			row.add_child(cost_box)
-		elif count == 0:
-			var req_id: String = building.get("requires", "")
-			var req_label := Label.new()
-			req_label.text = "Requires: " + req_id.replace("_", " ").capitalize()
-			req_label.add_theme_font_size_override("font_size", 11)
-			req_label.modulate = Color(0.55, 0.55, 0.55)
-			row.add_child(req_label)
+	var toggle := Button.new()
+	toggle.flat = true
+	toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toggle.text = "▶  " + base_name
+	if not any_live:
+		toggle.modulate = Color(0.55, 0.55, 0.55)
+	header.add_child(toggle)
 
-		# ── Storage contribution (shown for storage buildings only) ───────────
-		var stor: Dictionary = building.get("storage", {})
-		if not stor.is_empty():
-			var stor_label := Label.new()
-			stor_label.text = _format_storage(stor)
-			stor_label.add_theme_font_size_override("font_size", 11)
-			stor_label.modulate = Color(0.55, 0.90, 0.65)
-			row.add_child(stor_label)
+	var badge := Label.new()
+	badge.text = "+%d⚙" % queued
+	badge.add_theme_font_size_override("font_size", 11)
+	badge.modulate = Color(0.95, 0.70, 0.30)
+	badge.tooltip_text = "Under construction (limited by this world's manufacturing capacity)"
+	badge.visible = queued > 0
+	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	header.add_child(badge)
 
-		# ── [−] [count] [+] ───────────────────────────────────────────────────
-		var minus_btn := Button.new()
-		minus_btn.text               = "−"
-		minus_btn.flat               = true
-		minus_btn.custom_minimum_size = Vector2(24, 24)
-		minus_btn.disabled           = count <= min_count
-		minus_btn.pressed.connect(_on_demolish_pressed.bind(building["name"]))
-		row.add_child(minus_btn)
+	var total_label := Label.new()
+	total_label.text                 = str(total)
+	total_label.custom_minimum_size  = Vector2(28, 0)
+	total_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	total_label.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	total_label.add_theme_font_size_override("font_size", 13)
+	total_label.tooltip_text = "Total standing across all levels"
+	header.add_child(total_label)
+	card.add_child(header)
 
-		var count_label := Label.new()
-		count_label.text                    = str(count)
-		count_label.custom_minimum_size     = Vector2(22, 0)
-		count_label.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
-		count_label.add_theme_font_size_override("font_size", 13)
-		row.add_child(count_label)
+	# Body: one block per level, collapsed by default.
+	var body := MarginContainer.new()
+	body.add_theme_constant_override("margin_left", 16)
+	body.add_theme_constant_override("margin_bottom", 6)
+	body.visible = false
+	var detail := VBoxContainer.new()
+	detail.add_theme_constant_override("separation", 2)
+	body.add_child(detail)
+	for i in range(tiers.size()):
+		if i > 0:
+			var sep := HSeparator.new()
+			sep.modulate = Color(1.0, 1.0, 1.0, 0.12)
+			detail.add_child(sep)
+		_add_tier_block(detail, tiers[i] as Dictionary, tiers.size() > 1)
+	card.add_child(body)
 
-		# Amber "+N" while copies of this building are still under construction.
-		var in_progress: int = building.get("in_progress", 0)
-		if in_progress > 0:
-			var building_label := Label.new()
-			building_label.text = "+%d⚙" % in_progress
-			building_label.add_theme_font_size_override("font_size", 11)
-			building_label.modulate = Color(0.95, 0.70, 0.30)
-			building_label.tooltip_text = "Under construction (limited by this world's manufacturing capacity)"
-			row.add_child(building_label)
+	toggle.pressed.connect(func() -> void:
+		body.visible = not body.visible
+		toggle.text = ("▼  " if body.visible else "▶  ") + base_name)
 
-		var plus_btn := Button.new()
-		plus_btn.text               = "+"
-		plus_btn.flat               = true
-		plus_btn.custom_minimum_size = Vector2(24, 24)
-		plus_btn.disabled           = not available or not buildable
-		plus_btn.pressed.connect(_on_build_pressed.bind(building["name"]))
-		row.add_child(plus_btn)
+	_families[base_name] = {"total": total_label, "badge": badge}
+	build_list.add_child(card)
 
-		build_list.add_child(row)
+## One level inside a family card: its heading and count, what it produces, what it costs, and
+## the controls to build, demolish, or retrofit it.
+func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bool) -> void:
+	var bname:     String = str(building["name"])
+	var available: bool = building.get("available", true)
+	var count:     int  = building.get("count", 0)
+	var buildable: bool = building.get("buildable", true)
+	var min_count: int  = building.get("min_count", 0)
+	var dimmed:    bool = not available and count == 0
+
+	# Level heading + this level's own count.  A single-level building skips the heading, but the
+	# count label is still created (hidden) so apply_counts can patch every row uniformly.
+	var count_label := Label.new()
+	if show_level:
+		var head := HBoxContainer.new()
+		var lvl := Label.new()
+		lvl.text = "Level %d" % int(building.get("level", 1))
+		lvl.add_theme_font_size_override("font_size", 11)
+		lvl.modulate = Color(0.85, 0.88, 0.95) if not dimmed else Color(0.50, 0.50, 0.55)
+		lvl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		head.add_child(lvl)
+		count_label.text = str(count)
+		count_label.add_theme_font_size_override("font_size", 11)
+		count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		count_label.custom_minimum_size = Vector2(28, 0)
+		head.add_child(count_label)
+		parent.add_child(head)
+	else:
+		count_label.visible = false
+		parent.add_child(count_label)
+
+	var prod_text := _format_production(building.get("production", {}))
+	if prod_text != "":
+		parent.add_child(_detail_label(prod_text,
+			Color(0.50, 0.72, 0.95) if not dimmed else Color(0.45, 0.45, 0.45)))
+
+	# Fuel draw - this plant only runs while the world can feed it.
+	var fuel_text := _format_consumption(building.get("consumption", {}))
+	if fuel_text != "":
+		var fuel_label := _detail_label(fuel_text,
+			Color(0.95, 0.70, 0.35) if not dimmed else Color(0.50, 0.45, 0.40))
+		fuel_label.tooltip_text = "Burns fuel from this world's inventory; a plant that can't be fed throttles."
+		parent.add_child(fuel_label)
+
+	# Special infrastructure effects (e.g. Space Elevator launch discounts).
+	var eff_text := _format_effects(building)
+	if eff_text != "":
+		parent.add_child(_detail_label(eff_text,
+			Color(0.45, 0.85, 0.80) if not dimmed else Color(0.40, 0.45, 0.45)))
+
+	# Storage contribution (storage buildings only).
+	var stor: Dictionary = building.get("storage", {})
+	if not stor.is_empty():
+		parent.add_child(_detail_label(_format_storage(stor), Color(0.55, 0.90, 0.65)))
+
+	# Cost, or the research still standing in the way.
+	if available:
+		var cost: Dictionary = building.get("cost", {})
+		var have: Dictionary = building.get("have", {})
+		var cost_box := HBoxContainer.new()
+		cost_box.add_theme_constant_override("separation", 8)
+		# One label per cost item so resources the player can't afford dim individually.
+		for key: String in cost:
+			var amount: float = float(cost[key])
+			if amount <= 0.0:
+				continue
+			var affordable: bool = float(have.get(key, 0.0)) >= amount
+			var item := Label.new()
+			item.text = Units.format_cost_component(key, amount)
+			item.add_theme_font_size_override("font_size", 11)
+			item.modulate = COST_OK if affordable else COST_SHORT
+			cost_box.add_child(item)
+			_cost_items.append({"label": item, "key": key, "amount": amount})
+		parent.add_child(cost_box)
+	elif count == 0:
+		var req_id: String = building.get("requires", "")
+		parent.add_child(_detail_label(
+			"Requires: " + req_id.replace("_", " ").capitalize(), Color(0.55, 0.55, 0.55)))
+
+	# Build / demolish / upgrade, each in 1 / 10 / 100 batches — at single-building scale you
+	# raise infrastructure by the hundred, so one-at-a-time clicking is not a real option.
+	var demolish_btns: Array = []
+	var build_btns: Array = []
+	var upgrade_btns: Array = []
+
+	var build_row := HBoxContainer.new()
+	build_row.add_theme_constant_override("separation", 4)
+	var build_lbl := Label.new()
+	build_lbl.text = "Build"
+	build_lbl.add_theme_font_size_override("font_size", 10)
+	build_lbl.custom_minimum_size = Vector2(52, 0)
+	build_lbl.modulate = Color(0.70, 0.75, 0.85)
+	build_row.add_child(build_lbl)
+	for n: int in BATCH_SIZES:
+		var b := Button.new()
+		b.text = "+%d" % n
+		b.custom_minimum_size = Vector2(44, 24)
+		b.disabled = not available or not buildable
+		b.pressed.connect(_on_build_pressed.bind(bname, n))
+		build_row.add_child(b)
+		build_btns.append(b)
+	parent.add_child(build_row)
+
+	var dem_row := HBoxContainer.new()
+	dem_row.add_theme_constant_override("separation", 4)
+	var dem_lbl := Label.new()
+	dem_lbl.text = "Demolish"
+	dem_lbl.add_theme_font_size_override("font_size", 10)
+	dem_lbl.custom_minimum_size = Vector2(52, 0)
+	dem_lbl.modulate = Color(0.70, 0.75, 0.85)
+	dem_row.add_child(dem_lbl)
+	for n: int in BATCH_SIZES:
+		var b := Button.new()
+		b.text = "−%d" % n
+		b.custom_minimum_size = Vector2(44, 24)
+		b.disabled = count - n < min_count
+		b.pressed.connect(_on_demolish_pressed.bind(bname, n))
+		dem_row.add_child(b)
+		demolish_btns.append(b)
+	parent.add_child(dem_row)
+
+	# Retrofit into the next level, charged at the difference in materials.  Shown whenever a
+	# higher level exists so the upgrade path is discoverable before it is affordable.
+	var next_level: String = str(building.get("next_level", ""))
+	if next_level != "":
+		var up_row := HBoxContainer.new()
+		up_row.add_theme_constant_override("separation", 4)
+		var up_lbl := Label.new()
+		up_lbl.text = "Upgrade"
+		up_lbl.add_theme_font_size_override("font_size", 10)
+		up_lbl.custom_minimum_size = Vector2(52, 0)
+		up_lbl.modulate = Color(0.70, 0.75, 0.85)
+		up_row.add_child(up_lbl)
+		var up_cost: Dictionary = building.get("upgrade_cost", {})
+		var tip: String = "Retrofit into %s. Each costs the difference: %s" % [
+			str(building.get("upgrade_label", next_level)), Units.format_cost(up_cost)] 			if not up_cost.is_empty() else "Retrofit into the next level"
+		for n: int in BATCH_SIZES:
+			var b := Button.new()
+			b.text = "↑%d" % n
+			b.custom_minimum_size = Vector2(44, 24)
+			b.disabled = not bool(building.get("can_upgrade", false)) or count < n
+			b.tooltip_text = tip
+			b.pressed.connect(_on_upgrade_pressed.bind(bname, n))
+			up_row.add_child(b)
+			upgrade_btns.append(b)
+		parent.add_child(up_row)
+
+	_rows[bname] = {
+		"count": count_label, "demolish": demolish_btns, "build": build_btns,
+		"available": available, "min_count": min_count, "upgrade": upgrade_btns,
+	}
+
+
+func _detail_label(text: String, col: Color) -> Label:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", 10)
+	lbl.modulate = col
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return lbl
 
 func _format_cost(cost: Dictionary) -> String:
 	return Units.format_cost(cost)
@@ -175,6 +394,18 @@ func _format_production(prod: Dictionary) -> String:
 		if prod.has(key) and float(prod[key]) > 0.0:
 			parts.append(Units.format_rate(key, float(prod[key])))
 	return "  ".join(parts)
+
+## Fuel a building burns per game-day, e.g. {"Coal": 1.5} → "Burns 1.5 g Coal/day".
+## Returns "" for buildings that need no fuel (solar, nuclear, fusion, the Biomass Burner).
+func _format_consumption(burn: Dictionary) -> String:
+	var parts: Array = []
+	for key: String in burn:
+		var amount: float = float(burn[key])
+		if amount > 0.0:
+			parts.append("%s %s/day" % [Units.format_si(amount, "g"), key])
+	if parts.is_empty():
+		return ""
+	return "Burns " + "  ".join(parts)
 
 ## Compact description of special infrastructure effects shown in teal under the
 ## building's production line.  Currently covers launch cost/time discounts (the
@@ -193,6 +424,12 @@ func _format_effects(building: Dictionary) -> String:
 		parts.append("Signature detection +%d" % int(round(float(building["detection"]))))
 	if building.has("radiator_capacity") and float(building["radiator_capacity"]) > 0.0:
 		parts.append("Heat radiating +%s" % Units.format_si(float(building["radiator_capacity"]), "W"))
+	if building.has("atmo_rate") and float(building["atmo_rate"]) > 0.0:
+		parts.append("Condenses %s/day from the atmosphere"
+			% Units.format_si(float(building["atmo_rate"]), "g"))
+	if building.has("shelter") and float(building["shelter"]) > 0.0:
+		parts.append("Shelters %s through nuclear war and impacts"
+			% Units.format_si(float(building["shelter"]), ""))
 	return "  ".join(parts)
 
 ## Compact storage-capacity string shown in green next to storage buildings.
@@ -205,8 +442,11 @@ func _format_storage(stor: Dictionary) -> String:
 		parts.append("+%s" % Units.format_si(float(stor["energy"]), "J"))
 	return "  ".join(parts)
 
-func _on_build_pressed(building_name: String) -> void:
-	build_requested.emit(current_planet, building_name)
+func _on_build_pressed(building_name: String, count: int) -> void:
+	build_requested.emit(current_planet, building_name, count)
 
-func _on_demolish_pressed(building_name: String) -> void:
-	demolish_requested.emit(current_planet, building_name)
+func _on_demolish_pressed(building_name: String, count: int) -> void:
+	demolish_requested.emit(current_planet, building_name, count)
+
+func _on_upgrade_pressed(building_name: String, count: int) -> void:
+	upgrade_requested.emit(current_planet, building_name, count)

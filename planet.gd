@@ -80,7 +80,14 @@ var _infra_poll: float = 0.0
 ##   8.2 B        : Sun ejects outer envelope → planetary nebula + white dwarf
 ##                  All remaining solar-system colonies sterilised.
 const SUN_STAGES: Array = [
-	# Each entry: [year, color, visual_mult, emiss_mult, solar_radii]
+	# Each entry: [year, color, visual_mult, emiss_mult, solar_radii, luminosity_Lsun]
+	#
+	# luminosity_Lsun — physically accurate power output in solar luminosities (see
+	#                sun_luminosity_lsun()).  1 L☉ today, +10% per Gyr on the main sequence,
+	#                soaring to ~2700 L☉ at the red-giant tip and ~4000 L☉ on the AGB before
+	#                the envelope is ejected.  emiss_mult (the display glow) is a log-compressed
+	#                image of this curve so the render brightens hugely at the giant tips
+	#                without blowing the frame out to pure white.
 	#
 	# visual_mult  — multiplied by _sun_base_scale (= log(16) ≈ 2.773) for display.
 	#                _sun_base_scale × visual_mult × sphere_radius (0.5) = game-unit radius.
@@ -101,17 +108,17 @@ const SUN_STAGES: Array = [
 	#     Mars at 1.524 AU is NOT engulfed.  Outer-system colonies survive until the
 	#     planetary nebula fires at PLANETARY_NEBULA_YEAR (8.21B), which sterilises everything
 	#     via intense UV/X-ray radiation regardless of orbital distance.
-	[0,              Color(1.00, 0.95, 0.80),   1.00,  1.0,    1.0],  # modern Sun
-	[1_000_000_000,  Color(1.00, 0.92, 0.72),   1.00,  1.1,    1.05], # brightening MS — imperceptible change
-	[5_400_000_000,  Color(1.00, 0.84, 0.45),   1.15,  1.4,    1.5],  # subgiant begins
-	[7_000_000_000,  Color(1.00, 0.60, 0.18),   3.50,  2.5,   10.0],  # lower RGB (≈10 SR)
-	[7_500_000_000,  Color(1.00, 0.32, 0.06),   9.50,  5.5,  100.0],  # upper RGB — past Mercury, near Venus
-	[7_590_000_000,  Color(0.96, 0.18, 0.04),  16.00,  8.0,  215.0],  # RGB tip — Earth orbit
-	[7_591_000_000,  Color(0.60, 0.82, 1.00),   3.50, 14.0,   10.0],  # helium flash — shrinks to ~lower RGB size, turns blue-white
-	[7_700_000_000,  Color(0.90, 0.88, 0.80),   3.50,  3.5,   11.0],  # CHeB stable (~100 M yr, ~11 SR)
-	[8_000_000_000,  Color(1.00, 0.58, 0.20),   5.50,  4.0,   50.0],  # early AGB — past Mercury again
-	[8_200_000_000,  Color(0.94, 0.14, 0.03),  12.60,  7.0,  170.0],  # AGB tip (~170 SR = 0.79 AU, past Venus but NOT Mars)
-	[8_210_000_000,  Color(0.62, 0.80, 1.00),   0.05, 22.0,    0.05], # planetary nebula → white dwarf
+	[0,              Color(1.00, 0.95, 0.80),   1.00,  0.90,   1.0,      1.0],  # modern Sun
+	[1_000_000_000,  Color(1.00, 0.92, 0.72),   1.00,  0.95,   1.05,     1.1],  # brightening MS — imperceptible change
+	[5_400_000_000,  Color(1.00, 0.84, 0.45),   1.15,  1.10,   1.5,      1.8],  # subgiant begins
+	[7_000_000_000,  Color(1.00, 0.60, 0.18),   3.50,  3.50,  10.0,     50.0],  # lower RGB (≈10 SR)
+	[7_500_000_000,  Color(1.00, 0.32, 0.06),   9.50,  9.90, 100.0,   1200.0],  # upper RGB — past Mercury, near Venus
+	[7_590_000_000,  Color(0.96, 0.18, 0.04),  16.00, 14.00, 215.0,   2700.0],  # RGB tip — Earth orbit, ~2700 L☉
+	[7_591_000_000,  Color(0.60, 0.82, 1.00),   3.50,  3.50,  10.0,     50.0],  # helium flash — shrinks, turns blue-white, dims
+	[7_700_000_000,  Color(0.90, 0.88, 0.80),   3.50,  3.80,  11.0,     60.0],  # CHeB stable (~100 M yr, ~11 SR)
+	[8_000_000_000,  Color(1.00, 0.58, 0.20),   5.50,  7.80,  50.0,    500.0],  # early AGB — past Mercury again
+	[8_200_000_000,  Color(0.94, 0.14, 0.03),  12.60, 16.00, 170.0,   4000.0],  # AGB tip (~170 SR = 0.79 AU), ~4000 L☉
+	[8_210_000_000,  Color(0.62, 0.80, 1.00),   0.05, 12.00,   0.05,  3000.0],  # planetary nebula → white dwarf
 ]
 
 ## Base scale stored at scene-load so we can multiply cleanly.
@@ -413,7 +420,27 @@ func _create_orbit_line() -> void:
 
 ## Show stars always; show other bodies only when the solar system is active
 ## or either pause flag is set (so players can still inspect planets when frozen).
+## Set once the Sun's photosphere swallows this planet — it's gone for good.
+var _engulfed: bool = false
+
+## The Sun has engulfed this planet: destroy it and everything orbiting it (moons, rings,
+## orbital infrastructure, orbit line), and stop all its per-frame work.
+func engulf() -> void:
+	if _engulfed:
+		return
+	_engulfed = true
+	visible = false                      # hides the body + its moons + infra MMIs (children)
+	if _orbit_line:  _orbit_line.visible  = false
+	if _blur_torus:  _blur_torus.visible  = false
+	if _rings:       _rings.visible        = false
+	set_process(false)                   # no more orbit / moon / infra updates for a dead world
+
 func _sync_visibility() -> void:
+	if _engulfed:                        # a swallowed planet stays gone
+		visible = false
+		if _orbit_line: _orbit_line.visible = false
+		if _blur_torus: _blur_torus.visible = false
+		return
 	if type == Type.STAR:
 		visible = true
 		return
@@ -758,6 +785,28 @@ func get_visual_radius() -> float:
 	return _current_visual_radius
 
 # ── Stellar evolution ─────────────────────────────────────────────────────────
+
+## Physically accurate solar luminosity (in solar luminosities, L☉) at a game year,
+## interpolated in LOG space across SUN_STAGES[..][5] so the enormous RGB/AGB swings read
+## smoothly.  1 L☉ today, ~2700 L☉ at the red-giant tip, ~4000 L☉ on the AGB, then the
+## remnant fades.  Static so Game and the UI can query the Sun's power output over time.
+static func sun_luminosity_lsun(y: int) -> float:
+	var yy: float = float(y)
+	var last: Array = SUN_STAGES[SUN_STAGES.size() - 1]
+	if yy >= float(int(last[0])):
+		return float(last[5])
+	var lo: Array = SUN_STAGES[0]
+	var hi: Array = SUN_STAGES[1]
+	for i in range(SUN_STAGES.size() - 1):
+		if yy >= float(int(SUN_STAGES[i][0])) and yy < float(int(SUN_STAGES[i + 1][0])):
+			lo = SUN_STAGES[i]
+			hi = SUN_STAGES[i + 1]
+			break
+	var span: float = float(int(hi[0])) - float(int(lo[0]))
+	var t: float = 0.0 if span <= 0.0 else clampf((yy - float(int(lo[0]))) / span, 0.0, 1.0)
+	var l0: float = maxf(float(lo[5]), 1.0e-6)
+	var l1: float = maxf(float(hi[5]), 1.0e-6)
+	return exp(lerpf(log(l0), log(l1), t))
 
 ## Interpolate the Sun's emission colour, scale, and glow across SUN_STAGES.
 ## Only called once per game-year so it is essentially free.

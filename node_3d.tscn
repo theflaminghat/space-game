@@ -353,10 +353,6 @@ text = "Timeline"
 layout_mode = 2
 text = "Politics"
 
-[node name="production" type="Button" parent="main_ui/VBoxContainer3/HBoxContainer2/sidebar" unique_id=221862017]
-layout_mode = 2
-text = "Production"
-
 [node name="research_tree" type="Control" parent="main_ui/VBoxContainer3/HBoxContainer2" unique_id=629507370]
 process_mode = 1
 visible = false
@@ -626,59 +622,6 @@ size_flags_vertical = 3
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="PlanetBar" type="VBoxContainer" parent="main_ui" unique_id=400001]
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_top = -610.0
-offset_right = 72.0
-grow_vertical = 0
-
-[node name="sun_button" type="Button" parent="main_ui/PlanetBar" unique_id=400002]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Sun"
-
-[node name="mercury_button" type="Button" parent="main_ui/PlanetBar" unique_id=400003]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Mercury"
-
-[node name="venus_button" type="Button" parent="main_ui/PlanetBar" unique_id=400004]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Venus"
-
-[node name="earth_button" type="Button" parent="main_ui/PlanetBar" unique_id=400005]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Earth"
-
-[node name="mars_button" type="Button" parent="main_ui/PlanetBar" unique_id=400006]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Mars"
-
-[node name="jupiter_button" type="Button" parent="main_ui/PlanetBar" unique_id=400007]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Jupiter"
-
-[node name="saturn_button" type="Button" parent="main_ui/PlanetBar" unique_id=400008]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Saturn"
-
-[node name="uranus_button" type="Button" parent="main_ui/PlanetBar" unique_id=400009]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Uranus"
-
-[node name="neptune_button" type="Button" parent="main_ui/PlanetBar" unique_id=400010]
-custom_minimum_size = Vector2(64, 64)
-layout_mode = 2
-text = "Neptune"
-
 [node name="ProductionPanel" type="PanelContainer" parent="main_ui" unique_id=300101]
 visible = false
 anchors_preset = 11
@@ -749,30 +692,6 @@ script = ExtResource("6_i5arm")
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/statistics" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_statistics_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/timeline" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_timeline_pressed"]
 [connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/politics" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_politics_pressed"]
-[connection signal="pressed" from="main_ui/VBoxContainer3/HBoxContainer2/sidebar/production" to="main_ui/VBoxContainer3/HBoxContainer2" method="_on_production_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/sun_button" to="." method="_on_sun_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/sun_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_sun_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/mercury_button" to="." method="_on_mercury_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/mercury_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_mercury_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/mercury_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_mercury_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/venus_button" to="." method="_on_venus_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/venus_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_venus_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/venus_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_venus_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/earth_button" to="." method="_on_earth_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/earth_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_earth_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/earth_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_earth_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/mars_button" to="." method="_on_mars_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/mars_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_mars_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/mars_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_mars_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/jupiter_button" to="." method="_on_jupiter_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/jupiter_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_jupiter_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/jupiter_button" to="WorldRoot/Planets/earth/CameraPivot/Camera3D" method="_on_jupiter_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/saturn_button" to="." method="_on_saturn_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/saturn_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_saturn_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/uranus_button" to="." method="_on_uranus_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/uranus_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_uranus_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/neptune_button" to="." method="_on_neptune_button_pressed"]
-[connection signal="pressed" from="main_ui/PlanetBar/neptune_button" to="WorldRoot/Planets/earth/CameraPivot" method="_on_neptune_button_pressed"]
 [connection signal="pressed" from="pauseMenu/VBoxContainer/save" to="." method="_on_save_pressed"]
 [connection signal="pressed" from="pauseMenu/VBoxContainer/settings" to="." method="_on_settings_pressed"]
 [connection signal="pressed" from="pauseMenu/VBoxContainer/quit_to_menu" to="pauseMenu" method="_on_quit_to_menu_pressed"]

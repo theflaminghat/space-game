@@ -14,11 +14,11 @@ signal colonize_requested(star_name: String, gamma_max: float, accel: float)
 ## Fire the orbital laser at a star system (a light-speed white pulse crosses to it).
 ## `power` is the energy multiplier the player dialled in (≥1).
 signal laser_requested(star_name: String, power: float)
-## Launch a von Neumann berserker swarm at a star system, at a chosen max γ / acceleration
+## Launch `count` von Neumann berserker seeds at a star system, at a chosen max γ / acceleration
 ## (same flight model as a colony ship).
-signal berserker_requested(star_name: String, gamma_max: float, accel: float)
-## Fire a relativistic kinetic missile at a star system, at a chosen max γ / acceleration.
-signal missile_requested(star_name: String, gamma_max: float, accel: float)
+signal berserker_requested(star_name: String, gamma_max: float, accel: float, count: int)
+## Fire `count` relativistic kinetic missiles at a star system, at a chosen max γ / acceleration.
+signal missile_requested(star_name: String, gamma_max: float, accel: float, count: int)
 ## Send a lightweight recon probe to a star at a chosen max γ / acceleration (like a colony
 ## ship, but it gathers full intel on arrival instead of settling).
 signal probe_requested(star_name: String, gamma_max: float, accel: float)
@@ -133,47 +133,228 @@ static func flight_progress(tf: float, accel_time_frac: float, accel_dist_frac: 
 
 # ── Nearby stars within ~20 ly (real coordinates, light-years, Sun at origin) ──────
 const STARS: Array = [
-	{"name": "Proxima Centauri", "pos": Vector3(-1.55, -1.18, -3.77), "dist": 4.25, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Alpha Centauri A", "pos": Vector3(-1.63, -1.36, -3.81), "dist": 4.37, "spectral": "G", "color": Color(1.0, 0.93, 0.66)},
-	{"name": "Alpha Centauri B", "pos": Vector3(-1.63, -1.36, -3.81), "dist": 4.37, "spectral": "K", "color": Color(1.0, 0.8, 0.55)},
-	{"name": "Barnard's Star", "pos": Vector3(-0.06, -5.94, 0.49), "dist": 5.96, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Wolf 359", "pos": Vector3(-7.50, 2.13, 0.96), "dist": 7.86, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Lalande 21185", "pos": Vector3(-6.52, 1.65, 4.88), "dist": 8.31, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Sirius", "pos": Vector3(-1.62, 8.13, -2.49), "dist": 8.66, "spectral": "A", "color": Color(0.82, 0.88, 1.0)},
-	{"name": "Luyten 726-8", "pos": Vector3(7.54, 3.48, -2.69), "dist": 8.73, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Ross 154", "pos": Vector3(1.91, -8.66, -3.92), "dist": 9.69, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Ross 248", "pos": Vector3(7.37, -0.58, 7.18), "dist": 10.30, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Epsilon Eridani", "pos": Vector3(6.18, 8.28, -1.72), "dist": 10.47, "spectral": "K", "color": Color(1.0, 0.8, 0.55)},
-	{"name": "Lacaille 9352", "pos": Vector3(8.46, -2.04, -6.29), "dist": 10.74, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Ross 128", "pos": Vector3(-10.98, 0.59, 0.15), "dist": 11.00, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "61 Cygni", "pos": Vector3(6.47, -6.09, 7.14), "dist": 11.40, "spectral": "K", "color": Color(1.0, 0.8, 0.55)},
-	{"name": "Procyon", "pos": Vector3(-4.79, 10.36, 1.04), "dist": 11.46, "spectral": "F", "color": Color(1.0, 1.0, 0.94)},
-	{"name": "Epsilon Indi", "pos": Vector3(5.68, -3.17, -9.93), "dist": 11.87, "spectral": "K", "color": Color(1.0, 0.8, 0.55)},
-	{"name": "Tau Ceti", "pos": Vector3(10.29, 5.02, -3.27), "dist": 11.91, "spectral": "G", "color": Color(1.0, 0.93, 0.66)},
-	{"name": "Gliese 581", "pos": Vector3(-13.03, -15.45, -2.74), "dist": 20.40, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
+	{"name": "Proxima Centauri", "pos": Vector3(-1.55, -1.18, -3.77), "dist": 4.25, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.122, "age": 4.85},
+	{"name": "Alpha Centauri A", "pos": Vector3(-1.63, -1.36, -3.81), "dist": 4.37, "spectral": "G", "color": Color(1.0, 0.93, 0.66), "mass": 1.079, "age": 5.3},
+	{"name": "Alpha Centauri B", "pos": Vector3(-1.63, -1.36, -3.81), "dist": 4.37, "spectral": "K", "color": Color(1.0, 0.8, 0.55), "mass": 0.909, "age": 5.3},
+	{"name": "Barnard's Star", "pos": Vector3(-0.06, -5.94, 0.49), "dist": 5.96, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.144, "age": 10},
+	{"name": "Wolf 359", "pos": Vector3(-7.50, 2.13, 0.96), "dist": 7.86, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.09, "age": 0.5},
+	{"name": "Lalande 21185", "pos": Vector3(-6.52, 1.65, 4.88), "dist": 8.31, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.39, "age": 7},
+	{"name": "Sirius", "pos": Vector3(-1.62, 8.13, -2.49), "dist": 8.66, "spectral": "A", "color": Color(0.82, 0.88, 1.0), "mass": 2.063, "age": 0.24},
+	{"name": "Luyten 726-8", "pos": Vector3(7.54, 3.48, -2.69), "dist": 8.73, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.1, "age": 5},
+	{"name": "Ross 154", "pos": Vector3(1.91, -8.66, -3.92), "dist": 9.69, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.17, "age": 0.9},
+	{"name": "Ross 248", "pos": Vector3(7.37, -0.58, 7.18), "dist": 10.30, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.136, "age": 10},
+	{"name": "Epsilon Eridani", "pos": Vector3(6.18, 8.28, -1.72), "dist": 10.47, "spectral": "K", "color": Color(1.0, 0.8, 0.55), "mass": 0.82, "age": 0.6},
+	{"name": "Lacaille 9352", "pos": Vector3(8.46, -2.04, -6.29), "dist": 10.74, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.49, "age": 5},
+	{"name": "Ross 128", "pos": Vector3(-10.98, 0.59, 0.15), "dist": 11.00, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.168, "age": 9.4},
+	{"name": "61 Cygni", "pos": Vector3(6.47, -6.09, 7.14), "dist": 11.40, "spectral": "K", "color": Color(1.0, 0.8, 0.55), "mass": 0.7, "age": 6},
+	{"name": "Procyon", "pos": Vector3(-4.79, 10.36, 1.04), "dist": 11.46, "spectral": "F", "color": Color(1.0, 1.0, 0.94), "mass": 1.5, "age": 1.9},
+	{"name": "Epsilon Indi", "pos": Vector3(5.68, -3.17, -9.93), "dist": 11.87, "spectral": "K", "color": Color(1.0, 0.8, 0.55), "mass": 0.75, "age": 4},
+	{"name": "Tau Ceti", "pos": Vector3(10.29, 5.02, -3.27), "dist": 11.91, "spectral": "G", "color": Color(1.0, 0.93, 0.66), "mass": 0.783, "age": 5.8},
+	{"name": "Gliese 581", "pos": Vector3(-13.03, -15.45, -2.74), "dist": 20.40, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.31, "age": 8},
 	# ── More nearby red dwarfs ────────────────────────────────────────────────
-	{"name": "40 Eridani", "pos": Vector3(7.14, 14.53, -2.18), "dist": 16.34, "spectral": "K", "color": Color(1.0, 0.80, 0.55)},
-	{"name": "Kapteyn's Star", "pos": Vector3(1.90, 8.87, -9.07), "dist": 12.83, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Lacaille 8760", "pos": Vector3(7.44, -6.80, -8.13), "dist": 12.95, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Kruger 60", "pos": Vector3(6.47, -2.75, 11.11), "dist": 13.15, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
+	{"name": "40 Eridani", "pos": Vector3(7.14, 14.53, -2.18), "dist": 16.34, "spectral": "K", "color": Color(1.0, 0.80, 0.55), "mass": 0.78, "age": 5.6},
+	{"name": "Kapteyn's Star", "pos": Vector3(1.90, 8.87, -9.07), "dist": 12.83, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.28, "age": 11.5},
+	{"name": "Lacaille 8760", "pos": Vector3(7.44, -6.80, -8.13), "dist": 12.95, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.6, "age": 5},
+	{"name": "Kruger 60", "pos": Vector3(6.47, -2.75, 11.11), "dist": 13.15, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.27, "age": 5},
+	# ── Local neighbourhood — more real stars within ~20 ly ───────────────────
+	{"name": "Groombridge 34", "pos": Vector3(8.33, 0.67, 8.07), "dist": 11.62, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.38, "age": 8},
+	{"name": "EZ Aquarii", "pos": Vector3(10.19, -3.78, -2.97), "dist": 11.27, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.11, "age": 5},
+	{"name": "Struve 2398", "pos": Vector3(1.08, -5.71, 9.91), "dist": 11.49, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.33, "age": 5},
+	{"name": "DX Cancri", "pos": Vector3(-6.34, 8.28, 5.26), "dist": 11.68, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.09, "age": 5},
+	{"name": "YZ Ceti", "pos": Vector3(11.02, 3.61, -3.54), "dist": 12.13, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.13, "age": 3.8},
+	{"name": "Luyten's Star", "pos": Vector3(-4.58, 11.42, 1.13), "dist": 12.36, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.26, "age": 9},
+	{"name": "Teegarden's Star", "pos": Vector3(8.71, 8.20, 3.63), "dist": 12.50, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.09, "age": 8},
+	{"name": "Gliese 1061", "pos": Vector3(5.05, 6.95, -8.44), "dist": 12.04, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.12, "age": 7},
+	{"name": "SCR 1845-6357", "pos": Vector3(1.08, -5.41, -11.29), "dist": 12.57, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.07, "age": 5},
+	{"name": "Van Maanen's Star", "pos": Vector3(13.69, 2.98, 1.32), "dist": 14.07, "spectral": "D", "color": Color(0.90, 0.95, 1.0), "mass": 2.6, "age": 4.493},
+	{"name": "Gliese 1", "pos": Vector3(11.29, 0.27, -8.61), "dist": 14.20, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.45, "age": 10},
+	{"name": "Wolf 1061", "pos": Vector3(-5.23, -12.67, -3.08), "dist": 14.05, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.29, "age": 5},
+	{"name": "Wolf 424", "pos": Vector3(-13.98, -2.05, 2.24), "dist": 14.31, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.14, "age": 0.3},
+	{"name": "Gliese 876", "pos": Vector3(14.15, -4.24, -3.75), "dist": 15.24, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.37, "age": 5},
+	{"name": "AD Leonis", "pos": Vector3(-13.79, 6.46, 5.50), "dist": 16.19, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.42, "age": 0.3},
+	{"name": "Gliese 832", "pos": Vector3(8.51, -6.32, -12.20), "dist": 16.16, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.45, "age": 5},
+	{"name": "Gliese 570", "pos": Vector3(-12.83, -12.55, -7.04), "dist": 19.28, "spectral": "K", "color": Color(1.0, 0.8, 0.55), "mass": 0.8, "age": 3},
+	{"name": "82 Eridani", "pos": Vector3(9.26, 11.03, -13.46), "dist": 19.71, "spectral": "G", "color": Color(1.0, 0.93, 0.66), "mass": 0.85, "age": 6},
+	{"name": "Delta Pavonis", "pos": Vector3(4.28, -6.81, -18.22), "dist": 19.92, "spectral": "G", "color": Color(1.0, 0.93, 0.66), "mass": 0.99, "age": 7},
+	# ── Notable exoplanet host systems (famous colonisation targets) ──────────
+	{"name": "Gliese 667 C", "pos": Vector3(-3.45, -19.04, -13.54), "dist": 23.62, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.33, "age": 5},
+	{"name": "TRAPPIST-1", "pos": Vector3(39.40, -9.37, -3.57), "dist": 40.66, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.089, "age": 7.6},
+	{"name": "LHS 1140", "pos": Vector3(46.30, 9.19, -12.89), "dist": 48.93, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 0.18, "age": 5},
 	# ── Bright naked-eye stars (tens to hundreds of ly) ───────────────────────
-	{"name": "Altair", "pos": Vector3(7.68, -14.64, 2.58), "dist": 16.73, "spectral": "A", "color": Color(0.85, 0.90, 1.0)},
-	{"name": "Vega", "pos": Vector3(3.13, -19.27, 15.68), "dist": 25.04, "spectral": "A", "color": Color(0.85, 0.90, 1.0)},
-	{"name": "Fomalhaut", "pos": Vector3(21.04, -5.87, -12.42), "dist": 25.13, "spectral": "A", "color": Color(0.85, 0.90, 1.0)},
-	{"name": "Pollux", "pos": Vector3(-13.23, 26.73, 15.87), "dist": 33.78, "spectral": "K", "color": Color(1.0, 0.80, 0.55)},
-	{"name": "Arcturus", "pos": Vector3(-28.73, -19.32, 12.05), "dist": 36.66, "spectral": "K", "color": Color(1.0, 0.80, 0.55)},
-	{"name": "Capella", "pos": Vector3(5.60, 29.29, 30.87), "dist": 42.92, "spectral": "G", "color": Color(1.0, 0.93, 0.66)},
-	{"name": "Castor", "pos": Vector3(-17.37, 39.67, 26.94), "dist": 51.0, "spectral": "A", "color": Color(0.85, 0.90, 1.0)},
-	{"name": "Aldebaran", "pos": Vector3(22.43, 58.38, 18.54), "dist": 65.23, "spectral": "K", "color": Color(1.0, 0.80, 0.55)},
-	{"name": "Regulus", "pos": Vector3(-68.55, 36.31, 16.44), "dist": 79.3, "spectral": "B", "color": Color(0.80, 0.87, 1.0)},
-	{"name": "Mizar", "pos": Vector3(-44.48, -17.06, 67.85), "dist": 82.9, "spectral": "A", "color": Color(0.85, 0.90, 1.0)},
-	{"name": "Spica", "pos": Vector3(-228.52, -89.09, -48.39), "dist": 250.0, "spectral": "B", "color": Color(0.80, 0.87, 1.0)},
-	{"name": "Polaris", "pos": Vector3(4.39, 3.42, 432.96), "dist": 433.0, "spectral": "F", "color": Color(1.0, 1.0, 0.94)},
-	{"name": "Betelgeuse", "pos": Vector3(11.45, 543.31, 70.65), "dist": 548.0, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Antares", "pos": Vector3(-189.65, -454.53, -244.82), "dist": 550.0, "spectral": "M", "color": Color(1.0, 0.62, 0.46)},
-	{"name": "Rigel", "pos": Vector3(167.74, 834.51, -122.69), "dist": 860.0, "spectral": "B", "color": Color(0.80, 0.87, 1.0)},
-	{"name": "Deneb", "pos": Vector3(1191.51, -1402.13, 1858.11), "dist": 2615.0, "spectral": "A", "color": Color(0.85, 0.90, 1.0)},
+	{"name": "Altair", "pos": Vector3(7.68, -14.64, 2.58), "dist": 16.73, "spectral": "A", "color": Color(0.85, 0.90, 1.0), "mass": 1.79, "age": 1},
+	{"name": "Vega", "pos": Vector3(3.13, -19.27, 15.68), "dist": 25.04, "spectral": "A", "color": Color(0.85, 0.90, 1.0), "mass": 2.14, "age": 0.45},
+	{"name": "Fomalhaut", "pos": Vector3(21.04, -5.87, -12.42), "dist": 25.13, "spectral": "A", "color": Color(0.85, 0.90, 1.0), "mass": 1.92, "age": 0.44},
+	{"name": "Pollux", "pos": Vector3(-13.23, 26.73, 15.87), "dist": 33.78, "spectral": "K", "color": Color(1.0, 0.80, 0.55), "mass": 1.91, "age": 2.202},
+	{"name": "Arcturus", "pos": Vector3(-28.73, -19.32, 12.05), "dist": 36.66, "spectral": "K", "color": Color(1.0, 0.80, 0.55), "mass": 1.08, "age": 9.157},
+	{"name": "Capella", "pos": Vector3(5.60, 29.29, 30.87), "dist": 42.92, "spectral": "G", "color": Color(1.0, 0.93, 0.66), "mass": 2.57, "age": 1.048},
+	{"name": "Castor", "pos": Vector3(-17.37, 39.67, 26.94), "dist": 51.0, "spectral": "A", "color": Color(0.85, 0.90, 1.0), "mass": 2.2, "age": 0.37},
+	{"name": "Aldebaran", "pos": Vector3(22.43, 58.38, 18.54), "dist": 65.23, "spectral": "K", "color": Color(1.0, 0.80, 0.55), "mass": 1.16, "age": 7.659},
+	{"name": "Regulus", "pos": Vector3(-68.55, 36.31, 16.44), "dist": 79.3, "spectral": "B", "color": Color(0.80, 0.87, 1.0), "mass": 3.8, "age": 0.25},
+	{"name": "Mizar", "pos": Vector3(-44.48, -17.06, 67.85), "dist": 82.9, "spectral": "A", "color": Color(0.85, 0.90, 1.0), "mass": 2.2, "age": 0.37},
+	{"name": "Spica", "pos": Vector3(-228.52, -89.09, -48.39), "dist": 250.0, "spectral": "B", "color": Color(0.80, 0.87, 1.0), "mass": 11.4, "age": 0.0125},
+	{"name": "Polaris", "pos": Vector3(4.39, 3.42, 432.96), "dist": 433.0, "spectral": "F", "color": Color(1.0, 1.0, 0.94), "mass": 5.4, "age": 0.1638},
+	{"name": "Betelgeuse", "pos": Vector3(11.45, 543.31, 70.65), "dist": 548.0, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 18, "age": 0.007857},
+	{"name": "Antares", "pos": Vector3(-189.65, -454.53, -244.82), "dist": 550.0, "spectral": "M", "color": Color(1.0, 0.62, 0.46), "mass": 12, "age": 0.02165},
+	{"name": "Rigel", "pos": Vector3(167.74, 834.51, -122.69), "dist": 860.0, "spectral": "B", "color": Color(0.80, 0.87, 1.0), "mass": 21, "age": 0.005196},
+	{"name": "Deneb", "pos": Vector3(1191.51, -1402.13, 1858.11), "dist": 2615.0, "spectral": "A", "color": Color(0.85, 0.90, 1.0), "mass": 19, "age": 0.006673},
 ]
+
+# ── Procedurally-generated stars distributed across the galaxy ─────────────────
+# In addition to the real catalogue, a large set of invented stars is seeded across the whole
+# galactic disk + bulge from a fixed seed.  They're named procedural1, procedural2, … and are
+# full-fledged stars — selectable, colonisable, and eligible to host alien civilisations —
+# sharing the STARS dictionary shape.  But only those within the player's OBSERVATION RANGE (a
+# radius from Sol that grows with telescopes/colonies) are resolvable; the rest stay hidden in
+# the anonymous field until the frontier reaches them.  Seed-deterministic + static, so the set
+# is identical every session and consistent between the star map and Game.
+const PROC_STAR_COUNT:   int   = 10000
+const PROC_SEED:         int   = 0x57A6_5EED
+const PROC_BASE_RANGE_LY: float = 4000.0   # naked-eye / early-telescope reach (always visible)
+## [spectral, weight, base-mass M☉, colour] — weights skew heavily toward M dwarfs, as reality does.
+const PROC_TYPES: Array = [
+	["M", 0.74, 0.25, Color(1.0, 0.62, 0.46)],
+	["K", 0.12, 0.70, Color(1.0, 0.80, 0.55)],
+	["G", 0.08, 1.00, Color(1.0, 0.93, 0.66)],
+	["F", 0.04, 1.40, Color(1.0, 1.00, 0.94)],
+	["A", 0.02, 2.00, Color(0.85, 0.90, 1.00)],
+]
+
+## Static catalogue: the full galaxy-wide procedural set (built once) and the currently-visible
+## list = real STARS + procedural stars within the observation range (rebuilt when it grows).
+static var _proc_stars:   Array = []
+static var _all_stars:    Array = []
+static var _all_full:     Array = []   # real + EVERY procedural star, ignoring range (debug view)
+static var _obs_range_ly: float = PROC_BASE_RANGE_LY
+static var _stars_dirty:  bool  = true
+
+## The complete star catalogue — real STARS + ALL procedural stars, regardless of observation
+## range.  Used by the galaxy debug map to render the whole seed-generated distribution.
+static func all_stars_full() -> Array:
+	if _all_full.is_empty():
+		if _proc_stars.is_empty():
+			_proc_stars = _generate_procedural_stars()
+		_all_full = STARS.duplicate()
+		_all_full.append_array(_proc_stars)
+	return _all_full
+
+## The stars the player can currently resolve = real STARS + procedural stars inside the
+## observation range.  Cached; rebuilt only when the range expands.
+static func all_stars() -> Array:
+	if _stars_dirty or _all_stars.is_empty():
+		if _proc_stars.is_empty():
+			_proc_stars = _generate_procedural_stars()
+		_all_stars = STARS.duplicate()
+		for s: Dictionary in _proc_stars:
+			if float(s["dist"]) <= _obs_range_ly:
+				_all_stars.append(s)
+		_stars_dirty = false
+	return _all_stars
+
+## Expand how far the player can resolve individual stars (ly from Sol).  MONOTONIC — a star,
+## once in range, stays visible — so call it as telescopes/colonies push the frontier outward.
+static func set_observation_range(ly: float) -> void:
+	if ly > _obs_range_ly + 0.5:
+		_obs_range_ly = ly
+		_stars_dirty = true
+
+static func observation_range() -> float:
+	return _obs_range_ly
+
+## Seed-deterministic invented stars across the galactic disk + bulge (same distribution the
+## field uses), each a full star dict named "proceduralN".
+static func _generate_procedural_stars() -> Array:
+	var out: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = PROC_SEED
+	var basis: Array = _galactic_basis()
+	var gx: Vector3 = basis[0]
+	var gy: Vector3 = basis[1]
+	var gz: Vector3 = basis[2]
+	var gc: Vector3 = gx * SOL_GC_LY
+	var guard: int = 0
+	while out.size() < PROC_STAR_COUNT and guard < PROC_STAR_COUNT * 6:
+		guard += 1
+		var pos: Vector3
+		if rng.randf() < BULGE_FRAC:
+			pos = gc + _proc_rand_unit(rng) * absf(rng.randfn(0.0, BULGE_LY * 0.6))
+		else:
+			var radius: float = -DISK_SCALE_LY * (log(maxf(rng.randf(), 1e-6)) + log(maxf(rng.randf(), 1e-6)))
+			if radius > DISK_MAX_LY:
+				continue
+			var phi: float = rng.randf() * TAU
+			var z: float = rng.randfn(0.0, DISK_H_LY)
+			pos = gc + (gx * (radius * cos(phi))) + (gy * (radius * sin(phi))) + (gz * z)
+		var dist: float = pos.length()
+		if dist < 1.0:
+			continue   # essentially at Sol
+		var t: Array = _proc_pick_type(rng.randf())
+		out.append({
+			"name":     "procedural%d" % (out.size() + 1),
+			"pos":      pos,
+			"dist":     dist,
+			"spectral": str(t[0]),
+			"color":    t[3],
+			"mass":     float(t[2]) * rng.randf_range(0.7, 1.3),
+			"age":      rng.randf_range(0.4, 9.0),
+			"procedural": true,
+		})
+	return out
+
+## Orthonormal galactic basis [gx→centre, gy→l=90, gz→pole] in the equatorial frame — a static
+## copy of _build_galaxy's basis, so procedural stars can be distributed during static generation.
+static func _galactic_basis() -> Array:
+	var gx: Vector3 = _eq_dir(GC_RA_H, GC_DEC)
+	var gz: Vector3 = _eq_dir(NGP_RA_H, NGP_DEC)
+	gz = (gz - gx * gz.dot(gx)).normalized()
+	var gy: Vector3 = gz.cross(gx).normalized()
+	return [gx, gy, gz]
+
+## Public galactic basis [gx→centre, gy→l=90, gz→pole] in the equatorial frame, so Game can
+## tile its hex regions in the galactic plane rather than the tilted equatorial one.
+static func galactic_basis() -> Array:
+	return _galactic_basis()
+
+static func _eq_dir(ra_h: float, dec_deg: float) -> Vector3:
+	var ra: float = deg_to_rad(ra_h * 15.0)
+	var dec: float = deg_to_rad(dec_deg)
+	return Vector3(cos(dec) * cos(ra), cos(dec) * sin(ra), sin(dec)).normalized()
+
+## Relative stellar density (~0..3) of the disk+bulge model at a Sol-relative position (ly).  Used
+## by Game to weight how many colonisable stars a statistical region cell represents, so the
+## galaxy's aggregate colonisation follows the real disk/arm/bulge shape rather than filling voids.
+static func galactic_density(pos: Vector3) -> float:
+	var basis: Array = _galactic_basis()
+	var gx: Vector3 = basis[0]
+	var gy: Vector3 = basis[1]
+	var gz: Vector3 = basis[2]
+	var rel: Vector3 = pos - gx * SOL_GC_LY               # galactocentric
+	var rp: float = Vector2(rel.dot(gx), rel.dot(gy)).length()   # in-plane radius
+	var zz: float = rel.dot(gz)                                   # height above the plane
+	if rp > DISK_MAX_LY:
+		return 0.0
+	var disk: float = exp(-rp / DISK_SCALE_LY) * exp(-absf(zz) / DISK_H_LY)
+	var bulge: float = 2.0 * exp(-rel.length() / BULGE_LY)
+	return clampf(disk + bulge, 0.0, 3.0)
+
+## A uniformly-distributed unit direction (static so it's usable during static generation).
+static func _proc_rand_unit(rng: RandomNumberGenerator) -> Vector3:
+	var z: float = rng.randf_range(-1.0, 1.0)
+	var t: float = rng.randf() * TAU
+	var r: float = sqrt(maxf(0.0, 1.0 - z * z))
+	return Vector3(r * cos(t), r * sin(t), z)
+
+## Weighted pick from PROC_TYPES by a 0..1 roll.
+static func _proc_pick_type(roll: float) -> Array:
+	var total: float = 0.0
+	for t: Array in PROC_TYPES:
+		total += float(t[1])
+	var r: float = roll * total
+	var acc: float = 0.0
+	for t: Array in PROC_TYPES:
+		acc += float(t[1])
+		if r <= acc:
+			return t
+	return PROC_TYPES[PROC_TYPES.size() - 1]
 
 # ── Nearby galaxies (and the Milky Way's own centre) ───────────────────────────
 # Stored as equatorial coordinates + distance; _build_galaxies() converts them to the
@@ -207,6 +388,48 @@ const GALAXIES: Array = [
 	{"name": "Quasar 3C 273",            "ra_h": 12.485, "dec_deg":   2.05, "dist": 2.4e9,  "kind": "quasar", "color": Color(0.70, 0.95, 1.0)},
 ]
 
+# ── The Milky Way: procedural star field + named large-scale structure ─────────
+# The galactic disk holds hundreds of billions of stars over ~100 000 ly — far too many to
+# enumerate like the nearby-star catalogue.  Instead we SAMPLE it: a deterministic point cloud
+# drawn from the real structure (exponential disk + central bulge + logarithmic spiral arms),
+# so the map shows the galaxy as a field of faint stars filling the gap between the named stars
+# (out to ~2 600 ly) and the extragalactic layer.  Seeded, so it's identical every session.
+const GALAXY_SEED:    int   = 0x5EED_1A11
+const FIELD_STARS:    int   = 1700
+const FIELD_MIN_LY:   float = 1800.0    # cull points nearer than this (the named-star domain)
+const SOL_GC_LY:      float = 26000.0   # Sun's galactocentric distance (~8 kpc)
+const DISK_SCALE_LY:  float = 9000.0    # radial scale length of the exponential disk
+const DISK_MAX_LY:    float = 60000.0   # visible disk edge
+const DISK_H_LY:      float = 900.0     # disk scale height (thickness)
+const BULGE_LY:       float = 3500.0    # central bulge scale radius
+const BULGE_FRAC:     float = 0.16      # fraction of field stars in the bulge
+const ARM_COUNT:      int   = 4
+const ARM_PITCH_RAD:  float = 0.218     # ~12.5° spiral pitch angle
+const ARM_WIDTH_RAD:  float = 0.55      # angular half-width of an arm's overdensity
+# Galactic frame anchors (J2000): the galactic centre (Sgr A*) and the North Galactic Pole.
+const GC_RA_H:   float = 17.7603
+const GC_DEC:    float = -28.936
+const NGP_RA_H:  float = 12.85730
+const NGP_DEC:   float =  27.12825
+
+## Named intra-galactic landmarks (clusters, nebulae) with real equatorial coords + distance —
+## the mid-scale features that give the galaxy a sense of size between the nearby stars and the
+## other galaxies.  kind ∈ {"cluster", "nebula"}.
+const LANDMARKS_EQ: Array = [
+	{"name": "Hyades",            "ra_h":  4.483, "dec_deg":  15.87, "dist":   153.0, "kind": "cluster", "color": Color(1.00, 0.95, 0.80)},
+	{"name": "Pleiades (M45)",    "ra_h":  3.790, "dec_deg":  24.12, "dist":   444.0, "kind": "cluster", "color": Color(0.75, 0.85, 1.00)},
+	{"name": "Beehive (M44)",     "ra_h":  8.670, "dec_deg":  19.67, "dist":   577.0, "kind": "cluster", "color": Color(0.90, 0.93, 1.00)},
+	{"name": "Orion Nebula (M42)","ra_h":  5.588, "dec_deg":  -5.39, "dist":  1344.0, "kind": "nebula",  "color": Color(1.00, 0.60, 0.68)},
+	{"name": "Lagoon Nebula (M8)","ra_h": 18.060, "dec_deg": -24.38, "dist":  4100.0, "kind": "nebula",  "color": Color(1.00, 0.55, 0.62)},
+	{"name": "Rosette Nebula",    "ra_h":  6.538, "dec_deg":   4.95, "dist":  5200.0, "kind": "nebula",  "color": Color(1.00, 0.56, 0.62)},
+	{"name": "Eagle Nebula (M16)","ra_h": 18.313, "dec_deg": -13.79, "dist":  7000.0, "kind": "nebula",  "color": Color(0.95, 0.60, 0.70)},
+	{"name": "Double Cluster",    "ra_h":  2.330, "dec_deg":  57.14, "dist":  7500.0, "kind": "cluster", "color": Color(0.80, 0.87, 1.00)},
+	{"name": "Carina Nebula",     "ra_h": 10.752, "dec_deg": -59.87, "dist":  8500.0, "kind": "nebula",  "color": Color(1.00, 0.60, 0.66)},
+	{"name": "47 Tucanae",        "ra_h":  0.401, "dec_deg": -72.08, "dist": 13000.0, "kind": "cluster", "color": Color(1.00, 0.90, 0.78)},
+	{"name": "Omega Centauri",    "ra_h": 13.446, "dec_deg": -47.48, "dist": 17000.0, "kind": "cluster", "color": Color(1.00, 0.90, 0.75)},
+	{"name": "M13 (Hercules)",    "ra_h": 16.695, "dec_deg":  36.46, "dist": 22000.0, "kind": "cluster", "color": Color(1.00, 0.92, 0.80)},
+]
+
 const ROT_SENS:  float = 0.01    # radians of rotation per pixel dragged
 const MIN_PITCH: float = -1.45   # ~ ±83° — stop short of gimbal flip at the poles
 const MAX_PITCH: float =  1.45
@@ -214,6 +437,14 @@ const ZOOM_STEP: float = 1.12
 const ZOOM_MIN:  float = 0.4
 const ZOOM_MAX:  float = 80.0    # deep zoom needed: the scale spans ~10 decades of ly
 const PICK_PX:   float = 16.0    # click tolerance for selecting a star
+const FRAME_PICK_PX: float = 26.0   # right-click tolerance for landmark/galaxy reference frames
+# Stars nearer than this always draw (the local catalogue); farther ones draw only when in the
+# current zoom band — the perf gate that lets ~10 000 galaxy stars coexist with the neighbourhood.
+const STAR_ALWAYS_LY: float = 3500.0
+# Hard render cutoff: stars farther than this from the CURRENT REFERENCE FRAME are never drawn
+# (unless selected/alien/colonised), so the outer galaxy doesn't clutter the map or cost draw
+# time.  Measured from the frame origin, so recentring reveals a different bubble of stars.
+const STAR_RENDER_MAX_LY: float = 1000.0
 ## Labels + drop-lines are gated on the object's distance from Sol relative to the
 ## current VIEW RADIUS (the distance the zoom level reaches — max_display_radius / zoom),
 ## not its position on screen.  An object is named when its own log-distance is within
@@ -251,7 +482,7 @@ const RING_LABEL:  Color = Color(0.42, 0.56, 0.78, 0.55)
 const DROP_COLOR:  Color = Color(0.45, 0.60, 0.85, 0.12)
 
 var _yaw:   float = 0.6
-var _pitch: float = 0.5
+var _pitch: float = 0.95   # default tilt to look down onto the galactic plane (now the map plane)
 var _zoom:  float = 1.0
 var _selected: int = -1
 
@@ -263,6 +494,20 @@ var _font: Font
 
 ## GALAXIES with their equatorial coords resolved to cartesian "pos" (built in _ready).
 var _galaxies: Array = []
+## Procedural Milky-Way star field: [{pos: Vector3 (ly), col: Color, r: float}], built once.
+var _field: Array = []
+## Named intra-galactic landmarks resolved to cartesian: [{name, pos, kind, color}].
+var _landmarks: Array = []
+## Reference frame: the world position placed at the centre of the map (Sol by default).  Every
+## object is drawn at log(pos − _ref_pos), so switching frames re-lays-out the whole log-scaled
+## map around a different origin.  Right-click a star to recentre, empty space to reset.
+var _ref_pos:  Vector3 = Vector3.ZERO
+var _ref_name: String  = "Sol"
+## Orthonormal galactic basis in the equatorial frame + the galactic-centre position (ly).
+var _g_x: Vector3 = Vector3.RIGHT   # toward the galactic centre (l=0, b=0)
+var _g_y: Vector3 = Vector3.FORWARD # toward l=90 (direction of galactic rotation)
+var _g_z: Vector3 = Vector3.UP      # toward the North Galactic Pole (b=90)
+var _gc_pos: Vector3 = Vector3.ZERO # galactic centre, relative to Sol
 
 ## Interstellar state pushed by Game.gd.
 var _colonized: Dictionary = {}      # star name → true
@@ -271,13 +516,18 @@ var _missions: Array = []            # [{ "target": name, "progress": 0..1 }]
 var _avail_energy: float = 0.0       # current energy, for the launch affordability readout
 var _dash_phase: float = 0.0         # animates the travel-line dashes
 var _cosmic_scale: float = 1.0       # proper-distance multiplier for unbound galaxies (≥1)
+var _year: float = 2026.0            # current game year, so stars can be shown at their evolved state
+const STELLAR_EPOCH: float = 2026.0  # the game's start year; a star's "age" field is its age then
 var _attacks: Array = []             # [{ "target": name, "progress": 0..1, "kind": "laser"|"berserker" }]
 var _incoming: Array = []            # [{ "source": name, "target": "sol"|name, "progress": 0..1 }]
 var _can_laser: bool = false         # an Orbital Laser is built
 var _can_berserker: bool = false     # von Neumann (self-replicating industry) researched
 var _can_missile: bool = false       # relativistic missiles/probes (Relativistic Navigation)
+var _missile_stock: int = 0          # crafted Missile units in the player's inventory
+var _berserker_stock: int = 0        # crafted Berserker seeds in the player's inventory
 var _can_colonize: bool = false      # Relativistic Navigation researched (interstellar flight)
 var _intel: Dictionary = {}          # star → {alignment, dyson, telescopes, lasers, detail, diplo, probed}
+var _colony_intel: Dictionary = {}   # colonised star → {dyson, telescopes, lasers} (own infrastructure)
 var _missile_btn: Button = null
 var _probe_btn: Button = null
 var _contact_btn: Button = null
@@ -297,6 +547,23 @@ var _laser_power_slider: HSlider = null   # laser energy multiplier (≥1)
 var _laser_btn:     Button  = null
 var _berserker_btn: Button  = null
 
+## Modal configuration dialog — a launchable/laser button opens it to edit speed, acceleration,
+## number to send (weapons) or energy output (laser), with a live cost readout and a confirm.
+var _dialog_backdrop: ColorRect      = null   # dims the map + eats clicks while the dialog is up
+var _action_dialog:  PanelContainer  = null
+var _dlg_kind:       String          = ""     # "colonize" | "probe" | "berserker" | "missile" | "laser"
+var _dlg_title:      Label           = null
+var _dlg_speed_row:  HBoxContainer    = null
+var _dlg_accel_row:  HBoxContainer    = null
+var _dlg_count_row:  HBoxContainer    = null
+var _dlg_energy_row: HBoxContainer    = null
+var _dlg_speed_val:  Label            = null
+var _dlg_accel_val:  Label            = null
+var _dlg_energy_val: Label            = null
+var _dlg_count:      SpinBox          = null
+var _dlg_info:       Label            = null
+var _dlg_confirm:    Button           = null
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -306,6 +573,7 @@ func _ready() -> void:
 	clip_contents = true
 	_font = ThemeDB.fallback_font
 	_build_galaxies()
+	_build_galaxy()   # galactic basis + procedural star field + intra-galactic landmarks
 	_build_launch_ui()
 	resized.connect(queue_redraw)
 
@@ -347,45 +615,6 @@ func _build_launch_ui() -> void:
 	_intel_label.hide()
 	vb.add_child(_intel_label)
 
-	var speed_row := HBoxContainer.new()
-	speed_row.add_theme_constant_override("separation", 8)
-	var sl := Label.new()
-	sl.text = "Max speed"
-	sl.custom_minimum_size = Vector2(86, 0)
-	sl.add_theme_font_size_override("font_size", 11)
-	speed_row.add_child(sl)
-	# Cruise speed as log₁₀(γ−1): from γ≈1.001 up to the GZK limit (γ ≈ 5.3×10¹⁰), so the
-	# player can request cruise speeds up to 99.99% c (γ ≈ 70.71) — energy/accel are the real cap.
-	_speed_slider = HSlider.new()
-	_speed_slider.min_value = -3.0
-	_speed_slider.max_value = log(MAX_GAMMA - 1.0) / log(10.0)
-	_speed_slider.step = 0.02
-	_speed_slider.value = -1.0    # γ ≈ 1.1
-	_speed_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_speed_slider.value_changed.connect(func(_v): _update_launch_ui())
-	speed_row.add_child(_speed_slider)
-	vb.add_child(speed_row)
-
-	# Max acceleration — log scale (m/s²); the ship thrusts at this until it hits max
-	# speed (or runs out of distance).  Higher accel reaches cruise sooner = faster trip.
-	var accel_row := HBoxContainer.new()
-	accel_row.add_theme_constant_override("separation", 8)
-	var al := Label.new()
-	al.text = "Max accel"
-	al.custom_minimum_size = Vector2(86, 0)
-	al.add_theme_font_size_override("font_size", 11)
-	accel_row.add_child(al)
-	_accel_slider = HSlider.new()
-	_accel_slider.min_value = -3.0    # 10^-3 = 0.001 m/s²
-	_accel_slider.max_value = 4.0     # 10^4 = 10 000 m/s² (~1000 g) — needed to approach
-	                                  # high γ over short interstellar hops
-	_accel_slider.step = 0.05
-	_accel_slider.value = -1.0        # 0.1 m/s² ≈ 0.01 g
-	_accel_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_accel_slider.value_changed.connect(func(_v): _update_launch_ui())
-	accel_row.add_child(_accel_slider)
-	vb.add_child(accel_row)
-
 	_launch_info = Label.new()
 	_launch_info.add_theme_font_size_override("font_size", 11)
 	_launch_info.modulate = Color(0.75, 0.82, 0.95)
@@ -395,57 +624,41 @@ func _build_launch_ui() -> void:
 	_launch_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_child(_launch_info)
 
+	# Each action button opens the configuration dialog for that action (speed / acceleration /
+	# number to send, or laser output) with a live cost readout and a confirm — nothing fires on
+	# the button press itself.
 	_launch_btn = Button.new()
-	_launch_btn.text = "Launch colony ship"
-	_launch_btn.pressed.connect(_on_launch_pressed)
+	_launch_btn.text = "Launch colony ship…"
+	_launch_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_launch_btn.pressed.connect(func(): _open_action_dialog("colonize"))
 	vb.add_child(_launch_btn)
 
-	# ── Recon + relativistic weapons: full-width buttons stacked under the colony ship,
-	# all using the same speed/accel sliders as the colony flight. ─────────────────────
 	_probe_btn = Button.new()
-	_probe_btn.text = "Send recon probe"
+	_probe_btn.text = "Send recon probe…"
 	_probe_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_probe_btn.add_theme_color_override("font_color", Color(0.7, 0.9, 0.85))
-	_probe_btn.pressed.connect(_on_probe_pressed)
+	_probe_btn.pressed.connect(func(): _open_action_dialog("probe"))
 	vb.add_child(_probe_btn)
 
 	_berserker_btn = Button.new()
-	_berserker_btn.text = "Send berserkers"
+	_berserker_btn.text = "Send berserkers…"
 	_berserker_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_berserker_btn.add_theme_color_override("font_color", Color(1.0, 0.7, 0.6))
-	_berserker_btn.pressed.connect(_on_berserker_pressed)
+	_berserker_btn.pressed.connect(func(): _open_action_dialog("berserker"))
 	vb.add_child(_berserker_btn)
 
 	_missile_btn = Button.new()
-	_missile_btn.text = "Fire missile"
+	_missile_btn.text = "Fire missile…"
 	_missile_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_missile_btn.add_theme_color_override("font_color", Color(1.0, 0.8, 0.55))
-	_missile_btn.pressed.connect(_on_missile_pressed)
+	_missile_btn.pressed.connect(func(): _open_action_dialog("missile"))
 	vb.add_child(_missile_btn)
 
-	# ── Orbital laser: light-speed beam with its own power dial (flat cost). ───────────
-	var power_row := HBoxContainer.new()
-	power_row.add_theme_constant_override("separation", 8)
-	var pl := Label.new()
-	pl.text = "Laser power"
-	pl.custom_minimum_size = Vector2(86, 0)
-	pl.add_theme_font_size_override("font_size", 11)
-	power_row.add_child(pl)
-	_laser_power_slider = HSlider.new()
-	_laser_power_slider.min_value = 1.0     # at least full base energy to be lethal
-	_laser_power_slider.max_value = 10.0    # overcharge for a bigger, brighter pulse
-	_laser_power_slider.step = 0.5
-	_laser_power_slider.value = 1.0
-	_laser_power_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_laser_power_slider.value_changed.connect(func(_v): _update_launch_ui())
-	power_row.add_child(_laser_power_slider)
-	vb.add_child(power_row)
-
 	_laser_btn = Button.new()
-	_laser_btn.text = "Fire laser"
+	_laser_btn.text = "Fire laser…"
 	_laser_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_laser_btn.add_theme_color_override("font_color", Color(1.0, 0.9, 0.9))
-	_laser_btn.pressed.connect(_on_laser_pressed)
+	_laser_btn.pressed.connect(func(): _open_action_dialog("laser"))
 	vb.add_child(_laser_btn)
 
 	var diplo := HBoxContainer.new()
@@ -460,6 +673,8 @@ func _build_launch_ui() -> void:
 	diplo.add_child(_war_btn)
 	vb.add_child(diplo)
 
+	_build_action_dialog()
+
 func _diplo_button(label: String, handler: Callable) -> Button:
 	var b := Button.new()
 	b.text = label
@@ -473,15 +688,226 @@ func _emit_message(kind: String) -> void:
 	if n != "":
 		message_requested.emit(n, kind)
 
-func _on_missile_pressed() -> void:
-	var n := selected_star()
-	if n != "" and not _colonized.has(n):
-		missile_requested.emit(n, _selected_gamma(), _selected_accel())
+# ── Action configuration dialog ────────────────────────────────────────────────
 
-func _on_probe_pressed() -> void:
-	var n := selected_star()
-	if n != "":
-		probe_requested.emit(n, _selected_gamma(), _selected_accel())
+## Build the modal dialog (hidden) that a launchable/laser button opens.  It holds every
+## editable control; rows are shown/hidden per action in _open_action_dialog.
+func _build_action_dialog() -> void:
+	_dialog_backdrop = ColorRect.new()
+	_dialog_backdrop.color = Color(0.0, 0.0, 0.0, 0.5)   # dims the map behind the dialog
+	_dialog_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_dialog_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP   # modal — eats clicks behind it
+	_dialog_backdrop.hide()
+	_dialog_backdrop.gui_input.connect(_on_backdrop_input)
+	add_child(_dialog_backdrop)
+
+	_action_dialog = PanelContainer.new()
+	_action_dialog.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_action_dialog.custom_minimum_size = Vector2(380, 0)
+	_action_dialog.mouse_filter = Control.MOUSE_FILTER_STOP
+	_dialog_backdrop.add_child(_action_dialog)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	var mc := MarginContainer.new()
+	for m in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		mc.add_theme_constant_override(m, 14)
+	mc.add_child(vb)
+	_action_dialog.add_child(mc)
+
+	_dlg_title = Label.new()
+	_dlg_title.add_theme_font_size_override("font_size", 15)
+	_dlg_title.modulate = Color(0.95, 0.97, 1.0)
+	vb.add_child(_dlg_title)
+
+	# Max speed (γ) — log slider, identical range to the old inline control.
+	_dlg_speed_row = _dlg_slider_row("Max speed", -3.0, log(MAX_GAMMA - 1.0) / log(10.0), 0.02, -1.0)
+	_speed_slider = _dlg_speed_row.get_meta("slider")
+	_dlg_speed_val = _dlg_speed_row.get_meta("value")
+	vb.add_child(_dlg_speed_row)
+
+	# Max acceleration — log slider (m/s²).
+	_dlg_accel_row = _dlg_slider_row("Max accel", -3.0, 4.0, 0.05, -1.0)
+	_accel_slider = _dlg_accel_row.get_meta("slider")
+	_dlg_accel_val = _dlg_accel_row.get_meta("value")
+	vb.add_child(_dlg_accel_row)
+
+	# Number to send (weapons only) — a spinbox capped at the crafted stock on hand.
+	_dlg_count_row = HBoxContainer.new()
+	_dlg_count_row.add_theme_constant_override("separation", 8)
+	var cl := Label.new()
+	cl.text = "Number to send"
+	cl.custom_minimum_size = Vector2(120, 0)
+	cl.add_theme_font_size_override("font_size", 11)
+	_dlg_count_row.add_child(cl)
+	_dlg_count = SpinBox.new()
+	_dlg_count.min_value = 1
+	_dlg_count.max_value = 1
+	_dlg_count.step = 1
+	_dlg_count.value = 1
+	_dlg_count.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_dlg_count.value_changed.connect(func(_v): _update_dialog_info())
+	_dlg_count_row.add_child(_dlg_count)
+	vb.add_child(_dlg_count_row)
+
+	# Energy output (laser only) — the flat-cost power multiplier.
+	_dlg_energy_row = _dlg_slider_row("Energy output", 1.0, 10.0, 0.5, 1.0)
+	_laser_power_slider = _dlg_energy_row.get_meta("slider")
+	_dlg_energy_val = _dlg_energy_row.get_meta("value")
+	vb.add_child(_dlg_energy_row)
+
+	_dlg_info = Label.new()
+	_dlg_info.add_theme_font_size_override("font_size", 11)
+	_dlg_info.modulate = Color(0.78, 0.85, 0.97)
+	_dlg_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_dlg_info.custom_minimum_size = Vector2(340, 0)
+	vb.add_child(_dlg_info)
+
+	var btn_row := HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 8)
+	_dlg_confirm = Button.new()
+	_dlg_confirm.text = "Confirm"
+	_dlg_confirm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_dlg_confirm.pressed.connect(_on_dialog_confirm)
+	btn_row.add_child(_dlg_confirm)
+	var cancel := Button.new()
+	cancel.text = "Cancel"
+	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cancel.pressed.connect(_close_action_dialog)
+	btn_row.add_child(cancel)
+	vb.add_child(btn_row)
+
+## Build a labelled slider row with a right-aligned value readout; the HSlider and value Label
+## are stashed as metadata so the caller can wire them up.
+func _dlg_slider_row(label: String, lo: float, hi: float, step: float, val: float) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var l := Label.new()
+	l.text = label
+	l.custom_minimum_size = Vector2(96, 0)
+	l.add_theme_font_size_override("font_size", 11)
+	row.add_child(l)
+	var s := HSlider.new()
+	s.min_value = lo
+	s.max_value = hi
+	s.step = step
+	s.value = val
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s.value_changed.connect(func(_v): _update_dialog_info())
+	row.add_child(s)
+	var v := Label.new()
+	v.custom_minimum_size = Vector2(104, 0)
+	v.add_theme_font_size_override("font_size", 11)
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(v)
+	row.set_meta("slider", s)
+	row.set_meta("value", v)
+	return row
+
+## Open the dialog for `kind`, showing only the rows that action needs.  Buttons are disabled
+## when an action is unavailable, so this only ever opens for a valid, affordable-in-principle move.
+func _open_action_dialog(kind: String) -> void:
+	if _dialog_backdrop == null:
+		return
+	var star := selected_star()
+	if star == "" or _colonized.has(star):
+		return
+	_dlg_kind = kind
+	var is_laser := kind == "laser"
+	var wants_count := kind == "berserker" or kind == "missile"
+	_dlg_speed_row.visible  = not is_laser
+	_dlg_accel_row.visible  = not is_laser
+	_dlg_count_row.visible  = wants_count
+	_dlg_energy_row.visible = is_laser
+	if wants_count:
+		var stock := _berserker_stock if kind == "berserker" else _missile_stock
+		_dlg_count.min_value = 1
+		_dlg_count.max_value = maxi(1, stock)
+		_dlg_count.value = 1
+	var titles := {
+		"colonize": "Launch colony ship", "probe": "Send recon probe",
+		"berserker": "Launch berserkers", "missile": "Fire missiles", "laser": "Fire orbital laser"}
+	_dlg_title.text = "%s  →  %s" % [str(titles.get(kind, "Launch")), star]
+	_update_dialog_info()
+	_dialog_backdrop.show()
+
+func _close_action_dialog() -> void:
+	if _dialog_backdrop:
+		_dialog_backdrop.hide()
+	_dlg_kind = ""
+
+## Clicking the dimmed area outside the dialog cancels it.
+func _on_backdrop_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		_close_action_dialog()
+
+## Recompute the dialog's live cost/summary readout and enable/disable Confirm on affordability.
+func _update_dialog_info() -> void:
+	if _dlg_info == null or _dlg_kind == "":
+		return
+	var dist := _selected_dist()
+	if _dlg_speed_val:
+		_dlg_speed_val.text = _fmt_speed(_selected_gamma())
+	if _dlg_accel_val:
+		_dlg_accel_val.text = _fmt_accel(_selected_accel())
+	if _dlg_energy_val:
+		_dlg_energy_val.text = "×%.1f" % _laser_power()
+	var affordable := true
+	var text := ""
+	if _dlg_kind == "laser":
+		var lc := StarMapPanel.laser_energy(dist) * _laser_power()
+		affordable = lc <= _avail_energy
+		text = "Light-speed pulse  ·  %s energy%s" % [
+			Units.format_si(lc, "J"), "" if affordable else "   ✗ insufficient energy"]
+	else:
+		var g := _selected_gamma()
+		var a := _selected_accel()
+		var plan := StarMapPanel.plan_flight(dist, g, a)
+		var years := float(plan["years"])
+		var per := float(plan["energy"])
+		var count := 1
+		match _dlg_kind:
+			"berserker":
+				per *= BERSERKER_MASS_FRAC
+				count = int(_dlg_count.value)
+			"missile":
+				per *= MISSILE_MASS_FRAC
+				count = int(_dlg_count.value)
+			"probe":
+				per *= PROBE_MASS_FRAC
+		var total := per * float(count)
+		affordable = total <= _avail_energy
+		var speed_str := _fmt_speed(g)
+		if not bool(plan["reaches"]):
+			speed_str += " (peaks %s)" % _fmt_speed(float(plan["peak_gamma"]))
+		var tail := "" if count <= 1 else "  ·  ×%d = %s total" % [count, Units.format_si(total, "J")]
+		text = "%s  ·  %s  ·  %s travel  ·  %s each%s%s" % [
+			speed_str, _fmt_accel(a), _fmt_years(years), Units.format_si(per, "J"),
+			tail, "" if affordable else "   ✗ insufficient energy"]
+	_dlg_info.text = text
+	if _dlg_confirm:
+		_dlg_confirm.disabled = not affordable
+
+## Commit the configured action: emit the matching request (weapons carry the salvo count).
+func _on_dialog_confirm() -> void:
+	var star := selected_star()
+	if star == "":
+		_close_action_dialog()
+		return
+	var g := _selected_gamma()
+	var a := _selected_accel()
+	match _dlg_kind:
+		"colonize":
+			colonize_requested.emit(star, g, a)
+		"probe":
+			probe_requested.emit(star, g, a)
+		"berserker":
+			berserker_requested.emit(star, g, a, int(_dlg_count.value))
+		"missile":
+			missile_requested.emit(star, g, a, int(_dlg_count.value))
+		"laser":
+			laser_requested.emit(star, _laser_power())
+	_close_action_dialog()
 
 ## Animate the in-transit dashed lines + attack pulses while the map is visible.
 func _process(delta: float) -> void:
@@ -503,6 +929,88 @@ func _build_galaxies() -> void:
 		entry["bound"] = float(g["dist"]) <= LOCAL_GROUP_LY
 		_galaxies.append(entry)
 
+## Build the galactic basis, the seeded procedural star field, and the named landmarks.
+func _build_galaxy() -> void:
+	# Orthonormal galactic axes expressed in the equatorial cartesian frame the map uses:
+	#   _g_x → galactic centre, _g_z → North Galactic Pole, _g_y = _g_z × _g_x (l=90).
+	_g_x = _equatorial_to_xyz(GC_RA_H, GC_DEC, 1.0).normalized()
+	_g_z = _equatorial_to_xyz(NGP_RA_H, NGP_DEC, 1.0).normalized()
+	_g_z = (_g_z - _g_x * _g_z.dot(_g_x)).normalized()   # Gram–Schmidt: make the pole ⟂ the centre
+	_g_y = _g_z.cross(_g_x).normalized()
+	_gc_pos = _g_x * SOL_GC_LY
+	_build_star_field()
+	_build_landmarks()
+
+## Sample the Milky Way's stellar distribution into a deterministic point cloud.  Disk stars
+## follow an exponential radial profile with a Gaussian scale height and a spiral-arm
+## overdensity; the rest populate the central bulge.  Points nearer than FIELD_MIN_LY (the
+## catalogued-star domain) are dropped so the field only fills the galactic gap outward.
+func _build_star_field() -> void:
+	_field.clear()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = GALAXY_SEED
+	var guard: int = 0
+	while _field.size() < FIELD_STARS and guard < FIELD_STARS * 6:
+		guard += 1
+		var pos: Vector3
+		var col: Color
+		if rng.randf() < BULGE_FRAC:
+			# Central bulge: a roughly spherical concentration of old, yellow-orange stars.
+			var r_b: float = absf(rng.randfn(0.0, BULGE_LY * 0.6))
+			pos = _gc_pos + _random_unit(rng) * r_b
+			col = Color(1.0, 0.84, 0.58).lerp(Color(1.0, 0.72, 0.45), rng.randf())
+		else:
+			# Disk: exponential radius (Gamma-2 = sum of two exponentials), Gaussian height,
+			# azimuth biased toward the spiral arms.
+			var radius: float = -DISK_SCALE_LY * (log(maxf(rng.randf(), 1e-6)) + log(maxf(rng.randf(), 1e-6)))
+			if radius > DISK_MAX_LY:
+				continue
+			var phi: float = rng.randf() * TAU
+			var arm: float = _arm_strength(radius, phi)
+			if rng.randf() > 0.32 + 0.68 * arm:
+				continue   # thin out the inter-arm regions
+			var z: float = rng.randfn(0.0, DISK_H_LY)
+			pos = _gc_pos + (_g_x * (radius * cos(phi))) + (_g_y * (radius * sin(phi))) + (_g_z * z)
+			# Arm stars skew young/blue; inter-arm and outer disk skew yellow-white.
+			col = Color(1.0, 0.93, 0.80).lerp(Color(0.68, 0.80, 1.0), arm * rng.randf())
+		if pos.length() < FIELD_MIN_LY:
+			continue
+		var jitter: float = rng.randf_range(0.75, 1.0)
+		_field.append({
+			"pos": pos,
+			"col": Color(col.r, col.g, col.b, 1.0) * jitter,
+			"r":   rng.randf_range(0.8, 1.5),
+		})
+
+## Spiral-arm overdensity (0..1) at galactocentric (r, phi): proximity to the nearest log-spiral
+## arm winding out from the centre — used only to bias the field's density and colour.
+func _arm_strength(r: float, phi: float) -> float:
+	var wind: float = log(maxf(r, 1.0) / SOL_GC_LY) / tan(ARM_PITCH_RAD)
+	var best: float = 0.0
+	for k in range(ARM_COUNT):
+		var arm_phi: float = wind + TAU * float(k) / float(ARM_COUNT)
+		var d: float = wrapf(phi - arm_phi, -PI, PI)
+		best = maxf(best, exp(-(d * d) / (2.0 * ARM_WIDTH_RAD * ARM_WIDTH_RAD)))
+	return best
+
+## Resolve named landmarks: clusters/nebulae from equatorial coords.
+func _build_landmarks() -> void:
+	_landmarks.clear()
+	for m: Dictionary in LANDMARKS_EQ:
+		_landmarks.append({
+			"name":  str(m["name"]),
+			"pos":   _equatorial_to_xyz(float(m["ra_h"]), float(m["dec_deg"]), float(m["dist"])),
+			"kind":  str(m["kind"]),
+			"color": m["color"],
+		})
+
+## A uniformly-distributed unit vector (for scattering bulge stars).
+func _random_unit(rng: RandomNumberGenerator) -> Vector3:
+	var z: float = rng.randf_range(-1.0, 1.0)
+	var t: float = rng.randf() * TAU
+	var r: float = sqrt(maxf(0.0, 1.0 - z * z))
+	return Vector3(r * cos(t), r * sin(t), z)
+
 ## Push the cosmic scale factor (≥1) from Game — proper distance of unbound galaxies
 ## grows by this as the universe ages.
 func set_cosmic_scale(s: float) -> void:
@@ -510,6 +1018,27 @@ func set_cosmic_scale(s: float) -> void:
 	if not is_equal_approx(ns, _cosmic_scale):
 		_cosmic_scale = ns
 		queue_redraw()
+
+## Push the current game year so every star can be drawn and described at its EVOLVED state
+## (a star's "age" field is its age at STELLAR_EPOCH; elapsed game years are added on top).
+func set_year(y: float) -> void:
+	if absf(y - _year) >= 1.0:
+		_year = y
+		queue_redraw()
+
+## Compact luminosity readout in solar luminosities (SI prefixes at the extremes).
+func _fmt_lum(l: float) -> String:
+	if l >= 1000.0 or (l > 0.0 and l < 0.01):
+		return Units.format_si(l, "")
+	return "%.3g" % l
+
+## Current age of a star (years) at the present game year: its epoch age plus elapsed time.
+func _star_age_now(s: Dictionary) -> float:
+	return float(s.get("age", 5.0)) * 1.0e9 + (_year - STELLAR_EPOCH)
+
+## Evolutionary state of a star right now (phase, luminosity, current mass, colour, …).
+func _star_state(s: Dictionary) -> Dictionary:
+	return StellarEvolution.state(float(s.get("mass", 1.0)), _star_age_now(s), s["color"])
 
 ## Equatorial (RA hours, Dec degrees, distance) → cartesian light-years.
 func _equatorial_to_xyz(ra_h: float, dec_deg: float, dist_ly: float) -> Vector3:
@@ -522,9 +1051,15 @@ func _equatorial_to_xyz(ra_h: float, dec_deg: float, dist_ly: float) -> Vector3:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+## Galaxy-data accessors, so the linear-scale debug view can render the same generated field and
+## landmarks (single source of truth — no regeneration).
+func galaxy_field() -> Array: return _field
+func galaxy_landmarks() -> Array: return _landmarks
+func galaxy_center() -> Vector3: return _gc_pos
+
 ## Name of the currently selected star, or "" if none.
 func selected_star() -> String:
-	return str(STARS[_selected]["name"]) if _selected >= 0 else ""
+	return str(all_stars()[_selected]["name"]) if _selected >= 0 else ""
 
 ## Push interstellar state from Game.gd: which stars are colonised, the in-flight
 ## colony missions (target name + 0..1 progress), and current energy for the readout.
@@ -557,9 +1092,20 @@ func set_weapon_caps(can_laser: bool, can_berserker: bool, can_missile: bool) ->
 	_can_missile = can_missile
 	_update_launch_ui()
 
+## Push the player's crafted-weapon stockpile (Missile / Berserker units on hand).
+func set_arsenal(missiles: int, berserkers: int) -> void:
+	_missile_stock = missiles
+	_berserker_stock = berserkers
+	_update_launch_ui()
+
 ## Push per-system alien intel (light-delayed, telescope-limited) for the info readout.
 func set_alien_intel(intel: Dictionary) -> void:
 	_intel = intel
+	_update_launch_ui()
+
+## Push the player's own colony infrastructure (colonised star → {dyson, telescopes, lasers}).
+func set_colony_intel(intel: Dictionary) -> void:
+	_colony_intel = intel
 	_update_launch_ui()
 
 ## Whether interstellar colony launches are unlocked (Relativistic Navigation researched).
@@ -569,7 +1115,7 @@ func set_interstellar_unlocked(unlocked: bool) -> void:
 
 ## Distance (ly) of the selected star, or 0.
 func _selected_dist() -> float:
-	return float(STARS[_selected]["dist"]) if _selected >= 0 else 0.0
+	return float(all_stars()[_selected]["dist"]) if _selected >= 0 else 0.0
 
 ## Current max Lorentz factor γ from the log speed slider (1 + 10^value).
 func _selected_gamma() -> float:
@@ -596,36 +1142,30 @@ func _update_launch_ui() -> void:
 	var dist: float = _selected_dist()
 	if _colonized.has(name):
 		_launch_title.text = "%s  —  colonised" % name
-		_launch_info.text = "A human colony already orbits this star."
+		_launch_info.text = "A human colony orbits this star.\n%s" % _colony_infra_block(name)
 		_launch_btn.disabled = true
 		_launch_btn.text = "Colonised"
 		_update_weapon_buttons(dist, true)
 		return
-	var gamma: float = _selected_gamma()
-	var accel: float = _selected_accel()
-	var plan: Dictionary = StarMapPanel.plan_flight(dist, gamma, accel)
-	var cost: float = float(plan["energy"])
-	var years: float = float(plan["years"])
 	_launch_title.text = "%s  —  %.2f ly" % [name, dist]
-	var speed_str: String = _fmt_speed(gamma)
-	if not bool(plan["reaches"]):
-		speed_str += "  (peaks %s, range-limited)" % _fmt_speed(float(plan["peak_gamma"]))
-	_launch_info.text = "%s  ·  %s  ·  %s travel  ·  %s energy %s" % [
-		speed_str, _fmt_accel(accel), _fmt_years(years), Units.format_si(cost, "J"),
-		"" if cost <= _avail_energy else "  ✗ insufficient"]
+	_launch_info.text = "Energy available: %s.  Pick an action to set speed / acceleration / number and confirm." % \
+		Units.format_si(_avail_energy, "J")
 	if not _can_colonize:
 		# Interstellar flight not yet unlocked — show the target's data but block the launch.
 		_launch_btn.disabled = true
-		_launch_btn.text = "Interstellar flight — research Relativistic Navigation"
-		_update_weapon_buttons(dist, false)
-		return
-	var affordable := cost <= _avail_energy
-	_launch_btn.disabled = not affordable
-	_launch_btn.text = "Launch colony ship" if affordable else "Not enough energy"
+		_launch_btn.text = "Colony ship — research Relativistic Navigation"
+	else:
+		_launch_btn.disabled = false
+		_launch_btn.text = "Launch colony ship…"
 	_update_weapon_buttons(dist, false)
+	# Keep an open dialog's cost readout current if energy/stock changed underneath it.
+	if _dialog_backdrop and _dialog_backdrop.visible:
+		_update_dialog_info()
 
-## Enable/label the weapon, probe, and diplomacy buttons for the current target.
-func _update_weapon_buttons(dist: float, colonised: bool) -> void:
+## Enable/label the weapon, probe, and diplomacy buttons for the current target.  These now
+## only gate on AVAILABILITY (research / crafted stock / not-colonised); the actual energy cost
+## and affordability are computed live in the configuration dialog each button opens.
+func _update_weapon_buttons(_dist: float, colonised: bool) -> void:
 	if _laser_btn == null:
 		return
 	var name := selected_star()
@@ -636,7 +1176,7 @@ func _update_weapon_buttons(dist: float, colonised: bool) -> void:
 			db.disabled = colonised or not has_intel
 	if _probe_btn:
 		_probe_btn.disabled = colonised or not _can_missile
-		_probe_btn.text = "Send recon probe" if _can_missile else "Recon probe — research"
+		_probe_btn.text = "Send recon probe…" if _can_missile else "Recon probe — research"
 	if colonised:
 		for wb: Button in [_laser_btn, _berserker_btn, _missile_btn]:
 			wb.disabled = true
@@ -645,33 +1185,26 @@ func _update_weapon_buttons(dist: float, colonised: bool) -> void:
 		_laser_btn.disabled = true
 		_laser_btn.text = "Laser — build one"
 	else:
-		var lc: float = StarMapPanel.laser_energy(dist) * _laser_power()
-		var ok: bool = lc <= _avail_energy
-		_laser_btn.disabled = not ok
-		_laser_btn.text = "Fire laser ×%.1f (%s)" % [_laser_power(), Units.format_si(lc, "J")] if ok \
-			else "Laser ×%.1f — need %s" % [_laser_power(), Units.format_si(lc, "J")]
-	# Berserkers + missiles now use the same speed/accel sliders and flight model as a colony
-	# ship — cost is their relativistic launch energy at the dialled-in γ/acceleration.
-	var g: float = _selected_gamma()
-	var acc: float = _selected_accel()
+		_laser_btn.disabled = false
+		_laser_btn.text = "Fire laser…"
 	if not _can_berserker:
 		_berserker_btn.disabled = true
 		_berserker_btn.text = "Berserkers — research"
+	elif _berserker_stock < 1:
+		_berserker_btn.disabled = true
+		_berserker_btn.text = "Berserkers — craft one"
 	else:
-		var bc: float = StarMapPanel.projectile_energy(dist, g, acc, BERSERKER_MASS_FRAC)
-		var okb: bool = bc <= _avail_energy
-		_berserker_btn.disabled = not okb
-		_berserker_btn.text = "Send berserkers (%s)" % Units.format_si(bc, "J") if okb \
-			else "Berserkers — need %s" % Units.format_si(bc, "J")
+		_berserker_btn.disabled = false
+		_berserker_btn.text = "Send berserkers…  (%d in stock)" % _berserker_stock
 	if not _can_missile:
 		_missile_btn.disabled = true
 		_missile_btn.text = "Missile — research"
+	elif _missile_stock < 1:
+		_missile_btn.disabled = true
+		_missile_btn.text = "Missile — craft one"
 	else:
-		var mc: float = StarMapPanel.projectile_energy(dist, g, acc, MISSILE_MASS_FRAC)
-		var okm: bool = mc <= _avail_energy
-		_missile_btn.disabled = not okm
-		_missile_btn.text = "Fire missile (%s)" % Units.format_si(mc, "J") if okm \
-			else "Missile — need %s" % Units.format_si(mc, "J")
+		_missile_btn.disabled = false
+		_missile_btn.text = "Fire missiles…  (%d in stock)" % _missile_stock
 
 ## Multi-line intel block for a detected alien system: alignment/diplomacy header plus a list
 ## of its known infrastructure (fields the telescopes can't yet resolve read "unknown"; a
@@ -693,24 +1226,29 @@ func _intel_block(name: String) -> String:
 		if (probed or detail > 0.2) else "unknown"
 	var scopes: String = ("%d" % int(d.get("telescopes", 0))) if (probed or detail > 0.5) else "unknown"
 	var lasers: String = ("%d" % int(d.get("lasers", 0))) if (probed or detail > 0.8) else "unknown"
+	# Offensive arsenal is the hardest to resolve from afar — only a probe or the sharpest
+	# telescope reach reveals a hostile's missile and berserker stockpiles.
+	var missiles: String = ("%d" % int(d.get("missiles", 0))) if (probed or detail > 0.9) else "unknown"
+	var berserkers: String = ("%d" % int(d.get("berserkers", 0))) if (probed or detail > 0.9) else "unknown"
 	lines.append("  • Dyson swarm: %s" % dyson)
 	lines.append("  • Orbital telescopes: %s" % scopes)
 	lines.append("  • Orbital lasers: %s" % lasers)
+	lines.append("  • Relativistic missiles: %s" % missiles)
+	lines.append("  • Berserker seeds: %s" % berserkers)
 	return "\n".join(lines)
+
+## Infrastructure readout for one of the player's own colonies (full detail — it's ours).
+func _colony_infra_block(name: String) -> String:
+	if not _colony_intel.has(name):
+		return "Colony infrastructure: developing…"
+	var d: Dictionary = _colony_intel[name]
+	return "Colony infrastructure:\n  • Dyson swarm: %d%%\n  • Orbital telescopes: %d\n  • Defensive lasers: %d" % [
+		int(round(float(d.get("dyson", 0.0)) * 100.0)),
+		int(d.get("telescopes", 0)), int(d.get("lasers", 0))]
 
 ## Laser energy multiplier from the power slider (≥1).
 func _laser_power() -> float:
 	return _laser_power_slider.value if _laser_power_slider else 1.0
-
-func _on_laser_pressed() -> void:
-	var n := selected_star()
-	if n != "" and not _colonized.has(n):
-		laser_requested.emit(n, _laser_power())
-
-func _on_berserker_pressed() -> void:
-	var n := selected_star()
-	if n != "" and not _colonized.has(n):
-		berserker_requested.emit(n, _selected_gamma(), _selected_accel())
 
 ## Speed readout from γ as a fraction of c (cruise is capped at 99.99% c).
 func _fmt_speed(g: float) -> String:
@@ -730,16 +1268,10 @@ func _fmt_years(y: float) -> String:
 		return "%d yr" % int(round(y))
 	return "<1 yr"
 
-func _on_launch_pressed() -> void:
-	var name := selected_star()
-	if name == "" or _colonized.has(name):
-		return
-	colonize_requested.emit(name, _selected_gamma(), _selected_accel())
-
 ## Index of a star by name (-1 if not found).
 func _star_index(name: String) -> int:
-	for i in range(STARS.size()):
-		if str(STARS[i]["name"]) == name:
+	for i in range(all_stars().size()):
+		if str(all_stars()[i]["name"]) == name:
 			return i
 	return -1
 
@@ -853,7 +1385,7 @@ func _view_basis() -> Basis:
 
 func _max_dist() -> float:
 	var m: float = 1.0
-	for s: Dictionary in STARS:
+	for s: Dictionary in all_stars():
 		m = maxf(m, float(s["dist"]))
 	return m
 
@@ -875,6 +1407,15 @@ func _log_pos(p: Vector3) -> Vector3:
 	if r < 1.0e-6:
 		return Vector3.ZERO
 	return p * (_display_radius(r) / r)
+
+## A world position in the CURRENT reference frame, rotated into the GALACTIC frame and then
+## log-remapped: log(R·(pos − _ref_pos)), where R maps equatorial axes to (galactic centre,
+## l=90, pole).  Rotating into the galactic frame lays the Milky Way's disk flat on the map's
+## reference plane (z ≈ 0), so the galaxy "lies on the plane" instead of at a random tilt.  The
+## reference object still lands at the origin; distances (log radius) are unchanged by rotation.
+func _rel(p: Vector3) -> Vector3:
+	var v := p - _ref_pos
+	return _log_pos(Vector3(v.dot(_g_x), v.dot(_g_y), v.dot(_g_z)))
 
 ## Largest display radius shown — the Hubble horizon — used to fit the whole map.
 func _max_display_radius() -> float:
@@ -927,6 +1468,25 @@ func _draw_galaxy_glyph(sp: Vector2, rad: float, col: Color, tilt: float, alpha:
 	draw_colored_polygon(pts, Color(col.r, col.g, col.b, 0.30 * alpha))
 	draw_circle(sp, rad * 0.42, Color(col.r, col.g, col.b, 0.95 * alpha))   # bright core
 
+## Glyph + label for an intra-galactic landmark, distinct per kind:
+##   cluster   — a small scatter of dots (a knot of stars)
+##   nebula    — a soft translucent blob
+##   structure — a faint open ring (spiral arm / bulge region)
+func _draw_landmark(sp: Vector2, kind: String, col: Color, alpha: float, name: String) -> void:
+	var c := _fade(col, alpha)
+	match kind:
+		"cluster":
+			for off in [Vector2(0, -2), Vector2(-2, 1), Vector2(2, 1), Vector2(0, 2), Vector2(-1, -1)]:
+				draw_circle(sp + off, 1.1, c)
+		"nebula":
+			draw_circle(sp, 6.0, _fade(col, alpha * 0.22))
+			draw_circle(sp, 3.0, _fade(col, alpha * 0.38))
+			draw_circle(sp, 1.2, c)
+		_:  # structure — spiral arm / bulge
+			draw_arc(sp, 7.0, 0.0, TAU, 28, _fade(col, alpha * 0.6), 1.0, true)
+	draw_string(_font, sp + Vector2(9.0, 4.0), name,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(col.r, col.g, col.b, 0.8 * alpha))
+
 ## Orthographic projection of a world point onto the camera's right/up axes.
 func _project(p: Vector3, b: Basis, center: Vector2, scale: float) -> Vector2:
 	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * scale
@@ -946,6 +1506,19 @@ func _draw() -> void:
 	var b := _view_basis()
 	var scale := _fit_scale(center)
 	var star_maxdr := _max_star_display_radius()
+
+	# The Milky Way as a faint sampled star field — a hundred-billion-star galaxy rendered as a
+	# deterministic point cloud filling the decades between the named stars and the galaxies.
+	# Drawn first (behind the rings and everything else) as a dim backdrop; fades in with the
+	# view radius like every other object, so it reads at galactic zoom and vanishes up close.
+	for fs: Dictionary in _field:
+		var flp: Vector3 = _rel(fs["pos"])
+		var fa: float = _detail_alpha(flp.length())
+		if fa <= 0.0:
+			continue
+		var fsp := _project(flp, b, center, scale)
+		var fr: float = float(fs["r"])
+		draw_rect(Rect2(fsp - Vector2(fr, fr) * 0.5, Vector2(fr, fr)), _fade(fs["col"], fa * 0.65))
 
 	# Order-of-magnitude reference rings: one per decade of light-years, out to the
 	# Hubble horizon.  On the log scale they're evenly spaced (log₁₀(10ᵏ) = k), so each
@@ -986,7 +1559,7 @@ func _draw() -> void:
 		if eff_d >= HUBBLE_HORIZON_LY:
 			continue   # receded beyond the observable horizon — gone for good
 		var gpos: Vector3 = (g["dir"] as Vector3) * eff_d
-		var glp := _log_pos(gpos)
+		var glp := _rel(gpos)
 		var gsp := _project(glp, b, center, scale)
 		var gcol: Color = g["color"]
 		# Dim as it approaches the horizon (redshifting out of sight).
@@ -1002,18 +1575,46 @@ func _draw() -> void:
 			draw_string(_font, gsp + Vector2(9.0, 4.0), str(g["name"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(gcol.r, gcol.g, gcol.b, 0.80 * g_alpha))
 
-	# Stars, far-to-near so nearer ones overlap on top (depth uses log positions).
-	var order: Array = range(STARS.size())
-	order.sort_custom(func(i: int, j: int) -> bool:
-		return _depth(_log_pos(STARS[i]["pos"]), b) < _depth(_log_pos(STARS[j]["pos"]), b))
+	# Named intra-galactic landmarks — clusters, nebulae, spiral arms and the bulge — drawn as
+	# distinct labelled glyphs so the galaxy has recognisable features between the nearby stars
+	# and the extragalactic layer.
+	for m: Dictionary in _landmarks:
+		var mlp: Vector3 = _rel(m["pos"])
+		var ma: float = _detail_alpha(mlp.length())
+		if ma <= 0.0:
+			continue
+		_draw_landmark(_project(mlp, b, center, scale), str(m["kind"]), m["color"], ma, str(m["name"]))
 
-	for i: int in order:
-		var s: Dictionary = STARS[i]
-		var lp: Vector3 = _log_pos(s["pos"])
+	# Stars: with up to ~10 000 in range, cull to the current zoom band first (plus always-shown
+	# ones — selected, alien, colonised, or the nearby catalogue), computing each position ONCE
+	# rather than twice per sort comparison.  Then draw far-to-near so nearer ones overlap on top.
+	var vis: Array = []
+	for si in range(all_stars().size()):
+		var s0: Dictionary = all_stars()[si]
+		var nm0: String = str(s0["name"])
+		var selected: bool = si == _selected
+		var important: bool = selected or _colonized.has(nm0) or _factions.has(nm0)
+		# Hard distance cutoff, measured from the current reference frame — beyond
+		# STAR_RENDER_MAX_LY nothing draws, INCLUDING colonised and alien systems; only the
+		# selected star is kept.  In the Sol frame this is just the Sol distance.
+		if (s0["pos"] as Vector3).distance_to(_ref_pos) > STAR_RENDER_MAX_LY and not selected:
+			continue
+		var lp0: Vector3 = _rel(s0["pos"])
+		var a0: float = 1.0 if selected else _detail_alpha(lp0.length())
+		# Within the cutoff, colonised/alien/near stars always draw (at any zoom); far anonymous
+		# ones only draw when in the current zoom band.
+		if a0 <= 0.0 and not (important or float(s0["dist"]) < STAR_ALWAYS_LY):
+			continue
+		vis.append([si, lp0, maxf(a0, 0.0)])
+	vis.sort_custom(func(x: Array, y: Array) -> bool: return _depth(x[1], b) < _depth(y[1], b))
+
+	for e: Array in vis:
+		var i: int = int(e[0])
+		var s: Dictionary = all_stars()[i]
+		var lp: Vector3 = e[1]
 		var sp := _project(lp, b, center, scale)
-		# A selected star always keeps its name + line at full opacity so you can see
-		# what's chosen; everything else fades in/out with the view radius.
-		var alpha := 1.0 if i == _selected else _detail_alpha(lp.length())
+		# A selected star keeps full opacity; everything else fades in/out with the view radius.
+		var alpha: float = e[2]
 		if alpha > 0.0:
 			# Drop line to the reference plane conveys the star's height above/below it.
 			var foot := _project(Vector3(lp.x, lp.y, 0.0), b, center, scale)
@@ -1023,7 +1624,17 @@ func _draw() -> void:
 		# Stars shrink with distance from Sol (perspective): near = bigger, far = smaller.
 		var dist_frac := clampf(lp.length() / star_maxdr, 0.0, 1.0)
 		var rad := lerpf(6.0, 2.2, dist_frac)
-		var col: Color = s["color"]
+		# Draw each star at its CURRENT evolved state: giants swell and redden, compact remnants
+		# shrink to a dim point, and colour tracks the phase — so the map visibly ages over time.
+		var st: Dictionary = _star_state(s)
+		var col: Color = st["color"]
+		var ph: String = str(st["phase"])
+		if ph in ["Red giant", "Asymptotic giant", "Planetary nebula"]:
+			rad *= 1.7
+		elif ph == "Supergiant":
+			rad *= 2.1
+		elif bool(st["remnant"]):
+			rad *= 0.55                    # white dwarf / neutron star / black hole: tiny
 		if i == _selected:
 			draw_circle(sp, rad + 6.0, Color(1.0, 1.0, 1.0, 0.22), true, -1.0, true)
 			draw_arc(sp, rad + 6.0, 0.0, TAU, 40, Color(0.9, 0.95, 1.0, 0.9), 1.5, true)
@@ -1060,14 +1671,18 @@ func _draw() -> void:
 			draw_string(_font, sp + Vector2(rad + 4.0, 4.0), str(s["name"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _fade(lbl_col, la))
 
+	# Sol's projected position under the current reference frame — the origin of our own missions
+	# and the default target of incoming attacks (only at screen centre in the Sol frame).
+	var sol_px := _project(_rel(Vector3.ZERO), b, center, scale)
+
 	# In-transit colony missions: an animated dashed line from Sol to the target star,
 	# with dashes flowing toward the destination and a marker at the ship's progress.
 	for m: Dictionary in _missions:
 		var idx := _star_index(str(m.get("target", "")))
 		if idx < 0:
 			continue
-		var dst := _project(_log_pos(STARS[idx]["pos"]), b, center, scale)
-		_draw_travel_dashes(center, dst, float(m.get("progress", 0.0)))
+		var dst := _project(_rel(all_stars()[idx]["pos"]), b, center, scale)
+		_draw_travel_dashes(sol_px, dst, float(m.get("progress", 0.0)))
 
 	# In-flight attacks: a white laser pulse racing out at light speed, or a red von
 	# Neumann berserker swarm crawling toward its target.
@@ -1075,29 +1690,29 @@ func _draw() -> void:
 		var aidx := _star_index(str(atk.get("target", "")))
 		if aidx < 0:
 			continue
-		var adst := _project(_log_pos(STARS[aidx]["pos"]), b, center, scale)
+		var adst := _project(_rel(all_stars()[aidx]["pos"]), b, center, scale)
 		var ap := float(atk.get("progress", 0.0))
 		match str(atk.get("kind", "")):
 			"laser":
-				_draw_laser_pulse(center, adst, ap, float(atk.get("power", 1.0)))
+				_draw_laser_pulse(sol_px, adst, ap, float(atk.get("power", 1.0)))
 			"missile":
-				_draw_incoming_missile(center, adst, ap)   # relativistic kinetic missile
+				_draw_incoming_missile(sol_px, adst, ap)   # relativistic kinetic missile
 			_:
-				_draw_berserker_swarm(center, adst, ap)
+				_draw_berserker_swarm(sol_px, adst, ap)
 
 	# Incoming relativistic missiles: a red streak from the hostile source toward the target
-	# (Sol at centre, or one of our colonies), with a bright head at the missile's progress.
+	# (Sol, or one of our colonies), with a bright head at the missile's progress.
 	for inc: Dictionary in _incoming:
 		var sidx := _star_index(str(inc.get("source", "")))
 		if sidx < 0:
 			continue
-		var src_px := _project(_log_pos(STARS[sidx]["pos"]), b, center, scale)
+		var src_px := _project(_rel(all_stars()[sidx]["pos"]), b, center, scale)
 		var tgt_name := str(inc.get("target", "sol"))
-		var tgt_px := center
+		var tgt_px := sol_px
 		if tgt_name != "sol":
 			var tidx := _star_index(tgt_name)
 			if tidx >= 0:
-				tgt_px = _project(_log_pos(STARS[tidx]["pos"]), b, center, scale)
+				tgt_px = _project(_rel(all_stars()[tidx]["pos"]), b, center, scale)
 		var ip := float(inc.get("progress", 0.0))
 		match str(inc.get("kind", "missile")):
 			"berserker":
@@ -1107,17 +1722,44 @@ func _draw() -> void:
 			_:
 				_draw_incoming_missile(src_px, tgt_px, ip)   # relativistic kinetic missile
 
-	# The Sun, fixed at the centre of the map.
-	draw_circle(center, 10.0, Color(1.0, 0.85, 0.3, 0.22))
-	draw_circle(center, 5.5, Color(1.0, 0.9, 0.42))
-	draw_string(_font, center + Vector2(9, -6), "Sol", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.92, 0.6))
+	# The Sun — rendered exactly like every other star (its live evolved state), at its position
+	# in the current reference frame (map centre only while the frame IS Sol).  A G2V, ~4.6 Gyr
+	# old, so it reads main-sequence yellow now and swells to a red giant far in the future.
+	var sol_lp := _rel(Vector3.ZERO)
+	var sol_star := {"mass": 1.0, "age": 4.6, "color": Color(1.0, 0.95, 0.82)}
+	var sol_st := _star_state(sol_star)
+	var sol_rad := lerpf(6.0, 2.2, clampf(sol_lp.length() / star_maxdr, 0.0, 1.0))
+	var sol_ph := str(sol_st["phase"])
+	if sol_ph in ["Red giant", "Asymptotic giant", "Planetary nebula"]:
+		sol_rad *= 1.7
+	elif sol_ph == "Supergiant":
+		sol_rad *= 2.1
+	elif bool(sol_st["remnant"]):
+		sol_rad *= 0.55
+	_draw_soft_star(sol_px, sol_rad, sol_st["color"])
+	draw_string(_font, sol_px + Vector2(sol_rad + 4.0, 4.0), "Sol",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.92, 0.7))
 
 	# Title + controls hint.
 	draw_string(_font, Vector2(14, 24), "Star Map", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.9, 0.95, 1.0))
-	draw_string(_font, Vector2(14, 42), "Drag to rotate  ·  scroll to zoom  ·  click a star to select",
+	draw_string(_font, Vector2(14, 42), "Drag rotate · scroll zoom · click select · right-click set frame",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.68, 0.8))
 	draw_string(_font, Vector2(14, 58), "Log scale · rings = orders of magnitude (ly) · out to the Hubble horizon",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.58, 0.72))
+	# Observation reach — procedural stars beyond it stay hidden in the anonymous field.
+	draw_string(_font, Vector2(14, 106),
+		"Observable range: %s ly" % Units.format_si(observation_range(), ""),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.55, 0.72, 0.66))
+	# Current reference frame — the object at the map's centre (Sol unless recentred).  A
+	# crosshair marks the frame origin (always the centre), labelled with the frame's name.
+	var frame_col := Color(0.7, 0.85, 0.7) if _ref_name == "Sol" else Color(0.95, 0.85, 0.55)
+	draw_string(_font, Vector2(14, 90),
+		"Frame: %s%s" % [_ref_name, "" if _ref_name == "Sol" else "  ·  right-click empty space to reset"],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, frame_col)
+	var fc := _project(_rel(_ref_pos), b, center, scale)
+	draw_line(fc - Vector2(7, 0), fc + Vector2(7, 0), _fade(frame_col, 0.7), 1.0)
+	draw_line(fc - Vector2(0, 7), fc + Vector2(0, 7), _fade(frame_col, 0.7), 1.0)
+	draw_arc(fc, 10.0, 0.0, TAU, 24, _fade(frame_col, 0.5), 1.0, true)
 	# Cosmic expansion readout — once space has stretched noticeably.
 	if _cosmic_scale > 1.01:
 		draw_string(_font, Vector2(14, 74),
@@ -1126,10 +1768,26 @@ func _draw() -> void:
 
 	# Selected-star info box.
 	if _selected >= 0:
-		var s: Dictionary = STARS[_selected]
+		var s: Dictionary = all_stars()[_selected]
 		var lines: Array = [str(s["name"]),
 			"%.2f light-years" % float(s["dist"]),
 			"Spectral type %s" % str(s["spectral"])]
+		# Live stellar state at the current game year — phase, power output, mass, lifespan.
+		var st: Dictionary = _star_state(s)
+		var zams: float = float(s.get("mass", 1.0))
+		lines.append("Phase: %s" % str(st["phase"]))
+		lines.append("Output: %s  (%s Lsun)" % [
+			Units.format_si(float(st["lum_w"]), "W"), _fmt_lum(float(st["lum_lsun"]))])
+		lines.append("Mass now: %.2f Msun  ·  usable %s" % [
+			float(st["mass_msun"]), Units.format_si(StellarEvolution.total_usable_mass_kg(zams), "kg")])
+		var msl: float = float(st["ms_life"])
+		var age_now: float = _star_age_now(s)
+		if str(st["phase"]) == "Main sequence":
+			lines.append("Main-sequence span %s  ·  leaves in %s" % [
+				Units.format_si(msl, "yr"), Units.format_si(maxf(msl - age_now, 0.0), "yr")])
+		else:
+			lines.append("Main-sequence span %s  ·  ends as %s" % [
+				Units.format_si(msl, "yr"), StellarEvolution.remnant_kind(zams)])
 		var sfac: String = str(_factions.get(str(s["name"]), ""))
 		if sfac == "aggressive":
 			lines.append("⚠ Aggressive alien force")
@@ -1138,7 +1796,7 @@ func _draw() -> void:
 		elif sfac == "unknown":
 			lines.append("? Alien presence — alignment unknown")
 		var box := Rect2(Vector2(12, size.y - (16.0 * lines.size() + 16.0) - 12.0),
-			Vector2(248, 16.0 * lines.size() + 16.0))
+			Vector2(320, 16.0 * lines.size() + 16.0))
 		draw_rect(box, Color(0.06, 0.08, 0.14, 0.92))
 		draw_rect(box, Color(0.4, 0.55, 0.8, 0.5), false, 1.0)
 		for li in range(lines.size()):
@@ -1175,6 +1833,12 @@ func _gui_input(event: InputEvent) -> void:
 					_zoom = clampf(_zoom / ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
 					queue_redraw()
 				accept_event()
+			MOUSE_BUTTON_RIGHT:
+				# Recentre the reference frame: right-click a star, nebula, or galaxy (incl. the
+				# Galactic Centre) → centre on it; right-click empty space → reset to Sol.
+				if mb.pressed:
+					_try_set_frame(mb.position)
+				accept_event()
 			MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT:
 				accept_event()
 	elif event is InputEventMouseMotion and _dragging:
@@ -1188,15 +1852,60 @@ func _gui_input(event: InputEvent) -> void:
 		queue_redraw()
 		accept_event()
 
-## Pick the nearest projected star to the click, within PICK_PX pixels.
+## Recentre the reference frame on whatever the player right-clicked — the nearest star, nebula/
+## cluster landmark, or galaxy (including the Galactic Centre) — else reset to Sol (empty space).
+## Positions re-lay-out around the new origin.
+func _try_set_frame(mouse: Vector2) -> void:
+	var center: Vector2 = size * 0.5
+	var b := _view_basis()
+	var scale := _fit_scale(center)
+	var best_pos: Vector3 = Vector3.ZERO
+	var best_name: String = ""
+	var best_d: float = INF
+	# Stars (tight tolerance — they're dense).
+	for i in range(all_stars().size()):
+		var dd := _project(_rel(all_stars()[i]["pos"]), b, center, scale).distance_to(mouse)
+		if dd < PICK_PX and dd < best_d:
+			best_d = dd
+			best_pos = all_stars()[i]["pos"]
+			best_name = str(all_stars()[i]["name"])
+	# Nebulae / clusters (labelled markers — looser tolerance).
+	for m: Dictionary in _landmarks:
+		var dm := _project(_rel(m["pos"]), b, center, scale).distance_to(mouse)
+		if dm < FRAME_PICK_PX and dm < best_d:
+			best_d = dm
+			best_pos = m["pos"]
+			best_name = str(m["name"])
+	# Galaxies, including the Galactic Centre (Sgr A*) — at their current (expansion-adjusted) spot.
+	for g: Dictionary in _galaxies:
+		var eff_d: float = float(g["base_dist"])
+		if not bool(g["bound"]):
+			eff_d *= _cosmic_scale
+		if eff_d >= HUBBLE_HORIZON_LY:
+			continue
+		var gpos: Vector3 = (g["dir"] as Vector3) * eff_d
+		var dg := _project(_rel(gpos), b, center, scale).distance_to(mouse)
+		if dg < FRAME_PICK_PX and dg < best_d:
+			best_d = dg
+			best_pos = gpos
+			best_name = str(g["name"])
+	if best_name != "":
+		_ref_pos = best_pos
+		_ref_name = best_name
+	else:
+		_ref_pos = Vector3.ZERO   # empty space → back to the Sol frame
+		_ref_name = "Sol"
+	queue_redraw()
+
+## Pick the nearest projected star to the click (within PICK_PX); clicking empty space clears it.
 func _try_select(mouse: Vector2) -> void:
 	var center: Vector2 = size * 0.5
 	var b := _view_basis()
 	var scale := _fit_scale(center)
 	var best: int = -1
 	var best_d: float = PICK_PX
-	for i in range(STARS.size()):
-		var dd := _project(_log_pos(STARS[i]["pos"]), b, center, scale).distance_to(mouse)
+	for i in range(all_stars().size()):
+		var dd := _project(_rel(all_stars()[i]["pos"]), b, center, scale).distance_to(mouse)
 		if dd < best_d:
 			best_d = dd
 			best = i

@@ -29,6 +29,7 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 
 func _ready() -> void:
+	PanelBackground.attach(self)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical   = Control.SIZE_EXPAND_FILL
 	_build_ui()

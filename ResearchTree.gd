@@ -22,11 +22,18 @@ signal research_cancelled(node: ResearchNode)
 ## Emitted whenever the queue array changes (add / remove / advance).
 signal queue_changed
 
+## Emitted when research is paused or resumed by the player.
+signal research_pause_changed(paused: bool)
+
 ## All nodes keyed by their id.
 var nodes: Dictionary = {}  # id -> ResearchNode
 
 ## The node currently being researched (null if idle).
 var active_research: ResearchNode = null
+
+## When true the active job is HELD: progress is frozen (but kept), and the queue does not
+## advance, until the player resumes.  Distinct from cancelling — nothing is refunded or reset.
+var research_paused: bool = false
 
 ## Optional: allow queuing multiple research jobs.
 var research_queue: Array = []
@@ -129,6 +136,20 @@ func start_research(node_id: String, force: bool = false) -> bool:
 	return true
 
 
+## Hold or resume the active research job WITHOUT losing progress (unlike cancel_research,
+## which refunds and resets to zero).  Progress persists across saves regardless.
+func set_research_paused(paused: bool) -> void:
+	if research_paused == paused:
+		return
+	research_paused = paused
+	research_pause_changed.emit(research_paused)
+
+## Flip the pause state; returns the new value.
+func toggle_research_paused() -> bool:
+	set_research_paused(not research_paused)
+	return research_paused
+
+
 ## Cancel the active research job and refund resources.
 func cancel_research() -> void:
 	if active_research == null:
@@ -138,6 +159,7 @@ func cancel_research() -> void:
 	node.state = ResearchNode.State.AVAILABLE
 	node.progress = 0.0
 	active_research = null
+	set_research_paused(false)   # nothing active to hold
 	node_state_changed.emit(node)
 	research_cancelled.emit(node)
 	_advance_queue()
@@ -179,7 +201,7 @@ func reset_node(node_id: String) -> void:
 ## Call this from _process(delta) (or a timer) to advance active research.
 ## `research_speed` multiplies progress rate (default 1.0).
 func tick(delta: float, research_speed: float = 1.0) -> void:
-	if active_research == null or SolarSystem.paused:
+	if active_research == null or SolarSystem.paused or research_paused:
 		return
 
 	var effective_speed := research_speed * (1.0 + get_boost("research_speed"))
@@ -239,6 +261,7 @@ func save_state() -> Dictionary:
 		"nodes": state_data,
 		"resources": resources.duplicate(),
 		"active_research": active_research.id if active_research else "",
+		"research_paused": research_paused,
 		"research_queue": research_queue.duplicate()
 	}
 
@@ -264,6 +287,10 @@ func load_state(saved: Dictionary) -> void:
 	else:
 		active_research = null
 
+	# A held research job stays held after loading (only meaningful with an active job).
+	research_paused = bool(saved.get("research_paused", false)) and active_research != null
+	research_pause_changed.emit(research_paused)
+
 	_recompute_boosts()
 
 
@@ -275,6 +302,7 @@ func _complete_research(node: ResearchNode) -> void:
 	node.state = ResearchNode.State.UNLOCKED
 	node.progress = 1.0
 	active_research = null
+	set_research_paused(false)   # job done; the next queued one starts running, not held
 	node_state_changed.emit(node)
 	research_completed.emit(node)
 	_refresh_children_availability(node)

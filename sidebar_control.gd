@@ -9,11 +9,11 @@ extends HBoxContainer
 @onready var planet_info_page: PanelContainer = $"../../PlanetInfoPage"
 @onready var build_panel: PanelContainer = $"../../BuildPanel"
 @onready var launch_panel: PanelContainer = $"../../LaunchPanel"
-@onready var production_panel: PanelContainer = $"../../ProductionPanel"
 
 ## Star map and automation panels are created in code (no scene node needed) and live
 ## beside the other full-area panels in this HBoxContainer.
 var star_map: StarMapPanel = null
+var galaxy_debug: GalaxyDebugPanel = null
 var automation_panel: AutomationPanel = null
 ## Merged planet panel (info + build + population tabs), created and assigned by Game.
 var planet_tabs: Control = null
@@ -26,6 +26,13 @@ func _ready() -> void:
 	# Fills the available panel area (right of the sidebar buttons), like the other panels.
 	add_child(star_map)
 	_add_cloned_button("star_map", "star map", _on_starmap_pressed)
+
+	# Debug view of the galaxy in true (linear) scale, reading the star map's generated data.
+	galaxy_debug = GalaxyDebugPanel.new()
+	galaxy_debug.source = star_map
+	galaxy_debug.hide()
+	add_child(galaxy_debug)
+	_add_cloned_button("galaxy_debug", "galaxy", _on_galaxy_debug_pressed)
 
 	automation_panel = AutomationPanel.new()
 	automation_panel.hide()
@@ -68,9 +75,10 @@ func hide_all() -> void:
 	if planet_tabs:
 		planet_tabs.hide()
 	launch_panel.hide()
-	production_panel.hide()
 	if star_map:
 		star_map.hide()
+	if galaxy_debug:
+		galaxy_debug.hide()
 	if automation_panel:
 		automation_panel.hide()
 
@@ -115,15 +123,16 @@ func _on_politics_pressed() -> void:
 	_toggle_panel(politics_page)
 
 
-func _on_production_pressed() -> void:
-	_toggle_panel(production_panel)
-
-
 func _on_starmap_pressed() -> void:
 	if _toggle_panel(star_map):
 		var game := get_tree().current_scene
 		if game and game.has_method("refresh_star_map"):
 			game.refresh_star_map()
+
+
+func _on_galaxy_debug_pressed() -> void:
+	if _toggle_panel(galaxy_debug):
+		galaxy_debug.queue_redraw()
 
 
 func _on_automation_pressed() -> void:

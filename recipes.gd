@@ -324,6 +324,26 @@ const RECIPES: Array = [
 		"inputs":  {"SolarPanel": 40.0, "Al": 12.0, "Microchip": 1.0, "energy": 1_500.0},
 		"outputs": {"SolarSatellite": 1.0},
 	},
+	# Relativistic kinetic missile: a dense penetrator, superconducting shielding, and
+	# microchip guidance.  Crafted here, then fired at a star system from the star map.
+	{
+		"name":        "Relativistic Missile Assembly",
+		"category":    "aerospace",
+		"description": "Integrate a dense kinetic penetrator, superconducting magnetic shielding, and microchip guidance into a relativistic kinetic missile.",
+		"requires":    "relativistic_navigation",
+		"inputs":  {"Steel": 200.0, "Superconductor": 4.0, "Microchip": 2.0, "energy": 5_000.0},
+		"outputs": {"Missile": 1.0},
+	},
+	# Von Neumann berserker seed: a self-replicating industrial probe that consumes a target
+	# system on arrival.  Crafted here, then launched at a star system from the star map.
+	{
+		"name":        "Berserker Assembly",
+		"category":    "aerospace",
+		"description": "Integrate a self-replicating industrial core, microchip control, and superconducting systems into a von Neumann berserker seed.",
+		"requires":    "self_replicating_industry",
+		"inputs":  {"Steel": 60.0, "Superconductor": 6.0, "Microchip": 4.0, "energy": 4_000.0},
+		"outputs": {"Berserker": 1.0},
+	},
 
 	# ── Chemicals ────────────────────────────────────────────────────────────────
 
@@ -527,6 +547,23 @@ const RECIPES: Array = [
 		"outputs": {"Antimatter": 0.5},
 	},
 ]
+
+## Normalisation factor that makes a rate of 1× mean ONE UNIT of primary output per game-day:
+## one gram for a recipe that yields matter, or one Joule for the fuel recipes that yield only
+## energy.  The stoichiometric ratios in the table are preserved — every input and output is
+## simply scaled together — so "3× Iron Smelting" reads directly as 3 g of iron per day.
+static func scale(recipe: Dictionary) -> float:
+	var outputs: Dictionary = recipe.get("outputs", {})
+	var mass: float = 0.0
+	for key: String in outputs:
+		if key == "energy" or key == "science":
+			continue
+		mass += float(outputs[key])
+	if mass > 0.0:
+		return 1.0 / mass
+	# Energy-only recipes (coal/oil combustion, enrichment): 1× = 1 Joule per day.
+	var e: float = float(outputs.get("energy", 0.0))
+	return 1.0 / e if e > 0.0 else 1.0
 
 ## Returns all recipes that are unlocked given a set of completed research node ids.
 static func available(completed_research: Dictionary) -> Array:

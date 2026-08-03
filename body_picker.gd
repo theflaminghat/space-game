@@ -45,7 +45,10 @@ func _update_hover() -> void:
 	if cam == null:
 		return
 	var mouse: Vector2 = get_viewport().get_mouse_position()
-	var best_d: float = INF
+	# Among every body whose screen disc is under the cursor, pick the one CLOSEST TO THE CAMERA
+	# — the front-most, visible one — so a body sitting behind another is never highlighted
+	# through it.  (Depth by centre distance, not cursor proximity.)
+	var best_depth: float = INF
 	for body in _selectable_bodies():
 		if not body.visible:
 			continue
@@ -54,9 +57,11 @@ func _update_hover() -> void:
 			continue
 		var center: Vector2 = cam.unproject_position(wp)
 		var srad: float = _screen_radius(cam, body, wp, center)
-		var d: float = mouse.distance_to(center)
-		if d <= srad and d < best_d:
-			best_d = d
+		if mouse.distance_to(center) > srad:
+			continue   # cursor isn't over this body's disc
+		var depth: float = cam.global_position.distance_to(wp)
+		if depth < best_depth:
+			best_depth = depth
 			_hover_body = body
 			_hover_center = center
 			_hover_radius = srad

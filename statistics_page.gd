@@ -29,6 +29,9 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 
 func _ready() -> void:
+	# Backing covers the whole page, so it reaches the top behind the header — the graph's own
+	# background only ever covered the plot area, leaving the title over the 3-D view.
+	PanelBackground.attach(self)
 	_build_ui()
 
 # ── UI construction ───────────────────────────────────────────────────────────

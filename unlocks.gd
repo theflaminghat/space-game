@@ -3,10 +3,14 @@ class_name BuildingUnlocks
 const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Solar Farm":      "",
 	"Mine":            "",
+	# Cryogenic air separation needs vessels that survive the thermal stress of liquefaction.
+	"Atmospheric Condenser": "high_performance_materials",
 	"Workshop":          "",
 	"Factory":           "mass_production_systems",
 	"Automated Factory": "autonomous_factories",
 	"Nuclear Plant":   "nuclear_power",
+	# Civil defence becomes a live concern the moment the bomb does.
+	"Bunker":          "nuclear_power",
 	"Research Lab":    "",
 	"Observatory":     "radio_astronomy",
 	"Radio Telescope Array": "radio_astronomy",

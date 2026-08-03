@@ -5,6 +5,13 @@ extends PanelContainer
 
 var _value_labels: Dictionary = {}   # row key → value Label
 
+## Swallow scroll-wheel so hovering this tab doesn't zoom the 3-D camera behind it.
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index in [
+			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN,
+			MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+		accept_event()
+
 ## The rows shown, in order: [display key].  Values are pushed by set_stats().
 const ROWS: Array = [
 	"Current population",

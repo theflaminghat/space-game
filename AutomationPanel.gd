@@ -21,6 +21,8 @@ extends PanelContainer
 ##     "enabled": bool }
 
 signal automation_changed(rules: Array)
+## Emitted when the player toggles autonomous von Neumann colonisation.
+signal vn_colonization_changed(enabled: bool)
 
 ## Build/launch origins (planets only); launch targets add the Sun.
 const PLANETS: Array = [
@@ -34,6 +36,7 @@ const TARGETS: Array = [
 
 var _rules:   Array = []
 var _next_id: int   = 1
+var _vn_check: CheckButton = null
 
 # ── Build-form refs ───────────────────────────────────────────────────────────
 var _b_planet:   OptionButton = null
@@ -73,6 +76,11 @@ func load_rules(rules: Array) -> void:
 		_next_id = maxi(_next_id, int((r as Dictionary).get("id", 0)) + 1)
 	_rebuild_rule_list()
 
+## Reflect the loaded von Neumann toggle state without re-emitting the signal.
+func set_vn_enabled(on: bool) -> void:
+	if _vn_check:
+		_vn_check.set_pressed_no_signal(on)
+
 ## A serialisable copy of the current rules.
 func get_rules() -> Array:
 	var out: Array = []
@@ -105,6 +113,20 @@ func _build_ui() -> void:
 	hint.modulate = Color(0.70, 0.72, 0.78)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(hint)
+
+	vbox.add_child(HSeparator.new())
+
+	# ── Autonomous von Neumann colonisation ──────────────────────────────────────
+	# One global directive: seed a self-replicating colony probe and let it spread on its own.
+	# Behaviour is gated on Relativistic Navigation + Self-Replicating Industry (checked by Game).
+	_section_label(vbox, "Autonomous Expansion")
+	_vn_check = CheckButton.new()
+	_vn_check.text = "von Neumann colonisation"
+	_vn_check.tooltip_text = "Seed a self-replicating colony probe; on arrival it colonises the star and \
+launches fresh probes to nearby systems — spreading hands-free.  Needs Relativistic Navigation + \
+Self-Replicating Industry.  A launched swarm keeps replicating even if you switch this off."
+	_vn_check.toggled.connect(func(on: bool) -> void: vn_colonization_changed.emit(on))
+	vbox.add_child(_vn_check)
 
 	vbox.add_child(HSeparator.new())
 
@@ -173,7 +195,7 @@ func _build_build_form(vbox: VBoxContainer) -> void:
 	_form_label(grid, "Building:")
 	_b_building = OptionButton.new()
 	_b_building.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for b in BuildingData.BUILDINGS:
+	for b in BuildingData.all():
 		_b_building.add_item(str((b as Dictionary)["name"]))
 	grid.add_child(_b_building)
 

@@ -2,7 +2,10 @@ extends Control
 
 var showing: bool = false
 
-const NODE_W: float = 200.0
+## Node buttons clip their text (clip_text), so the width sets how much of a research name is
+## readable.  Columns sit ResearchTreeData.X_SPACING (430) apart, so this must stay comfortably
+## under that to leave room for the elbow connection lanes routed through the gap.
+const NODE_W: float = 300.0
 const NODE_H: float = 56.0
 const TIER_GAP_X: float = 220.0
 const NODE_GAP_Y: float = 90.0
@@ -34,11 +37,13 @@ var _tooltip_cost: Label
 var _info_panel: PanelContainer
 var _info_title: Label
 var _info_desc: Label
+var _info_prereqs: Label
 var _info_unlocks: Label
 var _info_cost: Label
 var _info_boosts: Label
 var _progress_bar: ProgressBar
 var _research_btn: Button
+var _pause_btn: Button   # hold/resume the active research (only shown for the active node)
 
 ## Always-visible science total + rate banner (moved here from the top HUD bar).
 var _science_label: Label
@@ -61,6 +66,7 @@ var _drag_last_mouse_pos: Vector2 = Vector2.ZERO
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	PanelBackground.attach(self)
 	_build_scene()
 
 	ResearchTree.node_state_changed.connect(_on_node_state_changed)
@@ -221,17 +227,30 @@ func _build_scene() -> void:
 	_research_btn.text = "Add to Queue"
 	_research_btn.pressed.connect(_on_research_button_pressed)
 
+	_pause_btn = Button.new()
+	_pause_btn.text = "Pause Research"
+	_pause_btn.pressed.connect(_on_pause_button_pressed)
+	_pause_btn.hide()
+
 	_info_unlocks = _make_label("", false, true)
 	_info_unlocks.add_theme_color_override("font_color", Color(0.70, 0.85, 1.00))
 	_info_unlocks.add_theme_font_size_override("font_size", 12)
 
+	# What this node needs first — each prerequisite ticked or crossed by its own state, so a
+	# locked node shows at a glance exactly what is still standing in the way.
+	_info_prereqs = _make_label("", false, true)
+	_info_prereqs.add_theme_color_override("font_color", Color(0.95, 0.80, 0.55))
+	_info_prereqs.add_theme_font_size_override("font_size", 12)
+
 	info_box.add_child(_info_title)
 	info_box.add_child(_info_desc)
+	info_box.add_child(_info_prereqs)
 	info_box.add_child(_info_unlocks)
 	info_box.add_child(_info_cost)
 	info_box.add_child(_info_boosts)
 	info_box.add_child(_progress_bar)
 	info_box.add_child(_research_btn)
+	info_box.add_child(_pause_btn)
 
 	_info_panel.hide()
 
@@ -477,6 +496,9 @@ func _on_node_pressed(node_id: String) -> void:
 
 	_info_title.text = node.display_name
 	_info_desc.text = node.description
+	var prereq_text: String = _format_prerequisites(node)
+	_info_prereqs.text = prereq_text
+	_info_prereqs.visible = not prereq_text.is_empty()
 	var unlocks_text: String = _format_unlocks(node)
 	_info_unlocks.text = unlocks_text
 	_info_unlocks.visible = not unlocks_text.is_empty()
@@ -508,6 +530,11 @@ func _on_node_pressed(node_id: String) -> void:
 	if in_queue:
 		_research_btn.text = "Remove from Queue (#%d)" % (queue_pos + 2)
 		_research_btn.disabled = false
+
+	# Pause/Resume is offered only for the job currently being researched.
+	_pause_btn.visible = is_active
+	if is_active:
+		_pause_btn.text = "Resume Research" if ResearchTree.research_paused else "Pause Research"
 
 	_info_panel.show()
 
@@ -575,6 +602,13 @@ func _on_research_button_pressed() -> void:
 	_on_node_pressed(_selected_id)
 
 
+## Hold or resume the active research job (keeps its progress) and refresh the info panel.
+func _on_pause_button_pressed() -> void:
+	ResearchTree.toggle_research_paused()
+	if not _selected_id.is_empty():
+		_on_node_pressed(_selected_id)
+
+
 func _on_node_state_changed(node: ResearchNode) -> void:
 	if _node_controls.has(node.id):
 		var btn: Button = _node_controls[node.id] as Button
@@ -611,6 +645,8 @@ func _update_progress_bar() -> void:
 
 	if _selected_id == ResearchTree.active_research.id:
 		_progress_bar.value = ResearchTree.active_research.progress * 100.0
+		# Grey the bar out while the job is held so a frozen progress reads as paused, not stalled.
+		_progress_bar.modulate = Color(0.6, 0.6, 0.68) if ResearchTree.research_paused else Color.WHITE
 
 	if _conn_layer != null and is_instance_valid(_conn_layer):
 		_conn_layer.queue_redraw()
@@ -698,6 +734,20 @@ func _format_boosts(boosts: Dictionary) -> String:
 		parts.append("%s +%d%%" % [label, int(float(boosts[key]) * 100.0)])
 	return "Unlocks: " + "  |  ".join(parts)
 
+
+## The research this node depends on, each marked by whether it is already done.  Returns ""
+## for root nodes so the line disappears rather than reading "Requires: nothing".
+func _format_prerequisites(node: ResearchNode) -> String:
+	if node.prerequisites.is_empty():
+		return ""
+	var lines: Array[String] = ["Requires:"]
+	for prereq_id_v: Variant in node.prerequisites:
+		var prereq_id: String = prereq_id_v as String
+		var prereq: ResearchNode = ResearchTree.get_research_node(prereq_id)
+		var label: String = prereq.display_name if prereq != null else prereq_id
+		var done: bool = prereq != null and prereq.state == ResearchNode.State.UNLOCKED
+		lines.append("  %s %s" % ["✓" if done else "•", label])
+	return "\n".join(lines)
 
 func _format_unlocks(node: ResearchNode) -> String:
 	var lines: Array[String] = []

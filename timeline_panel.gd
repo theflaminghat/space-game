@@ -13,6 +13,7 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _ready() -> void:
+	PanelBackground.attach(self)
 	# Expand to fill whatever space HBoxContainer2 gives us
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical   = Control.SIZE_EXPAND_FILL

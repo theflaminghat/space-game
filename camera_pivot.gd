@@ -75,38 +75,3 @@ func _process(delta: float) -> void:
 			rotation_degrees.x -= step
 		elif Input.is_action_pressed("down") and rotation_degrees.x < 90:
 			rotation_degrees.x += step
-
-
-func _on_sun_button_pressed() -> void:
-	move_to_planet("sun")
-
-func _on_mercury_button_pressed() -> void:
-	move_to_planet("mercury")
-
-
-func _on_venus_button_pressed() -> void:
-	move_to_planet("venus")
-
-
-func _on_earth_button_pressed() -> void:
-	move_to_planet("earth")
-
-
-func _on_mars_button_pressed() -> void:
-	move_to_planet("mars")
-
-
-func _on_jupiter_button_pressed() -> void:
-	move_to_planet("jupiter")
-
-
-func _on_saturn_button_pressed() -> void:
-	move_to_planet("saturn")
-
-
-func _on_uranus_button_pressed() -> void:
-	move_to_planet("uranus")
-
-
-func _on_neptune_button_pressed() -> void:
-	move_to_planet("neptune")

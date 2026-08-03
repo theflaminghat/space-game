@@ -13,6 +13,26 @@ class_name Units
 # The SI prefix formatter below makes any magnitude readable in the HUD.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Mass scale ────────────────────────────────────────────────────────────────
+## The industrial economy was authored at a "toy" mass scale: a Mine yielded 8 kg/day and a
+## building cost tens of kilograms.  Internally consistent, but nowhere near real tonnage —
+## an actual mine moves ~10 000 t/day.  MASS_SCALE lifts every mass in the game onto realistic
+## footing at once: mine output, building bills of materials, fuel burn, storage, and stockpiles.
+##
+## Applied programmatically (BuildingData.all(), and the constants below) rather than by editing
+## hundreds of literals, so there is a single number to tune and no chance of two tables drifting
+## apart.  Because EVERY mass moves together, the economy is unchanged — only the units are real:
+## a Mine now yields 10 000 t/day and its bill of materials is ~12 500 t of concrete.
+##
+## Deliberately NOT scaled: energy (Joules), science (FLOP), compute (FLOP/s), shelter capacity
+## (people), manufacturing capacity (work), radiator capacity (Watts), detection, and the crust
+## and atmosphere compositions in planet_data.gd — those are already in real units.
+const MASS_SCALE: float = 1.25e6
+
+## Resource keys inside a cost/production/storage block that are NOT masses, so MASS_SCALE
+## must skip them.
+const NON_MASS_KEYS: Array = ["energy", "science", "compute"]
+
 const RESOURCE_DEFS: Dictionary = {
 	# key       label        stored unit   rate unit
 	"science":  {"label": "Science",  "unit": "FLOP",    "rate_unit": "FLOP/s"},
@@ -51,10 +71,25 @@ static func format_si(value: float, unit: String) -> String:
 	if v >= 1.0e9:  return "%.1f %s" % [value * 1.0e-9,  "G" + unit]
 	if v >= 1.0e6:  return "%.1f %s" % [value * 1.0e-6,  "M" + unit]
 	if v >= 1.0e3:  return "%.1f %s" % [value * 1.0e-3,  "k" + unit]
-	# Sub-kilo: integer if whole, one decimal otherwise
-	if v == floorf(v):
-		return "%d %s" % [int(value), unit]
-	return "%.1f %s" % [value, unit]
+	# Unit scale: integer if whole, one decimal otherwise.
+	if v >= 1.0:
+		if v == floorf(v):
+			return "%d %s" % [int(value), unit]
+		return "%.1f %s" % [value, unit]
+	if v == 0.0:
+		return "0 %s" % unit
+	# Sub-unit: the negative SI prefixes, so small flows read as "5 mg" rather than "0.0 g".
+	if v >= 1.0e-3:  return "%.1f %s" % [value * 1.0e3,  "m" + unit]   # milli
+	if v >= 1.0e-6:  return "%.1f %s" % [value * 1.0e6,  "µ" + unit]   # micro
+	if v >= 1.0e-9:  return "%.1f %s" % [value * 1.0e9,  "n" + unit]   # nano
+	if v >= 1.0e-12: return "%.1f %s" % [value * 1.0e12, "p" + unit]   # pico
+	if v >= 1.0e-15: return "%.1f %s" % [value * 1.0e15, "f" + unit]   # femto
+	if v >= 1.0e-18: return "%.1f %s" % [value * 1.0e18, "a" + unit]   # atto
+	if v >= 1.0e-21: return "%.1f %s" % [value * 1.0e21, "z" + unit]   # zepto
+	if v >= 1.0e-24: return "%.1f %s" % [value * 1.0e24, "y" + unit]   # yocto
+	if v >= 1.0e-27: return "%.1f %s" % [value * 1.0e27, "r" + unit]   # ronto
+	if v >= 1.0e-30: return "%.1f %s" % [value * 1.0e30, "q" + unit]   # quecto
+	return "0 %s" % unit   # below quecto — indistinguishable from nothing
 
 ## Like format_si but spells out the full magnitude prefix (kilo, Mega, Giga…).
 ## Intended for the HUD top bar where readability matters more than compactness.
@@ -83,10 +118,25 @@ static func format_si_verbose(value: float, unit: String) -> String:
 	if v >= 1.0e9:  return "%.1f %s" % [value * 1.0e-9,  "Giga"   + unit]
 	if v >= 1.0e6:  return "%.1f %s" % [value * 1.0e-6,  "Mega"   + unit]
 	if v >= 1.0e3:  return "%.1f %s" % [value * 1.0e-3,  "Kilo"   + unit]
-	# Sub-kilo: integer if whole, one decimal otherwise
-	if v == floorf(v):
-		return "%d %s" % [int(value), unit]
-	return "%.1f %s" % [value, unit]
+	# Unit scale: integer if whole, one decimal otherwise.
+	if v >= 1.0:
+		if v == floorf(v):
+			return "%d %s" % [int(value), unit]
+		return "%.1f %s" % [value, unit]
+	if v == 0.0:
+		return "0 %s" % unit
+	# Sub-unit magnitudes, spelled out to match the rest of this formatter.
+	if v >= 1.0e-3:  return "%.1f %s" % [value * 1.0e3,  "milli" + unit]
+	if v >= 1.0e-6:  return "%.1f %s" % [value * 1.0e6,  "micro" + unit]
+	if v >= 1.0e-9:  return "%.1f %s" % [value * 1.0e9,  "nano"  + unit]
+	if v >= 1.0e-12: return "%.1f %s" % [value * 1.0e12, "pico"  + unit]
+	if v >= 1.0e-15: return "%.1f %s" % [value * 1.0e15, "femto" + unit]
+	if v >= 1.0e-18: return "%.1f %s" % [value * 1.0e18, "atto"  + unit]
+	if v >= 1.0e-21: return "%.1f %s" % [value * 1.0e21, "zepto" + unit]
+	if v >= 1.0e-24: return "%.1f %s" % [value * 1.0e24, "yocto" + unit]
+	if v >= 1.0e-27: return "%.1f %s" % [value * 1.0e27, "ronto" + unit]
+	if v >= 1.0e-30: return "%.1f %s" % [value * 1.0e30, "quecto" + unit]
+	return "0 %s" % unit
 
 # ── Resource-aware helpers ────────────────────────────────────────────────────
 

@@ -427,7 +427,9 @@ func _build_swarm() -> void:
 	_swarm_mmi.multimesh = _swarm_mm
 	_swarm_mmi.material_override = _make_panel_material()
 	_swarm_mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var ext: float = log(SWARM_OUTER_AU + 1.0) * ORBIT_RADIUS_MULT + 2.0
+	# Size the culling box for the swarm at its LARGEST — the outer lane scaled by the Sun's
+	# peak red-giant size (visual_mult ≈ 16) — so it never culls as the lanes grow.
+	var ext: float = log(SWARM_OUTER_AU + 1.0) * ORBIT_RADIUS_MULT * 16.0 + 4.0
 	_swarm_mmi.custom_aabb = AABB(
 		Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
 	add_child(_swarm_mmi)
@@ -512,7 +514,7 @@ func swarm_slot_world_pos(index: int) -> Vector3:
 		return global_position
 	var lane: int = _lane_of_index(index)
 	var fill: int = index - _lane_start[lane]
-	var rv: float = _lane_rvis[lane]
+	var rv: float = _lane_rvis[lane] * _sun_visual_mult()   # track the growing Sun
 	var th: float = _slot_phase(lane, fill) + _lane_angle[lane]   # current (rotated) slot spot
 	return to_global(_lane_basis[lane] * Vector3(rv * cos(th), 0.0, rv * sin(th)))
 
@@ -521,10 +523,13 @@ func swarm_slot_world_pos(index: int) -> Vector3:
 func _update_swarm_transforms() -> void:
 	if _swarm_mm == null:
 		return
+	# The whole swarm scales with the Sun: as it swells toward a red giant the lanes grow with
+	# it, so the collectors keep orbiting OUTSIDE the photosphere instead of vanishing inside it.
+	var sun_f: float = _sun_visual_mult()
 	var vis: int = _swarm_mm.visible_instance_count
 	for i in range(vis):
 		var lane: int = _sw_lane[i]
-		var rv: float = _lane_rvis[lane]
+		var rv: float = _lane_rvis[lane] * sun_f
 		var th: float = _sw_phase[i] + _lane_angle[lane]   # fixed slot + shared lane rotation
 		var lb: Basis = _lane_basis[lane]
 		var pos: Vector3 = lb * Vector3(rv * cos(th), 0.0, rv * sin(th))
@@ -536,6 +541,29 @@ func _update_swarm_transforms() -> void:
 		var across:  Vector3 = radial.cross(tangent).normalized()
 		var b := Basis(tangent * PANEL_W, radial * PANEL_THIN, across * PANEL_W)
 		_swarm_mm.set_instance_transform(i, Transform3D(b, pos))
+
+## Current visual size multiple of the Sun (1.0 today, up to 16× at the red-giant tip),
+## interpolated from Planet.SUN_STAGES exactly as the Sun's own appearance is, so the swarm
+## grows in lock-step with the star it orbits.
+func _sun_visual_mult() -> float:
+	var stages: Array = Planet.SUN_STAGES
+	var y: float = float(SolarSystem.current_year)
+	var last: Array = stages[stages.size() - 1]
+	if y >= float(int(last[0])):
+		return maxf(1.0, float(last[2]))
+	var lo: Array = stages[0]
+	var hi: Array = stages[1]
+	for i in range(stages.size() - 1):
+		if y >= float(int(stages[i][0])) and y < float(int(stages[i + 1][0])):
+			lo = stages[i]
+			hi = stages[i + 1]
+			break
+	var span: float = float(int(hi[0])) - float(int(lo[0]))
+	var t: float = 0.0 if span <= 0.0 else clampf((y - float(int(lo[0]))) / span, 0.0, 1.0)
+	var st: float = t * t * (3.0 - 2.0 * t)   # smoothstep, matching _update_sun_appearance
+	# Floor at 1.0 — the swarm grows with the swelling Sun but never contracts below the lanes
+	# it was built at (so it doesn't collapse into an overlapping knot around the white dwarf).
+	return maxf(1.0, lerpf(float(lo[2]), float(hi[2]), st))
 
 ## Show one collector per Solar Satellite the player has deployed to the Sun.
 func _refresh_swarm_count() -> void:

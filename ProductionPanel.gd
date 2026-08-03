@@ -16,10 +16,15 @@ const PLANETS: Array = [
 	"Jupiter", "Saturn", "Uranus", "Neptune",
 ]
 ## Slider operates in log₁₀ space so each position is an equal *ratio* step.
-## LOG_MIN = -2  →  0.01×   |   LOG_MAX = 3  →  1 000×
-## LOG_STEP = 0.05  →  each tick ≈ ×1.12  (≈ 60 ticks per decade)
-const LOG_MIN:  float = -2.0
-const LOG_MAX:  float =  3.0
+## LOG_MIN = -3  →  0.001×   |   LOG_MAX = 12  →  1 000 000 000 000×
+## LOG_STEP = 0.05  →  each tick ≈ ×1.12  (20 ticks per decade, 300 across the range).
+## The ceiling tracks Units.MASS_SCALE: one Mine yields 10 000 t/day, so a line that can
+## actually consume a mining operation has to reach millions of tonnes per day.
+## A rate of 1× is exactly one gram of product per game-day (see RecipeData.scale), so the
+## multiplier reads directly as output mass — 5 000× is 5 kg/day.  Twelve decades is a lot of
+## travel for a slider, so the readout beside it is editable: type an exact figure instead.
+const LOG_MIN:  float = -3.0
+const LOG_MAX:  float =  12.0
 const LOG_STEP: float =  0.05
 
 # ── Internal state ───────────────────────────────────────────────────────────────
@@ -35,14 +40,19 @@ var _all_recipes: Array = []   # full recipe list (updated on research change)
 var _recipe_menu:    MenuButton    = null   # dropdown with one submenu per category
 var _selected_recipe_name: String  = ""     # source of truth for the current pick
 var _cat_submenus:   Array         = []      # category PopupMenu nodes, freed on rebuild
-var _planet_option:  OptionButton = null
 var _rate_slider:    HSlider      = null
-var _rate_label:     Label        = null
+## Editable rate readout — typing an exact multiplier is the practical way to hit a precise
+## figure now that the slider spans twelve decades.
+var _rate_label:     LineEdit     = null
 var _add_button:     Button       = null
 var _job_list:       VBoxContainer = null
 var _inputs_label:   Label        = null
 var _outputs_label:  Label        = null
 var _mc_label:       Label        = null
+var _title_label:    Label        = null
+## The body this panel currently manages — set by Game from the selected planet/moon tab.
+## New jobs target it and the list is filtered to it (no in-panel planet picker any more).
+var _active_planet:  String       = "earth"
 ## planet_lower → { "capacity": work/day, "demand": work/day }, pushed by Game.gd.
 var _mc_state:       Dictionary   = {}
 
@@ -56,12 +66,37 @@ static func _log_to_rate(log_val: float) -> float:
 static func _rate_to_log(rate: float) -> float:
 	return clampf(log(maxf(rate, 1e-6)) / log(10.0), LOG_MIN, LOG_MAX)
 
-## Human-readable rate label: "0.01×", "1.00×", "10×", "1000×".
+## The rate box is an editable field, so it holds the RAW multiplier and nothing else — no SI
+## prefix, no "×".  What it shows is exactly what you could type back in: "0.001", "1", "2500",
+## "1000000000".  Trailing zeros are trimmed so the field stays readable at any magnitude.
 static func _fmt_rate(rate: float) -> String:
-	if rate >= 100.0: return "%d×"    % int(roundf(rate))
-	if rate >= 10.0:  return "%.1f×"  % rate
-	if rate >= 1.0:   return "%.2f×"  % rate
-	return "%.3f×" % rate
+	if rate >= 1.0 and rate == floorf(rate):
+		return "%d" % int(rate)                 # whole numbers print without a decimal point
+	var s: String = "%.4f" % rate
+	while s.ends_with("0"):
+		s = s.substr(0, s.length() - 1)
+	if s.ends_with("."):
+		s = s.substr(0, s.length() - 1)
+	return s
+
+## Parse a typed multiplier back to a number, accepting the same shorthand _fmt_rate emits
+## ("2.5k", "1M×", "3 G") as well as plain figures.  Returns -1.0 when it can't be read.
+static func _parse_rate(text: String) -> float:
+	var s: String = text.strip_edges().replace("×", "").replace(",", "").replace(" ", "")
+	if s == "":
+		return -1.0
+	var mult: float = 1.0
+	var last: String = s.substr(s.length() - 1, 1)
+	match last:
+		"k", "K": mult = 1.0e3
+		"m", "M": mult = 1.0e6
+		"g", "G", "b", "B": mult = 1.0e9
+		"t", "T": mult = 1.0e12
+	if mult != 1.0:
+		s = s.substr(0, s.length() - 1)
+	if not s.is_valid_float():
+		return -1.0
+	return s.to_float() * mult
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────────
 
@@ -106,24 +141,35 @@ func set_job_status(job_id: int, running: bool, missing_input: String = "") -> v
 		lbl.text    = "⚠ missing: %s" % missing_input if missing_input != "" else "⚠ stalled"
 		lbl.modulate = Color(0.90, 0.55, 0.20)
 
+## Point the panel at a body (planet OR moon).  New jobs target it and the list shows only its
+## jobs; called by Game when the active planet tab changes.
+func set_planet(planet: String) -> void:
+	var p := planet.to_lower()
+	if p == "":
+		p = "earth"
+	if p == _active_planet and not _jobs.is_empty():
+		_update_mc_label()   # cheap refresh; avoid a full rebuild when nothing moved
+		return
+	_active_planet = p
+	if _title_label:
+		_title_label.text = "Manufacturing — %s" % p.capitalize()
+	_rebuild_job_list()
+	_update_mc_label()
+
 ## Push the per-planet Manufacturing Capacity state (from Game.gd) for the readout.
 func set_mc_state(state: Dictionary) -> void:
 	_mc_state = state
 	_update_mc_label()
 
-## Refresh the capacity readout for the currently-selected location.
+## Refresh the capacity readout for the active body.
 func _update_mc_label() -> void:
-	if _mc_label == null or _planet_option == null:
+	if _mc_label == null:
 		return
-	var idx := _planet_option.selected
-	if idx < 0 or idx >= PLANETS.size():
-		_mc_label.text = ""
-		return
-	var info: Dictionary = _mc_state.get(str(PLANETS[idx]).to_lower(), {})
+	var info: Dictionary = _mc_state.get(_active_planet, {})
 	var cap: float = float(info.get("capacity", 0.0))
 	var used: float = float(info.get("demand", 0.0))
-	_mc_label.text = "Capacity %s / %s" % [
-		Units.format_si_verbose(used, ""), Units.format_si_verbose(cap, "")]
+	_mc_label.text = "Capacity %s / %s work/day" % [
+		Units.format_si(used, ""), Units.format_si(cap, "")]
 	# Tint amber when demand outstrips capacity (jobs on this world are throttled).
 	_mc_label.modulate = Color(0.95, 0.65, 0.30) if used > cap + 0.5 else Color(0.70, 0.80, 0.95)
 
@@ -150,11 +196,11 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	margin.add_child(vbox)
 
-	# Title
-	var title := Label.new()
-	title.text = "Manufacturing"
-	title.add_theme_font_size_override("font_size", 18)
-	vbox.add_child(title)
+	# Title (shows the active body; updated by set_planet)
+	_title_label = Label.new()
+	_title_label.text = "Manufacturing — Earth"
+	_title_label.add_theme_font_size_override("font_size", 18)
+	vbox.add_child(_title_label)
 
 	vbox.add_child(HSeparator.new())
 
@@ -172,14 +218,6 @@ func _build_ui() -> void:
 	_recipe_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	form.add_child(_recipe_menu)
 
-	_form_label(form, "Location:")
-	_planet_option = OptionButton.new()
-	_planet_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for p in PLANETS:
-		_planet_option.add_item(p)
-	_planet_option.item_selected.connect(func(_i): _update_mc_label())
-	form.add_child(_planet_option)
-
 	_form_label(form, "Rate:")
 	var rate_row := HBoxContainer.new()
 	rate_row.add_theme_constant_override("separation", 8)
@@ -192,9 +230,19 @@ func _build_ui() -> void:
 	_rate_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rate_slider.value_changed.connect(_on_rate_changed)
 	rate_row.add_child(_rate_slider)
-	_rate_label = Label.new()
+	# Editable readout: drag the slider for a coarse sweep, or type an exact multiplier.
+	_rate_label = LineEdit.new()
 	_rate_label.text = "1.00×"
-	_rate_label.custom_minimum_size = Vector2(38, 0)
+	_rate_label.custom_minimum_size = Vector2(92, 0)
+	_rate_label.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_rate_label.tooltip_text = "Exact multiplier — 1× = 1 g of product per day. Accepts k / M / G."
+	_rate_label.text_submitted.connect(func(txt: String) -> void:
+		var v: float = _parse_rate(txt)
+		if v > 0.0:
+			_rate_slider.value = _rate_to_log(v)   # emits value_changed → refreshes the preview
+		else:
+			_rate_label.text = _fmt_rate(_log_to_rate(_rate_slider.value))
+		_rate_label.release_focus())
 	rate_row.add_child(_rate_label)
 	form.add_child(rate_row)
 
@@ -323,6 +371,8 @@ func _update_io_preview() -> void:
 		_outputs_label.text = "—"
 		return
 	var rate: float = _log_to_rate(_rate_slider.value) if _rate_slider else 1.0
+	# Preview the NORMALISED flow so it matches what the job will actually move (1× = 1 g/day).
+	rate *= RecipeData.scale(recipe)
 	_inputs_label.text  = _fmt_flow(recipe.get("inputs",  {}), rate)
 	_outputs_label.text = _fmt_flow(recipe.get("outputs", {}), rate)
 
@@ -331,16 +381,23 @@ func _fmt_flow(flow: Dictionary, rate: float) -> String:
 		return "—"
 	var parts: Array = []
 	for k: String in flow:
-		var v: float = float(flow[k]) * rate
-		parts.append("%s %s/s" % [_fmt_amount(v), k])
+		parts.append(_fmt_flow_entry(k, float(flow[k]) * rate))
 	return "  ".join(parts)
 
-func _fmt_amount(v: float) -> String:
-	if v >= 1e9:  return "%.2fG" % (v * 1e-9)
-	if v >= 1e6:  return "%.2fM" % (v * 1e-6)
-	if v >= 1e3:  return "%.2fk" % (v * 1e-3)
-	if v >= 1.0:  return "%.2f"  % v
-	return "%.3f" % v
+## One input/output entry with its proper unit.  Recipe amounts are consumed and produced PER
+## GAME-DAY (see Game._process_production, which multiplies them by elapsed days — the same time
+## base as mine output and plant fuel), so every entry reads per day.  Compounds flow as mass;
+## the abstract resources carry their own units.
+func _fmt_flow_entry(k: String, v: float) -> String:
+	match k:
+		"energy":
+			return "%s energy/day" % Units.format_si(v, "J")
+		"science":
+			return "%s science/day" % Units.format_si(v, "FLOP")
+		"minerals":
+			return "%s minerals/day" % Units.format_si(v, "g")
+		_:
+			return "%s %s/day" % [Units.format_si(v, "g"), k]     # e.g. "1.5 kg Fe/day"
 
 func _selected_recipe() -> Dictionary:
 	if _selected_recipe_name == "":
@@ -359,13 +416,14 @@ func _rebuild_job_list() -> void:
 	_job_in_labels.clear()
 	for child in _job_list.get_children():
 		child.queue_free()
+	# Only this body's jobs (the panel is now per-planet/moon; no in-panel picker).
 	for job in _jobs:
-		_add_job_row(job)
+		if str(job.get("planet", "earth")).to_lower() == _active_planet:
+			_add_job_row(job)
 
 func _add_job_row(job: Dictionary) -> void:
 	var recipe  := _find_recipe(job.get("recipe", ""))
 	var rate:   float  = float(job.get("rate", 1.0))
-	var planet: String = (job.get("planet", "earth") as String).capitalize()
 	var job_id  := int(job.get("id", 0))
 
 	# ── Outer card ────────────────────────────────────────────────────────────
@@ -377,7 +435,7 @@ func _add_job_row(job: Dictionary) -> void:
 	header_row.add_theme_constant_override("separation", 6)
 
 	var name_lbl := Label.new()
-	name_lbl.text = "%s  @ %s" % [job.get("recipe", "?"), planet]
+	name_lbl.text = str(job.get("recipe", "?"))
 	name_lbl.add_theme_font_size_override("font_size", 12)
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_row.add_child(name_lbl)
@@ -417,27 +475,36 @@ func _add_job_row(job: Dictionary) -> void:
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider_row.add_child(slider)
 
-	var rate_lbl := Label.new()
+	var rate_lbl := LineEdit.new()
 	rate_lbl.text = _fmt_rate(rate)
 	rate_lbl.add_theme_font_size_override("font_size", 11)
-	rate_lbl.custom_minimum_size = Vector2(38, 0)
-	rate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rate_lbl.custom_minimum_size = Vector2(92, 0)
+	rate_lbl.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rate_lbl.tooltip_text = "Exact multiplier — 1× = 1 g of product per day. Accepts k / M / G."
+	rate_lbl.text_submitted.connect(func(txt: String) -> void:
+		var v: float = _parse_rate(txt)
+		if v > 0.0:
+			slider.value = _rate_to_log(v)   # emits value_changed → updates job + flow labels
+		else:
+			rate_lbl.text = _fmt_rate(_log_to_rate(slider.value))
+		rate_lbl.release_focus())
 	slider_row.add_child(rate_lbl)
 	_job_rate_labels[job_id] = rate_lbl
 
 	card.add_child(slider_row)
 
-	# Row 3: output / input flow (updated live when slider moves)
+	# Row 3: output / input flow (updated live when slider moves), in normalised units.
+	var norm: float = RecipeData.scale(recipe) if not recipe.is_empty() else 1.0
 	if not recipe.is_empty():
 		var out_lbl := Label.new()
-		out_lbl.text = "→ " + _fmt_flow(recipe.get("outputs", {}), rate)
+		out_lbl.text = "→ " + _fmt_flow(recipe.get("outputs", {}), rate * norm)
 		out_lbl.add_theme_font_size_override("font_size", 10)
 		out_lbl.modulate = Color(0.55, 0.85, 0.60)
 		card.add_child(out_lbl)
 		_job_out_labels[job_id] = out_lbl
 
 		var in_lbl := Label.new()
-		in_lbl.text = "← " + _fmt_flow(recipe.get("inputs", {}), rate)
+		in_lbl.text = "← " + _fmt_flow(recipe.get("inputs", {}), rate * norm)
 		in_lbl.add_theme_font_size_override("font_size", 10)
 		in_lbl.modulate = Color(0.80, 0.65, 0.55)
 		card.add_child(in_lbl)
@@ -455,9 +522,9 @@ func _add_job_row(job: Dictionary) -> void:
 		rate_lbl.text = _fmt_rate(actual_rate)
 		if not recipe.is_empty():
 			if _job_out_labels.has(job_id):
-				(_job_out_labels[job_id] as Label).text = "→ " + _fmt_flow(recipe.get("outputs", {}), actual_rate)
+				(_job_out_labels[job_id] as Label).text = "→ " + _fmt_flow(recipe.get("outputs", {}), actual_rate * norm)
 			if _job_in_labels.has(job_id):
-				(_job_in_labels[job_id] as Label).text = "← " + _fmt_flow(recipe.get("inputs", {}), actual_rate)
+				(_job_in_labels[job_id] as Label).text = "← " + _fmt_flow(recipe.get("inputs", {}), actual_rate * norm)
 		production_changed.emit(_jobs.duplicate(true))
 	)
 
@@ -487,12 +554,10 @@ func _on_add_pressed() -> void:
 	var recipe := _selected_recipe()
 	if recipe.is_empty():
 		return
-	var planet_idx := _planet_option.selected if _planet_option else 0
-	var planet: String = PLANETS[planet_idx].to_lower()
 	var job := {
 		"id":     _next_id,
 		"recipe": recipe["name"],
-		"planet": planet,
+		"planet": _active_planet,
 		"rate":   _log_to_rate(_rate_slider.value),
 	}
 	_next_id += 1
