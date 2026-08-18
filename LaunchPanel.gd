@@ -92,6 +92,13 @@ func _ready() -> void:
 
 	_calendar = CalendarPicker.new()
 	# A later start date shifts planet positions → different distance, time and cost.
+	# Colour every day by how well the transfer is phased on that date.
+	_calendar.set_quality_provider(func(off: float) -> float:
+		var o := _origin_name()
+		var t := _target_name()
+		if o == "" or t == "" or _is_local_orbit():
+			return 1.0
+		return LaunchPlanner.window_quality(o, t, _planet_angles, off))
 	_calendar.date_selected.connect(func(_y: int, _m: int, _d: int) -> void:
 		_update_duration(); _update_cost())
 	date_section.add_child(_calendar)
@@ -368,19 +375,31 @@ func _format_days(days: int) -> String:
 
 # ── Cost ─────────────────────────────────────────────────────────────────────
 
+## Grid energy this launch expends (see LaunchPlanner.energy_cost).
+func _launch_energy(idx: int) -> float:
+	var o := _origin_name()
+	var t := _target_name()
+	if o == "" or t == "":
+		return 0.0
+	return LaunchPlanner.energy_cost(idx, o, t, _planet_angles, _offset_days(),
+		float(_origin_mods().get("cost_mult", 1.0)))
+
 func _update_cost() -> void:
 	var idx := mission_option.selected
 	if idx < 0 or idx >= MissionData.MISSION_TYPES.size():
 		cost_value.text = "-"
 		return
 	var fuel: Dictionary = _selected_fuel()
-	var rockets: int  = _mission_rockets(idx)
-	var fuel_amt: int = _mission_fuel(idx)
-	var have_r: int = _origin_stock("Rocket")
-	var have_f: int = _origin_stock(str(fuel["id"]))
-	var txt: String = "%d Rocket (have %d)%s\n%d %s (have %d)%s" % [
-		rockets, have_r, ("" if have_r >= rockets else "  ✗"),
-		fuel_amt, str(fuel["name"]), have_f, ("" if have_f >= fuel_amt else "  ✗")]
+	var rockets: int    = _mission_rockets(idx)
+	var fuel_amt: float = _mission_fuel(idx)
+	var have_f: float   = float(_origin_stock(str(fuel["id"])))
+	# A launch consumes ONE thing: propellant.  The energy figure is shown because it is what
+	# sets that quantity — the vehicle flies again, so nothing else is expended.
+	var e_cost: float = _launch_energy(idx)
+	var txt: String = "%s %s (have %s)%s\n%d vehicle%s · %s of work to fly" % [
+		Units.format_si(fuel_amt, "g"), str(fuel["name"]), Units.format_si(have_f, "g"),
+		("" if have_f >= fuel_amt else "  ✗"),
+		rockets, ("" if rockets == 1 else "s"), Units.format_si(e_cost, "J")]
 	# Surface the launch-window quality so the player can see why fuel varies and
 	# can pick a better start date.
 	if not _is_local_orbit():
@@ -411,13 +430,14 @@ func _mission_rockets(mission_idx: int) -> int:
 	return LaunchPlanner.rockets(mission_idx, o, t, float(_origin_mods().get("cost", 1.0)))
 
 ## Fuel units the mission burns, via LaunchPlanner; consumed as the selected propellant.
-func _mission_fuel(mission_idx: int) -> int:
+## Grams of the selected propellant this launch burns — derived from its energy requirement.
+func _mission_fuel(mission_idx: int) -> float:
 	var o := _origin_name()
 	var t := _target_name()
 	if o == "" or t == "":
-		return 0
-	return LaunchPlanner.fuel(
-		mission_idx, o, t, _planet_angles, _offset_days(), float(_origin_mods().get("cost", 1.0)))
+		return 0.0
+	return LaunchPlanner.propellant_mass(mission_idx, o, t, _planet_angles, _offset_days(),
+		float(_origin_mods().get("cost", 1.0)), str(_selected_fuel().get("id", "")))
 
 ## Stock of a good (rockets or a fuel) at the currently-selected origin.
 func _origin_stock(key: String) -> int:
@@ -449,10 +469,10 @@ func _on_launch_pressed() -> void:
 		if target_name != "Sun" or _payload_batch(m_idx) <= 0:
 			return
 	var fuel: Dictionary = _selected_fuel()
-	var rockets: int  = _mission_rockets(m_idx)
-	var fuel_amt: int = _mission_fuel(m_idx)
-	# Don't fly if the origin can't supply the vehicle or its fuel.
-	if _origin_stock("Rocket") < rockets or _origin_stock(str(fuel["id"])) < fuel_amt:
+	var rockets: int    = _mission_rockets(m_idx)
+	var fuel_amt: float = _mission_fuel(m_idx)
+	# Propellant is the whole cost of a launch — nothing else is checked or spent.
+	if float(_origin_stock(str(fuel["id"]))) < fuel_amt:
 		return
 	var start_offset: int = 0
 	if _calendar:

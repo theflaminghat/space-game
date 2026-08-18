@@ -15,7 +15,17 @@ class_name ResearchTreeData
 #   • Energy is storage-capped (base 1e5, +1e6 per Storage Depot), so its cost is
 #     scaled to that pool: early nodes fit the base tank, advanced nodes require
 #     building dedicated storage first.
-const SCIENCE_COST_SCALE: float = 1.0e26
+## Science costs are paid down out of research output (see ResearchTree.tick), so this scale is
+## what sets how long a project takes.  A fresh 1945 civilisation produces ~2.3e26 FLOP/game-day.
+const SCIENCE_COST_SCALE: float = 1.0e27
+
+## Compounding surcharge per tier of depth, applied ON TOP of the hand-authored costs (which
+## already climb ~1.75× a tier).  The authored numbers alone make the last tier ~450× the first;
+## this lifts that to ~9 000×, so the far end of the tree is a civilisational undertaking rather
+## than a slightly longer wait.  Depth is read off the laid-out position, which the prerequisite
+## push above has already finalised, so a node that got shoved right pays for the depth it
+## actually sits at.
+const TIER_COST_GROWTH: float = 1.35
 const ENERGY_COST_SCALE:  float = 1.0e3
 
 # ── Cost philosophy ─────────────────────────────────────────────────────────
@@ -101,7 +111,7 @@ static func build() -> Array:
 		"Transistors",
 		"Solid-state electronics enabling modern digital systems.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -111,7 +121,7 @@ static func build() -> Array:
 		"Numerical Methods",
 		"Computational mathematics for simulation, approximation, and engineering analysis.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -121,7 +131,7 @@ static func build() -> Array:
 		"Nuclear Power",
 		"Controlled fission for industrial-scale power generation.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -131,7 +141,7 @@ static func build() -> Array:
 		"Metallurgy",
 		"Industrial knowledge of metals, alloys, and structural engineering.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -141,7 +151,7 @@ static func build() -> Array:
 		"Industrialization",
 		"Mass production through powered tools, standardization, and mechanized workflows.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -151,7 +161,7 @@ static func build() -> Array:
 		"Early Rocketry",
 		"Liquid-fuel launch systems capable of reaching space.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -161,7 +171,7 @@ static func build() -> Array:
 		"Modern Medicine",
 		"Evidence-based medicine, sterile procedures, antibiotics, vaccines, and imaging.",
 		[],
-		{"science": 0, "energy": 0},
+		{"science": 10, "energy": 3},
 		5.0,
 		lane_pos(0, BIO, X_SPACING, Y_SPACING)
 	))
@@ -487,18 +497,6 @@ static func build() -> Array:
 		lane_pos(4, ADDITIVE, X_SPACING, Y_SPACING)
 	))
 
-	# MODIFIED — removed control_theory prereq (covered transitively via
-	# industrial_robotics → mass_production → industrial_mechanization chain)
-	nodes.append(make.call(
-		"autonomous_industrial_control",
-		"Industrial AI",
-		"Software that plans and runs industry on its own — adaptive scheduling, fault handling, and standing-order execution. Unlocks the Automation panel, where you delegate building and launches to be carried out without you.",
-		["automated_logistics", "networked_computing"],
-		{"science": 155, "energy": 45},
-		15.0,
-		lane_pos(4, INDUSTRY, X_SPACING, Y_SPACING)
-	))
-
 	nodes.append(make.call(
 		"space_habitation_systems",
 		"Space Habitation",
@@ -566,7 +564,7 @@ static func build() -> Array:
 		"autonomous_factories",
 		"Autonomous Factories",
 		"Largely self-coordinating production systems with minimal human intervention.",
-		["autonomous_industrial_control", "high_performance_computing"],
+		["automated_logistics", "networked_computing", "high_performance_computing"],
 		{"science": 215, "energy": 72},
 		17.0,
 		lane_pos(5, INDUSTRY, X_SPACING, Y_SPACING)
@@ -1172,11 +1170,14 @@ static func build() -> Array:
 					n.position.x = min_x
 					any_changed = true
 
-	# Lift the hand-authored relative costs onto production-matched magnitudes.
+	# Lift the hand-authored relative costs onto production-matched magnitudes, with a
+	# compounding surcharge for how deep in the tree the node sits.
 	for n: ResearchNode in nodes:
+		var tier: float = maxf(0.0, roundf(n.position.x / X_SPACING))
+		var depth_mult: float = pow(TIER_COST_GROWTH, tier)
 		if n.cost.has("science"):
-			n.cost["science"] = float(n.cost["science"]) * SCIENCE_COST_SCALE
+			n.cost["science"] = float(n.cost["science"]) * SCIENCE_COST_SCALE * depth_mult
 		if n.cost.has("energy"):
-			n.cost["energy"] = float(n.cost["energy"]) * ENERGY_COST_SCALE
+			n.cost["energy"] = float(n.cost["energy"]) * ENERGY_COST_SCALE * depth_mult
 
 	return nodes

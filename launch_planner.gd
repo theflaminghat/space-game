@@ -108,10 +108,34 @@ static func rockets(mission_idx: int, origin: String, target: String, cost_mult:
 	var base: float = float(MissionData.MISSION_TYPES[mission_idx].get("rockets", 1))
 	return maxi(1, int(ceil(base * difficulty_factor(origin, target) * cost_mult)))
 
-## Fuel units a mission burns: base × Δv difficulty × launch-window factor × discount.
-static func fuel(mission_idx: int, origin: String, target: String,
-		angles: Dictionary, offset_days: float, cost_mult: float) -> int:
-	var base: float = float(MissionData.MISSION_TYPES[mission_idx].get("fuel", 0))
-	var f: float = base * difficulty_factor(origin, target) \
-		* path_energy_factor(origin, target, angles, offset_days) * cost_mult
-	return maxi(0, int(ceil(f)))
+## Vehicle mass a mission consumes, in grams of "Rocket" — the count of launch vehicles times
+## what one really weighs.  This is what gets drawn from the origin world's inventory.
+static func rocket_mass(mission_idx: int, origin: String, target: String, cost_mult: float) -> float:
+	return float(rockets(mission_idx, origin, target, cost_mult)) * MissionData.ROCKET_UNIT_MASS_G
+
+## Energy a launch expends: the vehicle mass it has to accelerate, at real specific launch
+## energy, scaled by how badly the departure window is phased.  Launching into a poor alignment
+## costs propellant AND grid energy — the same penalty the calendar colours warn about.
+static func energy_cost(mission_idx: int, origin: String, target: String,
+		angles: Dictionary, offset_days: float, cost_mult: float) -> float:
+	return rocket_mass(mission_idx, origin, target, cost_mult) 		* MissionData.LAUNCH_ENERGY_PER_GRAM 		* path_energy_factor(origin, target, angles, offset_days)
+
+## Launch-window quality, 0 (worst phasing) to 1 (ideal Hohmann alignment).  Drives the
+## calendar's red-to-green day colouring, and is the inverse of the energy penalty above.
+static func window_quality(origin: String, target: String,
+		angles: Dictionary, offset_days: float) -> float:
+	var f: float = path_energy_factor(origin, target, angles, offset_days)
+	if PHASE_ENERGY_WEIGHT <= 0.0:
+		return 1.0
+	return clampf(1.0 - (f - 1.0) / PHASE_ENERGY_WEIGHT, 0.0, 1.0)
+
+## Propellant a mission burns, in GRAMS — the only thing a launch consumes.  It is derived, not
+## authored: take the trajectory's energy requirement and divide by the usable energy a gram of
+## the chosen propellant delivers.  Everything that makes a launch harder — Δv difficulty, a
+## badly phased departure window — raises that energy, and the propellant mass follows exactly.
+static func propellant_mass(mission_idx: int, origin: String, target: String,
+		angles: Dictionary, offset_days: float, cost_mult: float, fuel_id: String) -> float:
+	var density: float = MissionData.fuel_energy_density(fuel_id)
+	if density <= 0.0:
+		return 0.0
+	return energy_cost(mission_idx, origin, target, angles, offset_days, cost_mult) / density

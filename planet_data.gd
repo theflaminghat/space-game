@@ -288,7 +288,8 @@ const PLANETS: Dictionary = {
 				"UO2":   7.40e19,  # uraninite — fissile U-238 ore (~2.7 ppm crust)
 				"ThO2":  2.62e20,  # thorianite — fertile Th-232 ore (~9.6 ppm crust)
 				"Coal":    1.50e22,  # organic carbon in sedimentary rock (~3 ppm crust)
-				"Oil":     3.00e18,  # petroleum + natural gas hydrocarbon inventory
+				"Oil":     3.00e18,  # petroleum (liquid hydrocarbons)
+				"CH4":     2.00e18,  # natural gas — conventional + shale methane reserves
 				"CuFeS2":  5.90e21,  # chalcopyrite — primary copper ore (~68 ppm Cu)
 				"N2":      6.00e20,  # fixed nitrogen in micas/feldspars (~20 ppm crust)
 			},
@@ -410,6 +411,7 @@ const PLANETS: Dictionary = {
 			"atmosphere": {
 				"H2":  1.39e30,  # molecular hydrogen (dominant; metallic at depth)
 				"He":  4.56e29,  # helium (depleted in outer layers — rains inward)
+				"He3": 4.56e24,  # helium-3 (~1e-5 of the helium) — fusion fuel
 				"H2O": 1.64e28,  # water (deep clouds ~5 bar; icy planetesimals)
 				"CH4": 1.29e28,  # methane (all carbon)
 				"H2S": 3.23e27,  # hydrogen sulfide
@@ -457,6 +459,7 @@ const PLANETS: Dictionary = {
 			"atmosphere": {
 				"H2":  4.28e29,  # molecular hydrogen (dominant)
 				"He":  1.22e29,  # helium
+				"He3": 1.22e24,  # helium-3 (~1e-5 of the helium) — fusion fuel
 				"H2O": 6.03e27,  # water (deep clouds)
 				"CH4": 5.39e27,  # methane
 				"H2S": 1.33e27,  # hydrogen sulfide
@@ -516,6 +519,7 @@ const PLANETS: Dictionary = {
 			"atmosphere": {
 				"H2":  4.61e27,  # molecular hydrogen
 				"He":  4.95e27,  # helium
+				"He3": 4.95e22,  # helium-3 (~1e-5 of the helium) — fusion fuel
 				"H2S": 1.30e27,  # hydrogen sulfide (H₂S ice clouds)
 				"Ne":  8.68e26,  # neon
 				"CO":  2.60e24,  # carbon monoxide (external infall + photochemistry)
@@ -569,6 +573,7 @@ const PLANETS: Dictionary = {
 			"atmosphere": {
 				"H2":  4.68e27,  # molecular hydrogen
 				"He":  5.63e27,  # helium
+				"He3": 5.63e22,  # helium-3 (~1e-5 of the helium) — fusion fuel
 				"H2S": 1.64e27,  # hydrogen sulfide (H₂S ice clouds)
 				"Ne":  1.02e27,  # neon
 				"Ar":  5.12e26,  # argon

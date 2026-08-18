@@ -21,6 +21,17 @@ const TREE_BOTTOM_PAD: float = 40.0
 const INFO_PANEL_W: float = 260.0
 const INFO_PANEL_MARGIN_R: float = 48.0   # inset from the right edge
 const INFO_PANEL_GAP: float = 64
+## Panel stylebox padding + scrollbar, subtracted to get the width text actually wraps at.
+const INFO_PANEL_PAD: float = 40.0
+## Vertical room kept clear below the scrolling text for the progress bar and buttons.
+const INFO_PANEL_CONTROLS_H: float = 96.0
+## Gap between the info panel's stacked blocks.  Zero — the blocks are already distinguished by
+## colour and their own headings, so any separation on top of that just spreads the readout out.
+const INFO_LINE_GAP: int = 0
+## Leading WITHIN a multi-line label (the "Enables …" lists are one label each).  A font carries
+## its own leading above and below the glyphs, and line_spacing stacks on top of that — zero
+## still leaves a visible gap on a bullet list, so this goes negative to pull the lines together.
+const INFO_TEXT_LEADING: int = -4
 
 const LINE_STUB: float = 18.0
 const LINE_WIDTH: float = 2.0
@@ -30,11 +41,11 @@ const PAN_STEP: int = 80
 var _scroll: ScrollContainer
 var _tree_container: Control
 var _conn_layer: Control
-var _tooltip: PanelContainer
-var _tooltip_title: Label
-var _tooltip_desc: Label
-var _tooltip_cost: Label
 var _info_panel: PanelContainer
+## Scrolling text area inside the info panel, and the column it holds.  The scroll is sized to
+## its content (see _clamp_info_panel) so the panel stays only as tall as it needs to be.
+var _info_scroll: ScrollContainer
+var _info_text_box: VBoxContainer
 var _info_title: Label
 var _info_desc: Label
 var _info_prereqs: Label
@@ -48,17 +59,11 @@ var _pause_btn: Button   # hold/resume the active research (only shown for the a
 ## Always-visible science total + rate banner (moved here from the top HUD bar).
 var _science_label: Label
 
-var _tooltip_boosts: Label
 
 var _node_rects: Dictionary = {}
 var _node_controls: Dictionary = {}
 var _queue_labels: Dictionary = {}
 var _selected_id: String = ""
-var _tooltip_timer: Timer
-var _hovered_node_id: String = ""
-var _hovered_button: Button = null
-var _tooltip_ready: bool = false
-var _tooltip_margin: Vector2 = Vector2(16, 16)
 
 var _drag_panning: bool = false
 var _drag_last_mouse_pos: Vector2 = Vector2.ZERO
@@ -166,35 +171,12 @@ func _build_scene() -> void:
 	_tree_container.custom_minimum_size = Vector2(1200, 700)
 	_scroll.add_child(_tree_container)
 
-	_tooltip = PanelContainer.new()
-	_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tooltip.z_index = 20
-	_tooltip.visible = false
-	_tooltip.position = Vector2(-10000, -10000)
-	add_child(_tooltip)
-
-	var tt_box: VBoxContainer = VBoxContainer.new()
-	tt_box.add_theme_constant_override("separation", 4)
-	_tooltip.add_child(tt_box)
-
-	_tooltip_title = _make_label("", true)
-	_tooltip_desc = _make_label("", false, true)
-	_tooltip_cost = _make_label("")
-	_tooltip_boosts = _make_label("")
-	_tooltip_boosts.add_theme_color_override("font_color", Color(1.0, 0.82, 0.22))
-	tt_box.add_child(_tooltip_title)
-	tt_box.add_child(_tooltip_desc)
-	tt_box.add_child(_tooltip_cost)
-	tt_box.add_child(_tooltip_boosts)
-
-	_tooltip_timer = Timer.new()
-	_tooltip_timer.wait_time = 0.08
-	_tooltip_timer.one_shot = true
-	_tooltip_timer.timeout.connect(_try_hide_tooltip)
-	add_child(_tooltip_timer)
 
 	# Info panel floats on the right (z_index 10) over the full-width tree, inset
 	# slightly from the edge by INFO_PANEL_MARGIN_R.
+	# The panel hugs its content at the top right.  Width is pinned and every label wraps, so no
+	# amount of text can push it wider; height follows the text but is capped by _clamp_info_panel
+	# so a node that enables a dozen recipes scrolls internally instead of running off the bottom.
 	_info_panel = PanelContainer.new()
 	_info_panel.custom_minimum_size = Vector2(INFO_PANEL_W, 0)
 	_info_panel.anchor_left = 1.0
@@ -206,10 +188,22 @@ func _build_scene() -> void:
 	_info_panel.offset_top = 8.0
 	_info_panel.z_index = 10
 	add_child(_info_panel)
+	resized.connect(_clamp_info_panel)
 
+	# Outer column: scrolling text on top, controls pinned underneath so they never scroll away.
 	var info_box: VBoxContainer = VBoxContainer.new()
-	info_box.add_theme_constant_override("separation", 8)
+	info_box.add_theme_constant_override("separation", INFO_LINE_GAP)
 	_info_panel.add_child(info_box)
+
+	_info_scroll = ScrollContainer.new()
+	_info_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_info_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_info_text_box = VBoxContainer.new()
+	_info_text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_info_text_box.add_theme_constant_override("separation", INFO_LINE_GAP)
+	_info_scroll.add_child(_info_text_box)
+	var text_box: VBoxContainer = _info_text_box
+	var info_scroll: ScrollContainer = _info_scroll
 
 	_info_title = _make_label("", true)
 	_info_desc = _make_label("", false, true)
@@ -242,12 +236,24 @@ func _build_scene() -> void:
 	_info_prereqs.add_theme_color_override("font_color", Color(0.95, 0.80, 0.55))
 	_info_prereqs.add_theme_font_size_override("font_size", 12)
 
-	info_box.add_child(_info_title)
-	info_box.add_child(_info_desc)
-	info_box.add_child(_info_prereqs)
-	info_box.add_child(_info_unlocks)
-	info_box.add_child(_info_cost)
-	info_box.add_child(_info_boosts)
+	text_box.add_child(_info_title)
+	text_box.add_child(_info_desc)
+	text_box.add_child(_info_prereqs)
+	text_box.add_child(_info_unlocks)
+	text_box.add_child(_info_cost)
+	text_box.add_child(_info_boosts)
+	info_box.add_child(info_scroll)
+	# Every label wraps, so none of them can force the panel wider than INFO_PANEL_W.  Cost and
+	# boost lines break ARBITRARILY because a single SI figure ("1.50×10^7 QFLOP") is one
+	# unbreakable word, and word-wrapping would let it set the panel's minimum width.
+	for l: Label in [_info_title, _info_desc, _info_prereqs, _info_unlocks]:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	for l2: Label in [_info_cost, _info_boosts]:
+		l2.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	# Labels ship with leading between lines, which turns a bullet list into a widely-spaced
+	# column.  Pull it in so a list reads as a list.
+	for l3: Label in [_info_title, _info_desc, _info_prereqs, _info_unlocks, _info_cost, _info_boosts]:
+		l3.add_theme_constant_override("line_spacing", INFO_TEXT_LEADING)
 	info_box.add_child(_progress_bar)
 	info_box.add_child(_research_btn)
 	info_box.add_child(_pause_btn)
@@ -280,6 +286,31 @@ func set_science(total: float, rate: float) -> void:
 		_science_label.text = "Science: %s (+%s)" % [
 			Units.format_si_verbose(total, "FLOP"),
 			Units.format_si_verbose(rate, "FLOP/s")]
+
+
+## Keep the panel inside the view without letting it become a full-height column.  Width is
+## right-anchored and fixed (shrunk only on a window narrower than the panel itself); height
+## follows the text, capped at what is left below the panel's top edge — past that the text
+## area scrolls rather than the panel growing off the bottom.
+func _clamp_info_panel() -> void:
+	if _info_panel == null or _info_scroll == null:
+		return
+	var avail_w: float = size.x - INFO_PANEL_MARGIN_R * 2.0
+	var w: float = clampf(INFO_PANEL_W, 120.0, maxf(120.0, avail_w))
+	_info_panel.custom_minimum_size = Vector2(w, 0)
+	_info_panel.offset_left = -(w + INFO_PANEL_MARGIN_R)
+	_info_panel.offset_right = -INFO_PANEL_MARGIN_R
+	# An autowrapping Label reports its minimum height at its minimum WIDTH — for ARBITRARY wrap
+	# that is about one character, so it claims hundreds of lines and every panel would measure
+	# as gigantic.  Pinning each label to the real inner width makes the wrap (and therefore the
+	# reported height) match what is actually drawn.
+	var inner: float = w - INFO_PANEL_PAD
+	for l: Label in [_info_title, _info_desc, _info_prereqs, _info_unlocks, _info_cost, _info_boosts]:
+		l.custom_minimum_size.x = inner
+	# Leave room for the progress bar and buttons that sit below the scrolling text.
+	var room: float = size.y - _info_panel.offset_top - 8.0 - INFO_PANEL_CONTROLS_H
+	var wanted: float = _info_text_box.get_combined_minimum_size().y
+	_info_scroll.custom_minimum_size.y = maxf(0.0, minf(wanted, maxf(80.0, room)))
 
 
 func _make_label(txt: String, bold: bool = false, do_wrap: bool = false) -> Label:
@@ -366,8 +397,6 @@ func _create_node_button(node: ResearchNode, pos: Vector2) -> void:
 	_style_button(btn, node)
 
 	btn.pressed.connect(_on_node_pressed.bind(node.id))
-	btn.mouse_entered.connect(_on_node_hovered.bind(node.id, btn))
-	btn.mouse_exited.connect(_on_node_unhovered.bind(node.id, btn))
 
 	# Queue-position badge: small label anchored to top-right of the button
 	var queue_label := Label.new()
@@ -424,9 +453,13 @@ func _style_button(btn: Button, node: ResearchNode) -> void:
 			btn.modulate = Color.WHITE
 
 	btn.add_theme_stylebox_override("normal", s)
-	btn.add_theme_stylebox_override("hover", s)
-	btn.add_theme_stylebox_override("pressed", s)
 	btn.add_theme_stylebox_override("focus", s)
+	# Hover keeps the state colour but outlines the node in white — the same cue the galaxy map
+	# uses for its tiles.  These were all pointed at the one stylebox, so hovering did nothing.
+	var hovered: StyleBoxFlat = s.duplicate()
+	hovered.border_color = Color.WHITE
+	btn.add_theme_stylebox_override("hover", hovered)
+	btn.add_theme_stylebox_override("pressed", hovered)
 
 
 func _draw_connections() -> void:
@@ -505,6 +538,9 @@ func _on_node_pressed(node_id: String) -> void:
 	_info_cost.text = _format_cost(node.cost)
 	_info_boosts.text = _format_boosts(node.boosts)
 	_info_boosts.visible = not node.boosts.is_empty()
+	# Deferred so the labels have recomputed their minimum sizes from the new text before the
+	# panel measures them — calling it inline would size to the PREVIOUS node's content.
+	call_deferred("_clamp_info_panel")
 	_progress_bar.value = node.progress * 100.0
 	_progress_bar.visible = node.state == ResearchNode.State.RESEARCHING
 
@@ -515,8 +551,13 @@ func _on_node_pressed(node_id: String) -> void:
 
 	match node.state:
 		ResearchNode.State.LOCKED:
-			_research_btn.text = "Locked"
-			_research_btn.disabled = true
+			# Locked but plannable: everything it needs is already queued ahead of it.
+			if ResearchTree.can_queue(node_id):
+				_research_btn.text = "Add to Queue"
+				_research_btn.disabled = false
+			else:
+				_research_btn.text = "Locked"
+				_research_btn.disabled = true
 		ResearchNode.State.AVAILABLE:
 			_research_btn.text = "Add to Queue"
 			_research_btn.disabled = false
@@ -539,45 +580,7 @@ func _on_node_pressed(node_id: String) -> void:
 	_info_panel.show()
 
 
-func _on_node_hovered(node_id: String, btn: Button) -> void:
-	var node: ResearchNode = ResearchTree.get_research_node(node_id)
-	if node == null:
-		return
 
-	_hovered_node_id = node_id
-	_hovered_button = btn
-	_tooltip_timer.stop()
-	_tooltip_ready = false
-
-	_tooltip_title.text = node.display_name
-	_tooltip_desc.text = node.description
-	_tooltip_cost.text = _format_cost(node.cost)
-	_tooltip_boosts.text = _format_boosts(node.boosts)
-	_tooltip_boosts.visible = not node.boosts.is_empty()
-
-	_tooltip.position = Vector2(-10000, -10000)
-	_tooltip.visible = true
-
-	call_deferred("_finalize_tooltip_show", node_id, btn)
-
-
-func _finalize_tooltip_show(node_id: String, btn: Button) -> void:
-	await get_tree().process_frame
-
-	if _hovered_node_id != node_id:
-		return
-	if btn == null or not is_instance_valid(btn):
-		return
-
-	var min_size: Vector2 = _tooltip.get_combined_minimum_size()
-	_tooltip.size = min_size
-	_tooltip_ready = true
-	_update_tooltip_position()
-
-
-func _on_node_unhovered(node_id: String, btn: Button) -> void:
-	if _hovered_node_id == node_id and _hovered_button == btn:
-		_tooltip_timer.start()
 
 
 func _on_research_button_pressed() -> void:
@@ -596,7 +599,7 @@ func _on_research_button_pressed() -> void:
 		ResearchTree.cancel_research()
 	elif in_queue:
 		ResearchTree.remove_from_queue(_selected_id)
-	elif node.state == ResearchNode.State.AVAILABLE:
+	elif node.state == ResearchNode.State.AVAILABLE or ResearchTree.can_queue(_selected_id):
 		ResearchTree.start_research(_selected_id)
 
 	_on_node_pressed(_selected_id)
@@ -652,49 +655,6 @@ func _update_progress_bar() -> void:
 		_conn_layer.queue_redraw()
 
 
-func _update_tooltip_position() -> void:
-	if not _tooltip.visible or not _tooltip_ready:
-		return
-	if _hovered_button == null or not is_instance_valid(_hovered_button):
-		return
-
-	var mouse_pos: Vector2 = get_local_mouse_position()
-	var tip_pos: Vector2 = mouse_pos + _tooltip_margin
-	var tooltip_size: Vector2 = _tooltip.size
-
-	var right_limit: float = size.x - tooltip_size.x - 8.0
-	if _info_panel.visible:
-		# Panel is right-anchored — keep the tooltip to the left of it.
-		var info_left: float = _info_panel.get_global_rect().position.x - global_position.x
-		right_limit = min(right_limit, info_left - tooltip_size.x - 8.0)
-
-	tip_pos.x = clamp(tip_pos.x, 4.0, max(4.0, right_limit))
-	tip_pos.y = clamp(tip_pos.y, 4.0, max(4.0, size.y - tooltip_size.y - 4.0))
-
-	_tooltip.position = tip_pos
-
-
-func _try_hide_tooltip() -> void:
-	var mouse_pos: Vector2 = get_local_mouse_position()
-	var over_tooltip: bool = false
-
-	if _tooltip.visible and _tooltip_ready:
-		over_tooltip = Rect2(_tooltip.position, _tooltip.size).has_point(mouse_pos)
-
-	var over_hovered_button: bool = false
-	if _hovered_button != null and is_instance_valid(_hovered_button):
-		var local_pos: Vector2 = _hovered_button.global_position - global_position
-		var rect: Rect2 = Rect2(local_pos, _hovered_button.size)
-		over_hovered_button = rect.has_point(mouse_pos)
-
-	if over_tooltip or over_hovered_button:
-		return
-
-	_hovered_node_id = ""
-	_hovered_button = null
-	_tooltip_ready = false
-	_tooltip.visible = false
-	_tooltip.position = Vector2(-10000, -10000)
 
 
 func _update_queue_labels() -> void:
@@ -749,6 +709,9 @@ func _format_prerequisites(node: ResearchNode) -> String:
 		lines.append("  %s %s" % ["✓" if done else "•", label])
 	return "\n".join(lines)
 
+## Everything this node opens up: follow-on research, buildings, the higher LEVELS of every
+## building, and manufacturing recipes.  A node's value is mostly in what it enables, so the
+## panel lists all of it rather than only the research branch.
 func _format_unlocks(node: ResearchNode) -> String:
 	var lines: Array[String] = []
 
@@ -765,17 +728,35 @@ func _format_unlocks(node: ResearchNode) -> String:
 	var buildings: Array[String] = []
 	for bname_v: Variant in BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS.keys():
 		var bname: String = bname_v as String
-		var req: String = BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS[bname] as String
-		if req == node.id:
+		if str(BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS[bname]) == node.id:
 			buildings.append(bname)
+	buildings.sort()
 	if not buildings.is_empty():
-		if not lines.is_empty():
-			lines.append("")
 		lines.append("Enables buildings:")
 		for b: String in buildings:
 			lines.append("  • " + b)
 
-	return "\n".join(lines)
+	# A whole tier of every building — one node lifts the entire industrial base a level.
+	var level: int = BuildingData.LEVEL_RESEARCH.find(node.id)
+	if level > 0:
+		lines.append("Enables building level %d:" % (level + 1))
+		lines.append("  • every structure, at %.1f× output for %.1f× cost"
+			% [pow(BuildingData.LEVEL_OUTPUT_MULT, float(level)),
+				pow(BuildingData.LEVEL_COST_MULT, float(level))])
+
+	# Manufacturing recipes gated behind this node
+	var recipes: Array[String] = []
+	for r: Dictionary in RecipeData.RECIPES:
+		if str(r.get("requires", "")) == node.id:
+			recipes.append(str(r["name"]))
+	recipes.sort()
+	if not recipes.is_empty():
+		lines.append("Enables recipes:")
+		for r_name: String in recipes:
+			lines.append("  • " + r_name)
+
+	return "
+".join(lines)
 
 
 func _format_cost(cost: Dictionary) -> String:

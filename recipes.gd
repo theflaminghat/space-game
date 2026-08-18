@@ -67,7 +67,7 @@ const RECIPES: Array = [
 		"name":        "Silicon Refining",
 		"category":    "metals",
 		"description": "Carbothermic reduction of quartz sand to metallurgical-grade silicon.",
-		"requires":    "metallurgy",
+		"requires":    "",
 		"inputs":  {"SiO2": 8.0, "Coal": 4.0, "energy": 120.0},
 		"outputs": {"Si": 4.0},
 	},
@@ -182,7 +182,7 @@ const RECIPES: Array = [
 		"name":        "Copper Smelting",
 		"category":    "metals",
 		"description": "Roast and smelt chalcopyrite ore through matte smelting and converting to produce blister copper.",
-		"requires":    "metallurgy",
+		"requires":    "",
 		"inputs":  {"CuFeS2": 5.0, "energy": 90.0},
 		"outputs": {"Cu": 2.0},
 	},
@@ -232,9 +232,9 @@ const RECIPES: Array = [
 	{
 		"name":        "Plastic Synthesis",
 		"category":    "materials",
-		"description": "Crack and polymerise petroleum fractions into bulk thermoplastic resin.",
+		"description": "Steam-crack and polymerise naphtha into bulk thermoplastic resin.",
 		"requires":    "industrial_mechanization",
-		"inputs":  {"Oil": 6.0, "energy": 60.0},
+		"inputs":  {"Naphtha": 6.0, "energy": 60.0},
 		"outputs": {"Plastic": 5.0},
 	},
 	# Graphene: high-temperature chemical-vapour deposition of single-layer carbon.
@@ -261,7 +261,7 @@ const RECIPES: Array = [
 		"name":        "Steel Making",
 		"category":    "materials",
 		"description": "Alloy molten iron with carbon from coal in a basic-oxygen furnace to produce structural steel.",
-		"requires":    "metallurgy",
+		"requires":    "",
 		"inputs":  {"Fe": 8.0, "Coal": 2.0, "energy": 100.0},
 		"outputs": {"Steel": 7.0},
 	},
@@ -270,7 +270,7 @@ const RECIPES: Array = [
 		"name":        "Ceramic Sintering",
 		"category":    "materials",
 		"description": "Sinter alumina and silicon carbide into hard, heat- and radiation-resistant technical ceramics.",
-		"requires":    "advanced_alloys",
+		"requires":    "",
 		"inputs":  {"Al2O3": 6.0, "Si": 3.0, "energy": 200.0},
 		"outputs": {"Ceramic": 5.0},
 	},
@@ -396,36 +396,35 @@ const RECIPES: Array = [
 	# ── Fuels ─────────────────────────────────────────────────────────────────────
 
 	{
-		"name":        "Coal Combustion",
-		"category":    "fuels",
-		"description": "Combustion of coal to generate thermal energy.",
-		"requires":    "",
-		"inputs":  {"Coal": 10.0},
-		"outputs": {"energy": 80.0},
-	},
-	{
 		"name":        "Oil Refining",
 		"category":    "fuels",
-		"description": "Fractional distillation and combustion of crude oil.",
-		"requires":    "industrial_mechanization",
-		"inputs":  {"Oil": 8.0},
-		"outputs": {"energy": 120.0},
+		"description": "Fractional distillation of crude oil. The still splits the barrel into heavy fuel oil for power generation, naphtha for the petrochemical industry, and kerosene for aviation and rocketry. Nothing is burned here — this is where crude becomes usable.",
+		"requires":    "",
+		# Mass balance mirrors a real barrel: ~45 % heavy fuel oil, ~35 % naphtha, ~10 % kerosene,
+		# with the last ~10 % leaving as refinery gas, coke and residue.
+		"inputs":  {"Oil": 10.0, "energy": 45.0},
+		"outputs": {"FuelOil": 4.5, "Naphtha": 3.5, "Kerosene": 1.0},
 	},
 	{
 		"name":        "Uranium Enrichment",
 		"category":    "fuels",
-		"description": "Gas-centrifuge enrichment of uranium hexafluoride to reactor-grade U-235.",
+		"description": "Gas-centrifuge enrichment of uranium hexafluoride to reactor-grade fuel. Natural uranium is only 0.72 % U-235; a cascade concentrates it to about 4 %, which is what a reactor core actually runs on. No power is generated here — this is what a Nuclear Plant burns.",
 		"requires":    "nuclear_power",
-		"inputs":  {"UO2": 5.0, "energy": 200.0},
-		"outputs": {"energy": 2000.0},
+		# ~8 kg of natural uranium per kg of 4 % enriched product (0.25 % tails), and the
+		# cascade is enormously energy-hungry — far more per gram than any other refining step.
+		"inputs":  {"UO2": 8.0, "energy": 900.0},
+		"outputs": {"EnrichedU": 1.0},
 	},
 	{
 		"name":        "Thorium Activation",
 		"category":    "fuels",
-		"description": "Neutron capture converts Th-232 to fissile U-233 in a molten-salt blanket.",
+		"description": "Neutron capture in a molten-salt blanket converts fertile Th-232 into fissile U-233, which is chemically separated and loaded as reactor fuel. Thorium is 3.5× more abundant than uranium and needs no isotope separation, so this route yields far more fuel per gram of ore for a fraction of the energy — but only once the reactor technology exists to breed it.",
 		"requires":    "advanced_reactor_systems",
-		"inputs":  {"ThO2": 4.0, "energy": 300.0},
-		"outputs": {"energy": 3000.0},
+		# 6:1 feed after breeding and reprocessing losses, at ~250 J per gram of product —
+		# well under the 900 J/g the uranium centrifuge cascade demands, because no isotope
+		# separation is involved.  The bred U-233 is uranium, so it fuels the same reactors.
+		"inputs":  {"ThO2": 6.0, "energy": 1500.0},
+		"outputs": {"EnrichedU": 1.0},
 	},
 	# Rocket propellant: refine kerosene from oil and combine with liquid oxygen.
 	{
@@ -433,18 +432,12 @@ const RECIPES: Array = [
 		"category":    "fuels",
 		"description": "Refine kerosene from crude oil and pair it with liquid oxygen to produce storable launch propellant.",
 		"requires":    "early_rocketry",
-		"inputs":  {"Oil": 5.0, "O2": 8.0, "energy": 200.0},
+		"inputs":  {"Kerosene": 5.0, "O2": 8.0, "energy": 200.0},
 		"outputs": {"Propellant": 6.0},
 	},
-	# Fusion fuel: distil deuterium from heavy water for fusion reactors.
-	{
-		"name":        "Deuterium Extraction",
-		"category":    "fuels",
-		"description": "Distil deuterium from heavy water by isotopic separation to fuel fusion reactors.",
-		"requires":    "fusion_engineering",
-		"inputs":  {"H2O": 20.0, "energy": 800.0},
-		"outputs": {"FusionFuel": 1.0},
-	},
+	# NOTE: there is no recipe for fusion fuel.  Helium-3 cannot be manufactured — it is mined,
+	# from lunar regolith where the solar wind implanted it, or condensed out of a gas giant's
+	# envelope.  Reaching it is the point; that is what fusion propulsion actually costs.
 
 	# ── Biologics ────────────────────────────────────────────────────────────────
 

@@ -66,6 +66,11 @@ func _process(delta: float) -> void:
 			rotation_degrees = Vector3.ZERO
 			set_to_zero = true
 
+		# WASD is shared with the galaxy map's panning, and Input.is_action_pressed polls raw
+		# device state — a panel can't consume it.  So the camera simply stands down whenever a
+		# full-area panel is covering the view.
+		if _ui_panel_open():
+			return
 		var step: float = ROT_SPEED * delta
 		if Input.is_action_pressed("right"):
 			rotation_degrees.y += step
@@ -75,3 +80,18 @@ func _process(delta: float) -> void:
 			rotation_degrees.x -= step
 		elif Input.is_action_pressed("down") and rotation_degrees.x < 90:
 			rotation_degrees.x += step
+
+
+## True while one of the sidebar's full-area panels is open, so keyboard input belongs to it
+## rather than to the camera behind it.
+func _ui_panel_open() -> bool:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return false
+	var sidebar := scene.get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2")
+	if sidebar == null:
+		return false
+	for child in sidebar.get_children():
+		if child is Control and child.visible and child.name != "sidebar":
+			return true
+	return false

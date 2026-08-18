@@ -27,6 +27,17 @@ var _min_day:   int = 1
 # ── UI refs ───────────────────────────────────────────────────────────────────
 var _header_label: Label
 var _day_btns:     Array = []   # 42 Button nodes (6 weeks × 7 days)
+## Optional Callable(offset_days: float) -> 0..1 launch-window quality, where the offset is
+## measured from the minimum date (the current game date).  When set, every selectable
+## day is tinted from red (badly phased, expensive) through amber to green (near-ideal transfer
+## alignment), so the good departure windows are visible at a glance instead of having to be
+## hunted for by dragging the date and watching the cost readout.
+var _quality_fn: Callable = Callable()
+
+## Worst-window and best-window tints the day colouring interpolates between.
+const COL_WORST: Color = Color(0.95, 0.35, 0.30)
+const COL_MID:   Color = Color(0.95, 0.80, 0.35)
+const COL_BEST:  Color = Color(0.40, 0.92, 0.50)
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +104,11 @@ func _build_ui() -> void:
 
 
 func _refresh_grid() -> void:
+	# Configuration can arrive before the node enters the tree — a caller may set the minimum
+	# date or the window-quality provider on a freshly constructed picker, which is exactly
+	# when the widgets don't exist yet.  Skip; _ready() paints once everything is built.
+	if _header_label == null or _day_btns.is_empty():
+		return
 	_header_label.text = "%s  %d" % [MONTH_NAMES[_view_month - 1], _view_year]
 
 	# Monday-first column offset for the 1st of the month
@@ -122,11 +138,34 @@ func _refresh_grid() -> void:
 
 		btn.text     = str(day)
 		btn.disabled = before_min
-		btn.modulate = (
-			Color(0.35, 0.70, 1.00)  if is_sel      else
-			Color(0.40, 0.40, 0.40)  if before_min  else
-			Color(1.00, 1.00, 1.00)
-		)
+		if is_sel:
+			btn.modulate = Color(0.35, 0.70, 1.00)
+			btn.tooltip_text = ""
+		elif before_min:
+			btn.modulate = Color(0.40, 0.40, 0.40)
+			btn.tooltip_text = ""
+		elif _quality_fn.is_valid():
+			# Offset is measured from the minimum (i.e. the current game date), which is exactly
+			# the frame the transfer maths wants — so the provider only needs a day count.
+			var off: float = float(_to_jdn(_view_year, _view_month, day)
+				- _to_jdn(_min_year, _min_month, _min_day))
+			var q: float = clampf(float(_quality_fn.call(off)), 0.0, 1.0)
+			btn.modulate = _quality_color(q)
+			btn.tooltip_text = "Launch window %d%%" % int(round(q * 100.0))
+		else:
+			btn.modulate = Color(1.00, 1.00, 1.00)
+			btn.tooltip_text = ""
+
+## Red → amber → green across the window-quality range.  Two segments rather than one so the
+## midpoint reads clearly as "workable" instead of washing into muddy brown.
+func _quality_color(q: float) -> Color:
+	return COL_WORST.lerp(COL_MID, q / 0.5) if q < 0.5 		else COL_MID.lerp(COL_BEST, (q - 0.5) / 0.5)
+
+## Supply the per-day launch-window rating (see _quality_fn) and repaint.  Pass an empty
+## Callable to go back to plain white days.
+func set_quality_provider(fn: Callable) -> void:
+	_quality_fn = fn
+	_refresh_grid()
 
 # ── Input handlers ────────────────────────────────────────────────────────────
 
@@ -199,7 +238,7 @@ func get_selected_day()   -> int: return _sel_day
 ## date.  Always >= 0 (clamped, since selection can't be before min date).
 func get_offset_days(from_year: int, from_month: int, from_day: int) -> int:
 	var diff: int = _to_jdn(_sel_year, _sel_month, _sel_day) \
-	              - _to_jdn(from_year,  from_month,  from_day)
+				  - _to_jdn(from_year,  from_month,  from_day)
 	return maxi(diff, 0)
 
 

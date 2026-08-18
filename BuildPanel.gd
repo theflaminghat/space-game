@@ -5,6 +5,8 @@ signal build_requested(planet_name: String, building_name: String, count: int)
 signal demolish_requested(planet_name: String, building_name: String, count: int)
 ## Retrofit standing copies of this building into the next level up.
 signal upgrade_requested(planet_name: String, building_name: String, count: int)
+## How many of the standing copies are switched on.  Idle buildings cost nothing and do nothing.
+signal active_changed(planet_name: String, building_name: String, count: int)
 
 @onready var build_list: VBoxContainer = $MarginContainer/VBoxContainer/ScrollContainer/BuildList
 
@@ -74,6 +76,18 @@ func apply_counts(catalog: Array) -> void:
 			return
 		var count: int = int(building.get("count", 0))
 		(r["count"] as Label).text = str(count)
+		# The slider's ceiling is the standing count, so building or demolishing moves it.
+		var asl: HSlider = r.get("active_slider", null)
+		if asl != null:
+			var act: int = clampi(int(building.get("active", count)), 0, count)
+			if int(asl.max_value) != count or int(asl.value) != act:
+				asl.set_block_signals(true)
+				asl.max_value = count
+				asl.value = act
+				asl.set_block_signals(false)
+				var alb: Label = r.get("active_label", null)
+				if alb != null:
+					alb.text = "%d / %d" % [act, count]
 		# Each batch button is gated on whether that many can actually be acted on.
 		var dem: Array = r["demolish"]
 		var ups: Array = r["upgrade"]
@@ -298,6 +312,47 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		parent.add_child(_detail_label(
 			"Requires: " + req_id.replace("_", " ").capitalize(), Color(0.55, 0.55, 0.55)))
 
+	# Running cost — nothing operates for free, so this is what each switched-on copy draws.
+	var upkeep: float = float(building.get("upkeep", 0.0))
+	if upkeep > 0.0:
+		var up_lbl := _detail_label("Draws %s/day to run" % Units.format_si(upkeep, "J"),
+			Color(0.85, 0.70, 0.95) if not dimmed else Color(0.45, 0.42, 0.50))
+		up_lbl.tooltip_text = "Maintenance power, drawn while the building is switched on"
+		parent.add_child(up_lbl)
+
+	# Active-count slider: how many of the standing copies are actually running.  Idling a
+	# building stops its output AND its running cost, which is the lever when the grid is short.
+	var active_lbl: Label = null
+	var active_slider: HSlider = null
+	if count > 0:
+		var act: int = clampi(int(building.get("active", count)), 0, count)
+		var act_row := HBoxContainer.new()
+		act_row.add_theme_constant_override("separation", 6)
+		var act_name := Label.new()
+		act_name.text = "Active"
+		act_name.add_theme_font_size_override("font_size", 10)
+		act_name.custom_minimum_size = Vector2(52, 0)
+		act_name.modulate = Color(0.70, 0.75, 0.85)
+		act_row.add_child(act_name)
+		active_slider = HSlider.new()
+		active_slider.min_value = 0
+		active_slider.max_value = count
+		active_slider.step = 1
+		active_slider.value = act
+		active_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		act_row.add_child(active_slider)
+		active_lbl = Label.new()
+		active_lbl.text = "%d / %d" % [act, count]
+		active_lbl.add_theme_font_size_override("font_size", 10)
+		active_lbl.custom_minimum_size = Vector2(72, 0)
+		active_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		active_lbl.modulate = Color(0.85, 0.90, 0.70)
+		act_row.add_child(active_lbl)
+		parent.add_child(act_row)
+		active_slider.value_changed.connect(func(v: float) -> void:
+			active_lbl.text = "%d / %d" % [int(v), count]
+			active_changed.emit(current_planet, bname, int(v)))
+
 	# Build / demolish / upgrade, each in 1 / 10 / 100 batches — at single-building scale you
 	# raise infrastructure by the hundred, so one-at-a-time clicking is not a real option.
 	var demolish_btns: Array = []
@@ -369,6 +424,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	_rows[bname] = {
 		"count": count_label, "demolish": demolish_btns, "build": build_btns,
 		"available": available, "min_count": min_count, "upgrade": upgrade_btns,
+		"active_slider": active_slider, "active_label": active_lbl,
 	}
 
 

@@ -445,6 +445,49 @@ const STAR_ALWAYS_LY: float = 3500.0
 # (unless selected/alien/colonised), so the outer galaxy doesn't clutter the map or cost draw
 # time.  Measured from the frame origin, so recentring reveals a different bubble of stars.
 const STAR_RENDER_MAX_LY: float = 1000.0
+
+# ── Star clusters ─────────────────────────────────────────────────────────────
+## Individual stars stop resolving past STAR_RENDER_MAX_LY, which used to leave the map simply
+## empty out there.  These fill that shell: seed-generated open clusters scattered through the
+## volume the player cannot see star-by-star, each a colonisable target in its own right.  You
+## do not settle a star out here — you settle a cluster, and what you get is however many
+## thousand suns came with it.
+const CLUSTER_COUNT:   int   = 140
+const CLUSTER_SEED:    int   = 0x0C1_5EED
+const CLUSTER_MIN_LY:  float = 1100.0     # just past the individual-star horizon
+const CLUSTER_MAX_LY:  float = 9000.0
+## Stars a cluster holds — real open clusters run from a few hundred to a few thousand.
+const CLUSTER_STARS_MIN: int = 250
+const CLUSTER_STARS_MAX: int = 6000
+const CLUSTER_PICK_PX: float = 16.0
+
+static var _clusters: Array = []
+
+## The generated cluster shell.  Deterministic from CLUSTER_SEED, so it is identical every
+## session and both the map and Game agree on where everything is.
+static func star_clusters() -> Array:
+	if _clusters.is_empty():
+		var rng := RandomNumberGenerator.new()
+		rng.seed = CLUSTER_SEED
+		for i in range(CLUSTER_COUNT):
+			# Uniform in VOLUME rather than in radius, so the shell looks evenly populated
+			# instead of crowding toward the inner edge.
+			var lo: float = pow(CLUSTER_MIN_LY, 3.0)
+			var hi: float = pow(CLUSTER_MAX_LY, 3.0)
+			var d: float = pow(lo + rng.randf() * (hi - lo), 1.0 / 3.0)
+			var dir: Vector3 = _proc_rand_unit(rng)
+			var n_stars: int = CLUSTER_STARS_MIN + rng.randi() % (CLUSTER_STARS_MAX - CLUSTER_STARS_MIN)
+			# Richer clusters read hotter/bluer; sparse ones dimmer.
+			var t: float = float(n_stars - CLUSTER_STARS_MIN) / float(CLUSTER_STARS_MAX - CLUSTER_STARS_MIN)
+			_clusters.append({
+				"name":     "Cluster C-%03d" % (i + 1),
+				"pos":      dir * d,
+				"dist":     d,
+				"stars":    n_stars,
+				"is_cluster": true,
+				"color":    Color(0.72, 0.80, 1.00).lerp(Color(1.00, 0.94, 0.82), 1.0 - t),
+			})
+	return _clusters
 ## Labels + drop-lines are gated on the object's distance from Sol relative to the
 ## current VIEW RADIUS (the distance the zoom level reaches — max_display_radius / zoom),
 ## not its position on screen.  An object is named when its own log-distance is within
@@ -485,6 +528,9 @@ var _yaw:   float = 0.6
 var _pitch: float = 0.95   # default tilt to look down onto the galactic plane (now the map plane)
 var _zoom:  float = 1.0
 var _selected: int = -1
+## Index into star_clusters() of the selected cluster, or -1.  Stars and clusters are picked
+## from the same click, and selecting one clears the other.
+var _selected_cluster: int = -1
 
 var _dragging:   bool = false
 var _drag_moved: bool = false
@@ -1059,6 +1105,8 @@ func galaxy_center() -> Vector3: return _gc_pos
 
 ## Name of the currently selected star, or "" if none.
 func selected_star() -> String:
+	if _selected_cluster >= 0:
+		return str(star_clusters()[_selected_cluster]["name"])
 	return str(all_stars()[_selected]["name"]) if _selected >= 0 else ""
 
 ## Push interstellar state from Game.gd: which stars are colonised, the in-flight
@@ -1115,6 +1163,8 @@ func set_interstellar_unlocked(unlocked: bool) -> void:
 
 ## Distance (ly) of the selected star, or 0.
 func _selected_dist() -> float:
+	if _selected_cluster >= 0:
+		return float(star_clusters()[_selected_cluster]["dist"])
 	return float(all_stars()[_selected]["dist"]) if _selected >= 0 else 0.0
 
 ## Current max Lorentz factor γ from the log speed slider (1 + 10^value).
@@ -1585,6 +1635,39 @@ func _draw() -> void:
 			continue
 		_draw_landmark(_project(mlp, b, center, scale), str(m["kind"]), m["color"], ma, str(m["name"]))
 
+	# The generated cluster shell: everything the player can reach but cannot resolve star by
+	# star.  Drawn as a soft cloud of points rather than a single dot, so a cluster reads as a
+	# GROUP of suns and never gets mistaken for one.
+	var cl_all: Array = star_clusters()
+	for ci in range(cl_all.size()):
+		var cl: Dictionary = cl_all[ci]
+		var clp: Vector3 = _rel(cl["pos"])
+		var ca: float = _detail_alpha(clp.length())
+		var csel: bool = ci == _selected_cluster
+		if ca <= 0.0 and not csel:
+			continue
+		var cp := _project(clp, b, center, scale)
+		if cp.x < -20.0 or cp.y < -20.0 or cp.x > size.x + 20.0 or cp.y > size.y + 20.0:
+			continue
+		var ccol: Color = cl["color"]
+		var settled: bool = _colonized.has(str(cl["name"]))
+		if settled:
+			ccol = Color(0.40, 0.95, 0.55)
+		var a: float = 1.0 if csel else maxf(ca, 0.25)
+		# A ring of grains around a brighter core — a cluster, not a star.
+		var seed_h: int = hash(str(cl["name"]))
+		for k in range(7):
+			var ang: float = float((seed_h >> (k * 3)) % 360) * PI / 180.0
+			var rad: float = 2.5 + float((seed_h >> (k * 2)) % 5)
+			draw_rect(Rect2(cp + Vector2(cos(ang), sin(ang)) * rad - Vector2(0.8, 0.8),
+				Vector2(1.6, 1.6)), Color(ccol.r, ccol.g, ccol.b, 0.45 * a))
+		draw_circle(cp, 2.2, Color(ccol.r, ccol.g, ccol.b, 0.9 * a))
+		if csel:
+			draw_arc(cp, 11.0, 0.0, TAU, 28, Color(1.0, 0.95, 0.6, 0.95), 1.5, true)
+		if csel or ca > 0.55:
+			draw_string(_font, cp + Vector2(13.0, 4.0), str(cl["name"]),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(ccol.r, ccol.g, ccol.b, 0.85 * a))
+
 	# Stars: with up to ~10 000 in range, cull to the current zoom band first (plus always-shown
 	# ones — selected, alien, colonised, or the nearby catalogue), computing each position ONCE
 	# rather than twice per sort comparison.  Then draw far-to-near so nearer ones overlap on top.
@@ -1766,8 +1849,23 @@ func _draw() -> void:
 			"Cosmic expansion ×%s — unbound galaxies receding" % Units.format_si(_cosmic_scale, ""),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.78, 0.55, 0.62))
 
+	# Selected-cluster info box — the same slot the star readout uses, so only one is ever up.
+	if _selected_cluster >= 0:
+		var cl: Dictionary = star_clusters()[_selected_cluster]
+		var settled: bool = _colonized.has(str(cl["name"]))
+		var clines: Array = [
+			str(cl["name"]),
+			"Open cluster",
+			"%s light-years" % Units.format_si(float(cl["dist"]), ""),
+			"%s stars" % Units.format_si(float(cl["stars"]), ""),
+			"Settled" if settled else "Uncolonised",
+		]
+		# Too far to resolve individually — this is what you get INSTEAD of picking a star.
+		clines.append("Beyond individual resolution;")
+		clines.append("colonised as a whole.")
+		_draw_info_box(clines)
 	# Selected-star info box.
-	if _selected >= 0:
+	elif _selected >= 0:
 		var s: Dictionary = all_stars()[_selected]
 		var lines: Array = [str(s["name"]),
 			"%.2f light-years" % float(s["dist"]),
@@ -1795,14 +1893,19 @@ func _draw() -> void:
 			lines.append("◇ Peaceful alien contact")
 		elif sfac == "unknown":
 			lines.append("? Alien presence — alignment unknown")
-		var box := Rect2(Vector2(12, size.y - (16.0 * lines.size() + 16.0) - 12.0),
-			Vector2(320, 16.0 * lines.size() + 16.0))
-		draw_rect(box, Color(0.06, 0.08, 0.14, 0.92))
-		draw_rect(box, Color(0.4, 0.55, 0.8, 0.5), false, 1.0)
-		for li in range(lines.size()):
-			draw_string(_font, box.position + Vector2(10, 19 + li * 16), str(lines[li]),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 12 if li == 0 else 11,
-				Color(0.92, 0.96, 1.0) if li == 0 else Color(0.7, 0.78, 0.9))
+		_draw_info_box(lines)
+
+## The bottom-left readout, shared by the star and cluster selections so they cannot drift apart.
+func _draw_info_box(lines: Array) -> void:
+	var box := Rect2(Vector2(12, size.y - (16.0 * lines.size() + 16.0) - 12.0),
+		Vector2(320, 16.0 * lines.size() + 16.0))
+	draw_rect(box, Color(0.06, 0.08, 0.14, 0.92))
+	draw_rect(box, Color(0.4, 0.55, 0.8, 0.5), false, 1.0)
+	for li in range(lines.size()):
+		draw_string(_font, box.position + Vector2(10, 19 + li * 16), str(lines[li]),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12 if li == 0 else 11,
+			Color(0.92, 0.96, 1.0) if li == 0 else Color(0.7, 0.78, 0.9))
+
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 
@@ -1909,7 +2012,23 @@ func _try_select(mouse: Vector2) -> void:
 		if dd < best_d:
 			best_d = dd
 			best = i
-	_selected = best
+	# Clusters are picked from the same click.  Past STAR_RENDER_MAX_LY there are no stars to
+	# compete with, so a generous radius just makes them easy to hit.
+	var best_c: int = -1
+	var best_cd: float = CLUSTER_PICK_PX
+	var clusters: Array = star_clusters()
+	for ci in range(clusters.size()):
+		var cd := _project(_rel(clusters[ci]["pos"]), b, center, scale).distance_to(mouse)
+		if cd < best_cd:
+			best_cd = cd
+			best_c = ci
+	# Whichever is genuinely nearer the cursor wins; a hit on one clears the other.
+	if best_c >= 0 and (best < 0 or best_cd <= best_d):
+		_selected = -1
+		_selected_cluster = best_c
+	else:
+		_selected = best
+		_selected_cluster = -1
 	_update_launch_ui()
 	queue_redraw()
 	star_selected.emit(selected_star())

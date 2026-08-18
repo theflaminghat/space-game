@@ -13,6 +13,7 @@ extends HBoxContainer
 ## Star map and automation panels are created in code (no scene node needed) and live
 ## beside the other full-area panels in this HBoxContainer.
 var star_map: StarMapPanel = null
+var galaxy_map: GalaxyMapPanel = null
 var galaxy_debug: GalaxyDebugPanel = null
 var automation_panel: AutomationPanel = null
 ## Merged planet panel (info + build + population tabs), created and assigned by Game.
@@ -27,12 +28,18 @@ func _ready() -> void:
 	add_child(star_map)
 	_add_cloned_button("star_map", "star map", _on_starmap_pressed)
 
+	# The player's galaxy map: a flat hex grid of the statistical regions, always drawn.
+	galaxy_map = GalaxyMapPanel.new()
+	galaxy_map.hide()
+	add_child(galaxy_map)
+	_add_cloned_button("galaxy_map", "galaxy", _on_galaxy_map_pressed)
+
 	# Debug view of the galaxy in true (linear) scale, reading the star map's generated data.
 	galaxy_debug = GalaxyDebugPanel.new()
 	galaxy_debug.source = star_map
 	galaxy_debug.hide()
 	add_child(galaxy_debug)
-	_add_cloned_button("galaxy_debug", "galaxy", _on_galaxy_debug_pressed)
+	_add_cloned_button("galaxy_debug", "galaxy 3d", _on_galaxy_debug_pressed)
 
 	automation_panel = AutomationPanel.new()
 	automation_panel.hide()
@@ -77,6 +84,8 @@ func hide_all() -> void:
 	launch_panel.hide()
 	if star_map:
 		star_map.hide()
+	if galaxy_map:
+		galaxy_map.hide()
 	if galaxy_debug:
 		galaxy_debug.hide()
 	if automation_panel:
@@ -128,6 +137,11 @@ func _on_starmap_pressed() -> void:
 		var game := get_tree().current_scene
 		if game and game.has_method("refresh_star_map"):
 			game.refresh_star_map()
+
+
+func _on_galaxy_map_pressed() -> void:
+	if _toggle_panel(galaxy_map):
+		galaxy_map.refresh()
 
 
 func _on_galaxy_debug_pressed() -> void:

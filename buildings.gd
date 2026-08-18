@@ -39,7 +39,7 @@ const LEVEL_OUTPUT_MULT: float = 3.5
 const LEVEL_SUFFIX:      Array = ["", " II", " III", " IV", " V"]
 ## One research node per tier, shared by every building — a single breakthrough scales the
 ## whole industrial base rather than gating each structure separately.
-const LEVEL_RESEARCH: Array = ["", "precision_manufacturing", "autonomous_industrial_control"]
+const LEVEL_RESEARCH: Array = ["", "precision_manufacturing", "autonomous_factories"]
 ## Dictionary blocks scaled by output.  "consumption" is included deliberately: a bigger plant
 ## burns proportionally more fuel, so tiers don't quietly become free energy.
 const LEVEL_OUTPUT_KEYS: Array = ["production", "storage", "consumption"]
@@ -67,6 +67,7 @@ const UNITS: Dictionary = {
 	"Biomass Burner":   200,     # 132 GW fleet → 660 MW station
 	"Coal Plant":       200,     # 132 GW fleet → 660 MW unit
 	"Oil Plant":        300,     # 132 GW fleet → 440 MW unit
+	"Natural Gas Burner": 264,   # 132 GW fleet → 500 MW combined-cycle unit
 	"Solar Farm":       1000,    # 50 GW fleet  → 50 MW utility farm
 	"Nuclear Plant":    300,     # 300 GW fleet → 1 GW reactor
 	"Fusion Reactor":   1000,    # 1.5 TW fleet → 1.5 GW plant
@@ -104,6 +105,13 @@ static func _to_real_mass(b: Dictionary) -> Dictionary:
 				blk[res] = float(blk[res]) * m
 	if b.has("atmo_rate"):          # grams pulled from the atmosphere per day
 		b["atmo_rate"] = float(b["atmo_rate"]) * m
+	if b.has("mc_capacity"):        # work units are material throughput — a mass-like quantity
+		b["mc_capacity"] = float(b["mc_capacity"]) * m
+	# Stored energy is not a mass, but it was authored at a token scale — lift it to the real
+	# capacity of the installation (see Units.ENERGY_STORAGE_SCALE).
+	var stor: Dictionary = b.get("storage", {})
+	if stor.has("energy"):
+		stor["energy"] = float(stor["energy"]) * Units.ENERGY_STORAGE_SCALE
 	return b
 
 static var _expanded: Array = []
@@ -239,6 +247,19 @@ const BUILDINGS := [
 		# Authored per BUILDING in real grams/day (skips the units + MASS_SCALE transforms).
 		"consumption": {"Coal": 6.25e9},
 		"co2_per_energy": 45.0},
+	# Burns FUEL OIL, not crude — the barrel goes through the Oil Refining still first.
+	# Natural Gas Burner — combined-cycle gas turbine.  The cleanest thing that burns: ~50 g of
+	# CO2 per MJ against coal's ~95, so it emits a little over half what a coal station does for
+	# the same power.  500 MW at ~60 % efficiency on 55 MJ/kg methane = 15 kg/s = 1.31e9 g/day,
+	# authored per BUILDING in real grams/day like the other fuelled plants.
+	{"name": "Natural Gas Burner",
+		"category": "power",
+		"allowed_types": ["rocky"],
+		"cost": {"Concrete": 120_000, "Steel": 88_000, "energy": 45_000},
+		"production": {"energy": 1.32e11},   # 132 GW fleet → 500 MW unit
+		"consumption": {"CH4": 1.31e9},
+		"co2_per_energy": 24.0},
+
 	# Oil is ~5000× rarer than coal in the crust, so oil plants can never be sustained by
 	# mining alone: they burn down the inherited reserve and then starve.  Peak oil, modelled.
 	{"name": "Oil Plant",
@@ -247,7 +268,7 @@ const BUILDINGS := [
 		"cost": {"Concrete": 160_000, "Steel": 104_000, "energy": 50_000},
 		"production": {"energy": 1.32e11},   # 132 GW fleet → 440 MW unit
 		# 440 MW at ~40 % efficiency on 42 MJ/kg fuel oil = 26 kg/s = 2.26e9 g/day.
-		"consumption": {"Oil": 2.26e9},
+		"consumption": {"FuelOil": 2.26e9},
 		"co2_per_energy": 32.0},
 
 	# ── Always available ──────────────────────────────────────────────────────
@@ -345,11 +366,15 @@ const BUILDINGS := [
 	# Nuclear Plant — multi-unit PWR complex, 300 GW.  The first power source that
 	# beats a fossil station: denser and cleaner, the workhorse upgrade once
 	# nuclear_power is researched.
+	# Burns ENRICHED uranium, not ore — the Uranium Enrichment cascade has to run first.
+	# A 1 GW PWR loads ~27 t of fresh fuel a year, so ~75 kg/day per reactor.  Authored per
+	# BUILDING in real grams/day, like the other fuelled plants.
 	{"name": "Nuclear Plant",
 		"category": "power",
 		"allowed_types": ["rocky"],
 		"cost": {"Concrete": 400_000, "Steel": 180_000, "Ceramic": 20_000, "energy": 80_000},
-		"production": {"energy": 3.0e11}},   # 300 GW (300e9 × 2.0e-6 = 600 000 g)
+		"production": {"energy": 3.0e11},   # 300 GW fleet → 1 GW reactor
+		"consumption": {"EnrichedU": 7.5e4}},
 
 	# Research Lab — precision instruments + clean-room optics.
 	# Steel frame, glass optics, copper wiring.

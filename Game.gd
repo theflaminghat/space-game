@@ -36,6 +36,9 @@ const MOON_COMPOSITION: Dictionary = {
 	"crust": {
 		"SiO2":  4.5e24, "Al2O3": 2.6e24, "CaO":   1.6e24, "FeO":  1.5e24,
 		"MgO":   6.0e23, "TiO2":  3.0e23, "Na2O":  1.0e23, "UO2":  1.0e19, "ThO2": 3.0e19,
+		# Four billion years of solar wind, implanted grain by grain into an airless regolith and
+		# never blown away: ~10 ppb, which is why the Moon is the place you go for fusion fuel.
+		"He3":   1.0e17,
 	},
 }
 
@@ -249,7 +252,12 @@ var _regions: Dictionary = {}
 var _region_last_year: float = 2026.0
 const DETAILED_RADIUS_LY:   float = 2500.0   # inside this radius = individual colonies; outside = regions
 const HEX_HEIGHT_LY:        float = 6000.0   # prism height (ly): one tile spans the galaxy's full thickness
-const HEX_SIZE:             float = 2000.0   # hex circumradius → tile ~4000 ly corner-to-corner
+## Hex circumradius.  Sized so BOTH landmarks land on tile centres: the lattice is anchored on
+## the galactic centre (tile "0,0"), and Sol lies SOL_GC_LY away along the +x galactic axis where
+## centres fall every 3*HEX_SIZE — so 26 000 / (3 x 4) puts Sol exactly on tile "-8,4".
+## 2166.67 rather than a round 2000 is the closest such size; tiles are ~4333 ly corner-to-corner
+## and 3753 ly flat-to-flat.
+const HEX_SIZE:             float = 2166.666667
 const HEX_SQRT3:            float = 1.7320508
 const HEX_AREA_LY2:         float = 1.5 * HEX_SQRT3 * HEX_SIZE * HEX_SIZE   # flat-top hex face area (ly²)
 const GALAXY_STAR_DENSITY:  float = 0.065    # stars per ly³ per unit galactic density (~150 billion galaxy)
@@ -261,7 +269,11 @@ const HEX_DIRS: Array = [
 const REGION_STARS_PER_CELL: float = 2.0e6   # colonisable stars in a full-density cell (real-galaxy scale)
 const REGION_SATURATE_RATE: float = 4.0e-6   # per-year rate a region colonises its own remaining stars
 const REGION_SPREAD_RATE:   float = 2.5e-5   # per-year chance (× colonised fraction) a region seeds a neighbour
-const REGION_GRID_RADIUS:   int   = 18       # how many cells around Sol the galaxy map draws
+## How many hex rings out from the GALACTIC CENTRE the grid covers.  Hexes are 3 753 ly
+## centre-to-centre and the disk runs to DISK_MAX_LY = 60 000 ly, so 16 rings reach the rim and
+## 17 takes it with one to spare.  Measuring from the centre rather than from Sol covers the
+## whole disk in ~900 cells instead of the ~2 100 an off-centre origin needed.
+const REGION_GRID_RADIUS:   int   = 17
 var _region_grid_cache: Array = []           # cached [{id, center, density}] of non-void cells near Sol
 var _gal_basis: Array = []                   # cached galactic basis [gx, gy, gz] (equatorial frame)
 
@@ -504,10 +516,67 @@ var _live_fossil_energy:   float = 0.0       # fuel-burning energy actually runn
 ## at once.  Its capacity = a manual base (cottage industry) + the factories built on
 ## it, multiplied by automation, then scaled by how well the civilisation's one finite
 ## labour force can staff all that capacity.  See _process_production.
-const BASE_MC: float       = 5000.0    # manual industry every inhabited world has, work/day
-const LABOR_PER_CAP: float = 2000.0    # people needed per raw work-unit (before automation)
+## A "work unit" is material throughput, so manufacturing capacity is a MASS-like quantity and
+## rides Units.MASS_SCALE with everything else.  Without this the rescale left capacity a million
+## times too small for the throughput it gates, and every production line ran at ~0.04%.
+const BASE_MC: float       = 5000.0 * Units.MASS_SCALE   # manual industry every world has, work/day
+## Labour is people per work-unit, so it scales INVERSELY — the same population staffs the same
+## real industry, just expressed in bigger units.
+const LABOR_PER_CAP: float = 2000.0 / Units.MASS_SCALE
 ## planet → Σ factory mc_capacity, refreshed in _recompute_production_cache.
 var _cached_planet_built_mc: Dictionary = {}
+## planet → roster-derived sums the per-frame passes read instead of re-walking every building:
+## { mine, atmo, co2_base, co2_fuel{}, e_total, e_dirty, e_fuel_dirty{} }.  Rebuilt only when
+## the roster changes — at ~10 000 structures, doing this per frame was the dominant tick cost.
+var _cached_planet_stats: Dictionary = {}
+## Civilisation-wide roster sums, likewise refreshed only on a roster change.
+var _cached_detection: float = 0.0
+var _cached_nuclear:   float = 0.0
+## Total running cost (J/game-day) of every building currently switched on.
+var _bld_upkeep: float = 0.0
+## planet → { building → standing count }, tallied in the roster pass and reused by the UI.
+var _cached_planet_counts: Dictionary = {}
+
+## Nothing runs for free: a building draws maintenance power in proportion to how much structure
+## it is — 0.02 J per game-day per gram of the bill of materials.  Derived rather than authored,
+## so every building (and every generated tier) carries a running cost automatically and the
+## whole system has one number to tune.  This is what gives the active-count slider its teeth:
+## idle a mine and you stop paying for it.
+const UPKEEP_J_PER_GRAM: float = 0.02
+## ...weighted by what the structure actually does with that mass.  A warehouse mostly sits
+## there; a mine runs heavy machinery around the clock.  Mass alone put the storage fleet's
+## running cost above the entire power fleet's, which is plainly wrong.  Unlisted = 1.0.
+const UPKEEP_CATEGORY_MULT: Dictionary = {
+	"storage":     0.10,   # passive volume — lighting, pumps, inventory control
+	"power":       0.50,   # parasitic station load
+	"observation": 0.30,
+	"habitation":  0.30,
+	"support":     0.30,
+	"defense":     0.30,
+}
+
+## planet → { building → how many are switched on }.  Absent means all of them.
+var active_buildings: Dictionary = {}
+
+## Switch `count` of `building_name` on at `planet_name` (clamped to what is standing).
+func set_active_count(planet_name: String, building_name: String, count: int) -> void:
+	var standing: int = _count_building(planet_name, building_name)
+	var m: Dictionary = active_buildings.get(planet_name, {})
+	if count >= standing:
+		m.erase(building_name)          # "all of them" is the absence of an entry
+	else:
+		m[building_name] = maxi(0, count)
+	if m.is_empty():
+		active_buildings.erase(planet_name)
+	else:
+		active_buildings[planet_name] = m
+	_mark_prod_dirty()
+
+## How many of `building_name` are switched on at `planet_name`.
+func active_count(planet_name: String, building_name: String) -> int:
+	var standing: int = _count_building(planet_name, building_name)
+	return clampi(int((active_buildings.get(planet_name, {}) as Dictionary)
+		.get(building_name, standing)), 0, standing)
 ## planet → { "capacity": work/day, "demand": work/day } from the last production tick,
 ## pushed to the ProductionPanel for its capacity readout.
 var _last_mc_state: Dictionary = {}
@@ -671,32 +740,52 @@ func start_new_game() -> void:
 	# abstractions.  Counts are scaled by the same factor BuildingData divided each entry by,
 	# so the starting grid is unchanged to the watt.
 	var earth_buildings: Array = []
-	# 1 500 mines ≈ 15 Mt/day of extraction — roughly what the fossil fleet's real 15.9 Mt/day
+	# 2 000 mines ≈ 20 Mt/day of extraction against the fossil fleet's real 15.9 Mt/day
 	# coal-and-oil habit needs, so the opening is a live allocation problem in the Extraction tab
 	# rather than an immediate shortfall: point too little at coal and the grid starts eating
 	# its reserve, point it all at coal and nothing is left for construction materials.
-	for _i in range(1500): earth_buildings.append("Mine")
+	for _i in range(2000): earth_buildings.append("Mine")
 	# Depots scale with the mines they bank for; at 15 Mt/day a handful would cap out in hours
 	# and the Matter readout would sit pinned at its ceiling from the first minute.
 	for _i in range(2500): earth_buildings.append("Matter Depot")
+	# Pumped storage — the only grid-scale energy buffer that actually existed in 1945, and the
+	# reason the civilisation can bank a launch campaign's worth of power instead of spending
+	# every Joule the moment it is generated.
+	for _i in range(6): earth_buildings.append("Pumped Hydro Storage")
 	for spec: Array in [["Biomass Burner", 10], ["Coal Plant", 10], ["Oil Plant", 5]]:
 		var bname: String = str(spec[0])
 		for _i in range(int(spec[1]) * BuildingData.units(bname)):
 			earth_buildings.append(bname)
 	earth_buildings.append("Research Lab")
 	planet_buildings = {"earth": earth_buildings}
-	# Inherited 1945 fuel reserve: above-ground stockpiles the fossil fleet burns while the
-	# mines ramp.  Coal is common enough that mining roughly keeps pace; oil is ~5000× rarer
-	# in the crust, so this reserve is effectively all the oil there will ever be.
-	# Added through _add_stockpile so the Matter readout counts the reserve it aggregates.
-	# Sized against the fleet's REAL burn: ~12.5 Mt of coal and ~3.4 Mt of oil a day, so this is
-	# roughly two decades of running.  Long enough to industrialise, short enough that the clock
-	# is real — feeding 2 000 coal stations needs ~1 250 mines pointed at coal in the Extraction
-	# tab, and until they exist the fossil half of the grid is living on the reserve.
-	_add_stockpile("Coal", 9.1e16, "earth")
-	_add_stockpile("Oil",  2.5e16, "earth")
+	# A starter buffer, not a reserve: roughly 90 days of the fossil fleet's full burn — about 1 %
+	# of the stockpile this replaced.  Long enough to notice the grid draining and find the
+	# Extraction tab, short enough that the answer is still "point the mines at coal" rather than
+	# "coast for two decades".  Once it runs dry the stations burn only what is dug that day, and
+	# the fuel-free Biomass Burners hold the floor under the grid.
+	_add_stockpile("Coal",    1.1e15, "earth")   # ~90 days for 2 000 coal stations
+	_add_stockpile("FuelOil", 3.0e14, "earth")   # ~90 days for 1 500 oil stations
+	_add_stockpile("Oil",     1.0e13, "earth")   # crude for the still to work while mining ramps
 	build_queue = {}   # nothing under construction at the start
-	extraction_focus = {}   # take whatever the ground gives until the player targets something
+	# The 1945 mining industry is already pointed at what the grid burns, not at whatever the
+	# ground happens to hold: nearly all of it goes to coal and oil, because that is what 3 500
+	# fossil stations demand.  Coal gets its full requirement; oil runs a touch under, so its
+	# stations sit at ~98 % and the buffer drains very slowly.  The half-percent left over is
+	# still ~60× what the seven starting production lines actually consume — ore is not the
+	# constraint here, fuel is.  Reallocating this is the central early decision: every point
+	# taken off coal is a point of the grid going dark, and every point left on it is uranium,
+	# copper and construction ore you are not digging.
+	extraction_focus = {"earth": {
+		"Coal":   0.6250,   # 2 000 stations at 6.25e9 g/day each
+		"Oil":    0.3700,   # crude for the still; 45 % of the barrel comes out as fuel oil
+		"Fe2O3":  0.0020,
+		"CaCO3":  0.0010,
+		"SiO2":   0.0010,
+		"FeS2":   0.0005,
+		"CuFeS2": 0.0003,
+		"Al2O3":  0.0002,
+	}}
+	active_buildings = {}   # everything the player owns starts switched on
 	entropy_exported = 0.0
 	_heat_alerted = false
 	_labor_alerted = false
@@ -704,9 +793,21 @@ func start_new_game() -> void:
 	# quicklime → concrete, the foundation for expanding the operation.
 	# Rates are normalised (1× = 1 g of product/day), so these read directly as grams:
 	# 9 g/day of quicklime feeding 8 g/day of concrete — the same throughput as before.
+	# A 1945 civilisation already has a metals industry running — it is not waiting for the
+	# player to switch on iron.  Rates are grams of product per day (1× = 1 g), sized so the
+	# whole slate draws well under one world's manufacturing capacity and inside what 2 000
+	# mines yield at default (crustal-abundance) extraction.  Iron feeds Steel; Lime feeds
+	# Concrete; both metals feed the building bills of materials.
 	_production_jobs = [
-		{"id": 1, "recipe": "Lime Production",     "planet": "earth", "rate": 9.0 * Units.MASS_SCALE},
-		{"id": 2, "recipe": "Concrete Production", "planet": "earth", "rate": 8.0 * Units.MASS_SCALE},
+		{"id": 1, "recipe": "Lime Production",     "planet": "earth", "rate": 3.0e8},
+		{"id": 2, "recipe": "Concrete Production", "planet": "earth", "rate": 2.5e8},
+		{"id": 3, "recipe": "Iron Smelting",       "planet": "earth", "rate": 3.0e8},
+		{"id": 4, "recipe": "Pyrite Smelting",     "planet": "earth", "rate": 1.0e8},
+		# No Wüstite line: it reduces FeO, which Earth's crust doesn't carry.  The recipe stays
+		# available for when the player is mining Venus, where FeO is the dominant iron ore.
+		{"id": 5, "recipe": "Steel Making",        "planet": "earth", "rate": 2.5e8},
+		{"id": 6, "recipe": "Copper Smelting",     "planet": "earth", "rate": 5.0e7},
+		{"id": 7, "recipe": "Oil Refining",        "planet": "earth", "rate": 1.0e8},
 	]
 	if production_panel:
 		production_panel.load_jobs(_production_jobs)
@@ -761,6 +862,7 @@ func _ready() -> void:
 	build_panel.build_requested.connect(_on_build_requested)
 	build_panel.demolish_requested.connect(_on_demolish_requested)
 	build_panel.upgrade_requested.connect(_on_upgrade_requested)
+	build_panel.active_changed.connect(_on_active_changed)
 	launch_panel.launch_requested.connect(_on_launch_requested)
 	production_panel.production_changed.connect(_on_production_changed)
 	if sidebar and sidebar.automation_panel:
@@ -1127,7 +1229,7 @@ func _refresh_launch_access() -> void:
 		launch_panel.hide()
 
 ## Research that unlocks the Automation panel (standing build/launch orders).
-const AUTOMATION_UNLOCK_RESEARCH: String = "autonomous_industrial_control"
+const AUTOMATION_UNLOCK_RESEARCH: String = "autonomous_factories"
 
 ## Reveal the Automation button only once Industrial AI is researched; keep it hidden
 ## (and the panel closed) before then.
@@ -1373,6 +1475,14 @@ func advance_day() -> void:
 func _init_building_cache() -> void:
 	_bdef_cache.clear()
 	for b: Dictionary in BuildingData.all():
+		# Structural mass — the tonnage of the thing — cached once so the upkeep pass never has
+		# to re-add a bill of materials.  Maintenance scales with how much building there is.
+		var mass: float = 0.0
+		for res: String in (b.get("cost", {}) as Dictionary):
+			if res not in Units.NON_MASS_KEYS:
+				mass += float(b["cost"][res])
+		b["_mass"] = mass
+		b["_upkeep"] = mass * UPKEEP_J_PER_GRAM 			* float(UPKEEP_CATEGORY_MULT.get(str(b.get("category", "")), 1.0))
 		_bdef_cache[b["name"]] = b
 	# Recipe lookups too, so _process_production doesn't linear-scan the recipe list twice
 	# per job every frame (that scan was the frame-rate drag while production was running).
@@ -1395,7 +1505,8 @@ func _mark_prod_dirty() -> void:
 ## Base storage granted to every planet that has been colonised (or Earth).
 ## Minerals is a mass, so it rides Units.MASS_SCALE; energy is in Joules and does not.
 const _PLANET_BASE_STORAGE: Dictionary = {
-	"minerals": 100_000.0 * Units.MASS_SCALE, "energy": 100_000.0}
+	"minerals": 100_000.0 * Units.MASS_SCALE,
+	"energy":   100_000.0 * Units.ENERGY_STORAGE_SCALE}
 
 ## Returns the storage capacity this specific planet contributes to the global
 ## pool: base allocation (if colonised / Earth) + capacity from storage buildings.
@@ -1440,32 +1551,81 @@ func _recompute_production_cache() -> void:
 	var built_mc: Dictionary = {}
 	var fuel_demand: Dictionary = {}   # planet → { fuel → g/game-day }
 	var plants: Dictionary = {}        # planet → { building → {"energy", "fuel"} }
+	var pstats: Dictionary = {}        # planet → per-world sums the per-frame passes need
+	var detection: float = 0.0         # civilisation-wide signature-detection power
+	var nuclear: float = 0.0           # civilisation-wide reactor capacity, in level-1 equivalents
+	var upkeep: float = 0.0            # running cost of everything switched on
+	var counts: Dictionary = {}        # planet → { building → standing }, reused by the UI
 	for planet_name: String in planet_buildings:
 		var pmc: float = 0.0
-		for b_name: String in planet_buildings[planet_name]:
+		# Tally the roster ONCE, then work per building TYPE.  A world holds thousands of
+		# structures but only tens of kinds, so every per-building dictionary lookup below
+		# happens once per kind instead of once per instance.
+		var tally: Dictionary = {}
+		for bn in planet_buildings[planet_name]:
+			tally[bn] = int(tally.get(bn, 0)) + 1
+		counts[planet_name] = tally
+		var act_map: Dictionary = active_buildings.get(planet_name, {})
+		# Everything below is roster-derived, so it is summed HERE (once per roster change)
+		# rather than by re-walking thousands of buildings on every single frame.
+		var st: Dictionary = {
+			"mine": 0.0, "atmo": 0.0,        # extraction rates
+			"co2_base": 0.0, "co2_fuel": {}, # emissions: always-on vs fuel-gated
+			"e_total": 0.0, "e_dirty": 0.0,  # non-fuel energy, and how much of it emits
+			"e_fuel_dirty": {},              # fuel-gated energy that emits, by building
+		}
+		for b_name: String in tally:
+			var standing: int = int(tally[b_name])
+			# Only SWITCHED-ON buildings produce, draw, burn, or vent.  Absent from the map means
+			# all of them; a stored figure is clamped in case some were demolished since.
+			var n: float = float(clampi(int(act_map.get(b_name, standing)), 0, standing))
+			if n <= 0.0:
+				continue
 			var bdef: Dictionary = _bdef_cache.get(b_name, {})
 			var prod: Dictionary = bdef.get("production", {})
-			compute  += (prod.get("compute",  0.0) as float)
-			minerals += (prod.get("minerals", 0.0) as float)
-			pmc      += float(bdef.get("mc_capacity", 0.0))
-			radiator += float(bdef.get("radiator_capacity", 0.0))
+			compute  += (prod.get("compute",  0.0) as float) * n
+			minerals += (prod.get("minerals", 0.0) as float) * n
+			pmc      += float(bdef.get("mc_capacity", 0.0)) * n
+			radiator += float(bdef.get("radiator_capacity", 0.0)) * n
+			upkeep   += float(bdef.get("_upkeep", 0.0)) * n
+			st["mine"] = float(st["mine"]) + (prod.get("minerals", 0.0) as float) * n
+			st["atmo"] = float(st["atmo"]) + float(bdef.get("atmo_rate", 0.0)) * n
+			detection += float(bdef.get("detection", 0.0)) * n
+			# Fissile capability tracks REACTOR CAPACITY, so a higher tier counts for as much
+			# more as it generates — and every tier counts, which plain name-matching missed.
+			if str(bdef.get("base_name", "")) == "Nuclear Plant":
+				nuclear += pow(BuildingData.LEVEL_OUTPUT_MULT, float(int(bdef.get("level", 1)) - 1)) * n
+			var co2f: float = float(bdef.get("co2_per_energy", 0.0))
 			# A plant with a fuel line is only as productive as its supply, so hold its energy
 			# aside (and tally its draw) instead of counting it as always-on.
 			var burn: Dictionary = bdef.get("consumption", {})
-			var e: float = (prod.get("energy", 0.0) as float)
+			var e: float = (prod.get("energy", 0.0) as float) * n
 			if burn.is_empty():
 				energy += e
+				st["e_total"] = float(st["e_total"]) + e
+				if co2f > 0.0:
+					st["co2_base"] = float(st["co2_base"]) + e * co2f
+					st["e_dirty"] = float(st["e_dirty"]) + e
 				continue
 			var pf: Dictionary = fuel_demand.get(planet_name, {})
 			for fuel: String in burn:
-				pf[fuel] = float(pf.get(fuel, 0.0)) + float(burn[fuel])
+				pf[fuel] = float(pf.get(fuel, 0.0)) + float(burn[fuel]) * n
 			fuel_demand[planet_name] = pf
 			var pp: Dictionary = plants.get(planet_name, {})
-			var rec: Dictionary = pp.get(b_name, {"energy": 0.0, "fuel": burn})
-			rec["energy"] = float(rec["energy"]) + e
-			pp[b_name] = rec
+			pp[b_name] = {"energy": e, "fuel": burn}
 			plants[planet_name] = pp
+			if co2f > 0.0:
+				var cf: Dictionary = st["co2_fuel"]
+				cf[b_name] = float(cf.get(b_name, 0.0)) + e * co2f
+				var ed: Dictionary = st["e_fuel_dirty"]
+				ed[b_name] = float(ed.get(b_name, 0.0)) + e
 		built_mc[planet_name] = pmc
+		pstats[planet_name] = st
+	_cached_planet_stats = pstats
+	_cached_planet_counts = counts
+	_bld_upkeep = upkeep
+	_cached_detection = detection
+	_cached_nuclear = nuclear
 	_cached_planet_built_mc = built_mc
 	_cached_planet_fuel = fuel_demand
 	_cached_planet_plants = plants
@@ -1506,6 +1666,9 @@ func _combine_production() -> void:
 		* (1.0 + ResearchTree.get_boost("heat_management")) * _thermal_coldness()
 	_thermal_ratio = energy / maxf(_cached_radiator_cap, 1.0)
 	energy *= _thermal_efficiency(energy, _cached_radiator_cap)
+	# Everything switched on draws maintenance power off the top.  This can go negative: a grid
+	# that can't carry its own infrastructure drains the reserve until the player idles something.
+	energy -= _bld_upkeep
 
 	_cached_compute = compute
 	_cached_prod = {
@@ -1990,7 +2153,8 @@ func _auto_launch(rule: Dictionary, angles: Dictionary) -> void:
 		"duration":     duration,
 		"rockets":      LaunchPlanner.rockets(m_idx, origin_cap, target_cap, cost_mult),
 		"fuel_id":      fuel_id,
-		"fuel_amount":  LaunchPlanner.fuel(m_idx, origin_cap, target_cap, angles, 0.0, cost_mult),
+		"fuel_amount":  LaunchPlanner.propellant_mass(
+			m_idx, origin_cap, target_cap, angles, 0.0, cost_mult, fuel_id),
 		"arrival":      arrival,
 	})
 
@@ -2191,15 +2355,16 @@ func _completed_research_map() -> Dictionary:
 ## fractions.  `delta_days` is elapsed game-days so extraction scales with the
 ## timescale, matching the bulk minerals accumulation.
 func _accumulate_compounds(delta_days: float) -> void:
+	if _prod_dirty:
+		_recompute_production_cache()
 	var minerals_mult: float = (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
-	for planet_name: String in planet_buildings:
+	for planet_name: String in _cached_planet_stats:
+		var st: Dictionary = _cached_planet_stats[planet_name]
+		var mine_rate: float = float(st["mine"])
+		var atmo_rate: float = float(st["atmo"])
+		if mine_rate <= 0.0 and atmo_rate <= 0.0:
+			continue
 		var comp: Dictionary = _body_composition(planet_name) as Dictionary
-		var mine_rate: float = 0.0
-		var atmo_rate: float = 0.0
-		for b_name: String in planet_buildings[planet_name]:
-			var bdef: Dictionary = _bdef_cache.get(b_name, {})
-			mine_rate += float((bdef.get("production", {}) as Dictionary).get("minerals", 0.0))
-			atmo_rate += float(bdef.get("atmo_rate", 0.0))
 		# Mines split their yield across the CRUST.  That mass is already counted in the Matter
 		# pool via production.minerals, so it is written straight to the inventory — mirroring
 		# it as well would count every gram mined twice.
@@ -2266,7 +2431,9 @@ func extraction_data(planet_name: String) -> Dictionary:
 		rows.append({
 			"compound": compound,
 			"abundance": abundance,
-			"weight": float(focus.get(compound, abundance)),
+			# With an allocation set, anything absent from it is getting NOTHING — falling back
+			# to abundance there would show a share the operation isn't actually mining.
+			"weight": float(focus.get(compound, 0.0)) if not focus.is_empty() else abundance,
 		})
 	return {"rows": rows, "mine_rate": mine_rate, "focused": not focus.is_empty()}
 
@@ -2320,20 +2487,17 @@ func _consume_fuel(delta_days: float) -> void:
 
 func _accumulate_emissions(delta_days: float) -> void:
 	# Per-planet emission rate (grams/game-day) from combustion plants.
+	if _prod_dirty:
+		_recompute_production_cache()
 	var emit_rate: Dictionary = {}
-	for planet_name: String in planet_buildings:
-		var co2_rate: float = 0.0
-		# A fuel-starved plant burns proportionally less, so it vents proportionally less.
+	for planet_name: String in _cached_planet_stats:
+		var st: Dictionary = _cached_planet_stats[planet_name]
+		# Always-on emitters are a cached constant; fuel-gated ones are scaled by how well each
+		# was fed this tick — a handful of building TYPES, not thousands of buildings.
 		var pfac: Dictionary = _fuel_factor.get(planet_name, {})
-		for b_name: String in planet_buildings[planet_name]:
-			var bdef: Dictionary = _bdef_cache.get(b_name, {})
-			var factor: float = float(bdef.get("co2_per_energy", 0.0))
-			if factor <= 0.0:
-				continue
-			var e: float = float((bdef.get("production", {}) as Dictionary).get("energy", 0.0))
-			if not (bdef.get("consumption", {}) as Dictionary).is_empty():
-				e *= clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
-			co2_rate += e * factor
+		var co2_rate: float = float(st["co2_base"])
+		for b_name: String in (st["co2_fuel"] as Dictionary):
+			co2_rate += float(st["co2_fuel"][b_name]) 				* clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
 		if co2_rate > 0.0:
 			emit_rate[planet_name] = co2_rate * PoliticsData.co2_mult(policies)
 
@@ -2371,19 +2535,18 @@ func _life_expectancy() -> float:
 func _dirty_power_fraction() -> float:
 	var dirty: float = 0.0
 	var total: float = 0.0
-	for p_name: String in planet_buildings:
+	if _prod_dirty:
+		_recompute_production_cache()
+	for p_name: String in _cached_planet_stats:
+		var st: Dictionary = _cached_planet_stats[p_name]
 		var pfac: Dictionary = _fuel_factor.get(p_name, {})
-		for b_name: String in planet_buildings[p_name]:
-			var bdef: Dictionary = _bdef_cache.get(b_name, {})
-			var e: float = float((bdef.get("production", {}) as Dictionary).get("energy", 0.0))
-			if e <= 0.0:
-				continue
-			# Idle (unfuelled) plants neither generate nor pollute — they drop out of both sides.
-			if not (bdef.get("consumption", {}) as Dictionary).is_empty():
-				e *= clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
-			total += e
-			if float(bdef.get("co2_per_energy", 0.0)) > 0.0:
-				dirty += e
+		total += float(st["e_total"])
+		dirty += float(st["e_dirty"])
+		# Idle (unfuelled) plants neither generate nor pollute — they scale out of both sides.
+		for b_name: String in (_cached_planet_plants.get(p_name, {}) as Dictionary):
+			var f: float = clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
+			total += float((_cached_planet_plants[p_name][b_name] as Dictionary)["energy"]) * f
+			dirty += float((st["e_fuel_dirty"] as Dictionary).get(b_name, 0.0)) * f
 	total += _swarm_power()   # the swarm is clean
 	return dirty / total if total > 0.0 else 0.0
 
@@ -2565,6 +2728,9 @@ func _get_catalog_for_display() -> Array:
 		else:
 			entry["requires"] = ""
 		entry["count"] = cnt
+		entry["active"] = clampi(int((active_buildings.get(current_planet, {}) as Dictionary)
+			.get(b["name"], cnt)), 0, cnt)
+		entry["upkeep"] = float(b.get("_upkeep", 0.0))
 		entry["in_progress"] = _queued_count(current_planet, b["name"])
 		# Current stockpile (on this planet) of each cost resource so the panel can
 		# dim the ones the player can't yet afford here.
@@ -2806,11 +2972,11 @@ func _queued_count(planet_name: String, building_name: String) -> int:
 
 ## Number of `building_name` currently standing on `planet_name`.
 func _count_building(planet_name: String, building_name: String) -> int:
-	var c: int = 0
-	for b in planet_buildings.get(planet_name, []):
-		if b == building_name:
-			c += 1
-	return c
+	# Read the tally the roster pass already built rather than rescanning thousands of entries —
+	# batch actions call this repeatedly, and at 10 000 buildings the scan dominated them.
+	if _prod_dirty:
+		_recompute_production_cache()
+	return int((_cached_planet_counts.get(planet_name, {}) as Dictionary).get(building_name, 0))
 
 func _on_build_requested(planet_name: String, building_name: String, count: int = 1) -> void:
 	# A manual click gets instant feedback (works while paused, when the throttled tick is
@@ -2826,6 +2992,13 @@ func _on_build_requested(planet_name: String, building_name: String, count: int 
 		if build_panel.visible:
 			build_panel.apply_counts(_get_catalog_for_display())   # patch counts in place, no rebuild
 		_build_ui_dirty = false
+
+## Player moved a building's active-count slider: switch that many on and refresh the readouts
+## (the roster cache is already marked dirty by set_active_count).
+func _on_active_changed(planet_name: String, building_name: String, count: int) -> void:
+	set_active_count(planet_name, building_name, count)
+	planet_info_page.set_planet_info(get_planet_data(planet_name))
+	_update_hud()
 
 ## Player pressed Upgrade on a building's dropdown: queue the retrofit and refresh the panel
 ## the same coalesced way a manual build does.
@@ -2968,17 +3141,14 @@ func _on_launch_requested(params: Dictionary) -> void:
 		if sat_payload <= 0:
 			return                                    # no satellites stockpiled to loft
 
-	# Cost is the launch vehicle (Rockets) plus the chosen propellant, both drawn from
-	# the origin planet's inventory.
-	var rockets: float = float(params.get("rockets", 0))
+	# Propellant is the ENTIRE cost of a launch, drawn from the origin world's inventory.  The
+	# quantity was derived from the trajectory's energy requirement (LaunchPlanner.propellant_mass),
+	# so a harder transfer or a worse window is paid for in fuel and nothing else.
 	var fuel_id: String = str(params.get("fuel_id", ""))
 	var fuel_amount: float = float(params.get("fuel_amount", 0.0))
-	if _get_stockpile("Rocket", origin_name) < rockets:
+	if fuel_id == "" or _get_stockpile(fuel_id, origin_name) < fuel_amount:
 		return
-	if fuel_id != "" and _get_stockpile(fuel_id, origin_name) < fuel_amount:
-		return
-	_deduct_stockpile("Rocket", rockets, origin_name)
-	if fuel_id != "" and fuel_amount > 0.0:
+	if fuel_amount > 0.0:
 		_deduct_stockpile(fuel_id, fuel_amount, origin_name)
 	if sat_payload > 0:
 		_deduct_stockpile(mission_def.get("payload", ""), float(sat_payload), origin_name)
@@ -3097,11 +3267,29 @@ func refresh_launch_panel() -> void:
 # ── Interstellar colonisation ─────────────────────────────────────────────────
 
 ## Distance (ly) to a named star, from the star-map catalogue.
+## name → star record.  _star_pos / _star_distance_ly used to LINEAR-SCAN the whole catalogue on
+## every call, and they are called from inside loops over alien systems and candidate targets —
+## at ten thousand stars that made the yearly alien pass quadratic and cost whole frames.  The
+## catalogue only ever grows (the observation range is monotonic), so a size change is a
+## sufficient staleness check.
+var _star_index: Dictionary = {}
+var _star_index_size: int = -1
+
+func _star_lookup(star_name: String) -> Dictionary:
+	var all: Array = StarMapPanel.all_stars()
+	if all.size() != _star_index_size:
+		_star_index.clear()
+		for s: Dictionary in all:
+			_star_index[str(s["name"])] = s
+		# Clusters are colonisation targets too, and the mission machinery addresses everything
+		# by name — so they live in the same index and _star_pos/_star_distance_ly just work.
+		for c: Dictionary in StarMapPanel.star_clusters():
+			_star_index[str(c["name"])] = c
+		_star_index_size = all.size()
+	return _star_index.get(star_name, {})
+
 func _star_distance_ly(star_name: String) -> float:
-	for s: Dictionary in StarMapPanel.all_stars():
-		if str(s["name"]) == star_name:
-			return float(s["dist"])
-	return 0.0
+	return float(_star_lookup(star_name).get("dist", 0.0))
 
 ## Launch an interstellar colony ship from Sol to a star with a chosen max speed β and
 ## max acceleration.  The real relativistic energy (accel + coast + decel for the ship's
@@ -3289,10 +3477,18 @@ func _process_vn_colonization() -> void:
 ## Tile id ("q,r") of the hexagonal prism containing a Sol-relative position: a flat-top hex
 ## axial coordinate in the galactic plane.  The prism is a single tall column (no vertical
 ## stacking), so height plays no part in the id.
+## Origin of the region lattice, in Sol-relative coordinates: the GALACTIC CENTRE.  Anchoring
+## there rather than on Sol puts the centre of the galaxy exactly at the centre of tile "0,0",
+## and lets the grid cover the whole disk from one radius instead of reaching 86 000 ly to catch
+## the far rim from an off-centre origin.
+func _region_origin() -> Vector3:
+	return (_gal_axes()[0] as Vector3) * StarMapPanel.SOL_GC_LY
+
 func _region_id(pos: Vector3) -> String:
 	var ax: Array = _gal_axes()
-	var gpx: float = pos.dot(ax[0] as Vector3)   # galactic in-plane x (toward centre)
-	var gpy: float = pos.dot(ax[1] as Vector3)   # galactic in-plane y (toward l=90)
+	var rel: Vector3 = pos - _region_origin()    # measured from the galactic centre
+	var gpx: float = rel.dot(ax[0] as Vector3)   # galactic in-plane x (toward centre)
+	var gpy: float = rel.dot(ax[1] as Vector3)   # galactic in-plane y (toward l=90)
 	var qf: float = (2.0 / 3.0 * gpx) / HEX_SIZE
 	var rf: float = (-1.0 / 3.0 * gpx + HEX_SQRT3 / 3.0 * gpy) / HEX_SIZE
 	var hex: Vector2i = _hex_round(qf, rf)
@@ -3325,7 +3521,8 @@ func _region_center(id: String) -> Vector3:
 	var lx: float = HEX_SIZE * (1.5 * q)                              # galactic in-plane x
 	var ly: float = HEX_SIZE * (HEX_SQRT3 / 2.0 * q + HEX_SQRT3 * r)  # galactic in-plane y
 	var ax: Array = _gal_axes()
-	return (ax[0] as Vector3) * lx + (ax[1] as Vector3) * ly          # centred on the galactic plane
+	# Lattice origin is the galactic centre; the result is still Sol-relative.
+	return _region_origin() + (ax[0] as Vector3) * lx + (ax[1] as Vector3) * ly
 
 ## How many stars a tile actually contains: the galactic stellar density at its centre times the
 ## prism's volume.  Deterministic from position, so it needn't be stored (survives save/load free).
@@ -3379,23 +3576,28 @@ func galaxy_region_grid() -> Array:
 	if _region_grid_cache.is_empty():
 		var n: int = REGION_GRID_RADIUS
 		for q in range(-n, n + 1):
-			for r in range(maxi(-n, -q - n), mini(n, -q + n) + 1):   # hexagonal disc of radius n
+			for r in range(maxi(-n, -q - n), mini(n, -q + n) + 1):   # hex disc centred on the galaxy
 				var id: String = "%d,%d" % [q, r]
 				var center: Vector3 = _region_center(id)
 				var dens: float = StarMapPanel.galactic_density(center)
 				if dens < 1.0e-3:
 					continue   # void tile — never drawn
-				_region_grid_cache.append({"id": id, "center": center, "density": dens})
-	var out: Array = []
+				# Star count is deterministic from position, so it belongs in the one-time build
+				# rather than being recomputed on every call.
+				_region_grid_cache.append({
+					"id": id, "center": center, "density": dens,
+					"stars": _region_star_count(center), "frac": 0.0,
+				})
+	# Only the colonised fraction changes, so it is patched IN PLACE and the cache itself is
+	# returned.  This is called from the galaxy maps' _draw AND from their hover picking, i.e.
+	# every frame and every mouse move — rebuilding ~900 dictionaries each time was pure garbage,
+	# and the collector pauses it caused were the periodic stutter.
+	# Callers treat the result as read-only.
 	for c: Dictionary in _region_grid_cache:
-		var frac: float = 0.0
-		var id: String = str(c["id"])
-		if _regions.has(id):
-			var reg: Dictionary = _regions[id]
-			frac = clampf(float(reg["colonized"]) / maxf(float(reg["colonizable"]), 1.0), 0.0, 1.0)
-		out.append({"id": id, "center": c["center"], "density": float(c["density"]), "frac": frac,
-			"stars": _region_star_count(c["center"] as Vector3)})
-	return out
+		var reg: Dictionary = _regions.get(str(c["id"]), {})
+		c["frac"] = 0.0 if reg.is_empty() else clampf(
+			float(reg["colonized"]) / maxf(float(reg["colonizable"]), 1.0), 0.0, 1.0)
+	return _region_grid_cache
 
 ## Full detail for one region tile (by id), for the galaxy map's selection sidebar.
 func galaxy_region_info(id: String) -> Dictionary:
@@ -3609,10 +3811,8 @@ func _seed_star_factions() -> void:
 
 ## 3-D map position of a star (game units), or ZERO if unknown.
 func _star_pos(star_name: String) -> Vector3:
-	for s: Dictionary in StarMapPanel.all_stars():
-		if str(s["name"]) == star_name:
-			return s["pos"]
-	return Vector3.ZERO
+	var s: Dictionary = _star_lookup(star_name)
+	return s["pos"] if s.has("pos") else Vector3.ZERO
 
 ## Combined signature-detection power: base astronomy + every telescope building's
 ## "detection" contribution, scaled by detection research.  ZERO until Radio Astronomy is
@@ -3620,11 +3820,9 @@ func _star_pos(star_name: String) -> Vector3:
 func _telescope_power() -> float:
 	if not ResearchTree.is_unlocked("radio_astronomy"):
 		return 0.0
-	var p: float = TELESCOPE_BASE_POWER
-	for planet: String in planet_buildings:
-		for b_name: String in planet_buildings[planet]:
-			p += float((_bdef_cache.get(b_name, {}) as Dictionary).get("detection", 0.0))
-	return p * (1.0 + ResearchTree.get_boost("detection"))
+	if _prod_dirty:
+		_recompute_production_cache()
+	return (TELESCOPE_BASE_POWER + _cached_detection) * (1.0 + ResearchTree.get_boost("detection"))
 
 ## Deterministic alien infrastructure at a given OBSERVATION year: pass (year − distance) to
 ## get the light-delayed state the player can actually see.  {dyson: 0..1, telescopes, lasers}.
@@ -3755,6 +3953,15 @@ func _detect_alien_signatures(dyears: float) -> void:
 func _spread_aliens(dyears: float) -> void:
 	if star_factions.is_empty():
 		return
+	# Decide HOW MANY systems spread before looking for anywhere to put them.  At the base rate
+	# a colonisation is rare, so building a candidate list of every uncolonised star first meant
+	# allocating (and discarding) a several-thousand-entry array on almost every single year.
+	var expected: float = float(star_factions.size()) * ALIEN_SPREAD_RATE * dyears
+	var count: int = int(expected)
+	if randf() < (expected - float(count)):   # fractional remainder → probabilistic +1
+		count += 1
+	if count <= 0:
+		return
 	var targets: Array = []
 	for s: Dictionary in StarMapPanel.all_stars():
 		var nm: String = str(s["name"])
@@ -3762,10 +3969,6 @@ func _spread_aliens(dyears: float) -> void:
 			targets.append(nm)
 	if targets.is_empty():
 		return
-	var expected: float = float(star_factions.size()) * ALIEN_SPREAD_RATE * dyears
-	var count: int = int(expected)
-	if randf() < (expected - float(count)):   # fractional remainder → probabilistic +1
-		count += 1
 	count = mini(count, targets.size())
 	var sources: Array = star_factions.keys()
 	for _i in range(count):
@@ -4302,6 +4505,7 @@ func save_game(path: String = "") -> void:
 		"planet_buildings":   planet_buildings,
 		"build_queue":        build_queue,
 		"extraction_focus":   extraction_focus,
+		"active_buildings":   active_buildings,
 		"entropy_exported":   entropy_exported,
 		"resources":          ResearchTree.resources,
 		"active_launches":    active_launches,
@@ -4422,6 +4626,7 @@ func load_game(path: String = "") -> void:
 
 	build_queue = data["build_queue"] if (data.has("build_queue") and data["build_queue"] is Dictionary) else {}
 	extraction_focus = data["extraction_focus"] if (data.has("extraction_focus") and data["extraction_focus"] is Dictionary) else {}
+	active_buildings = data["active_buildings"] if (data.has("active_buildings") and data["active_buildings"] is Dictionary) else {}
 	entropy_exported = float(data.get("entropy_exported", 0.0))
 	_heat_alerted = false
 	_labor_alerted = false
@@ -5029,12 +5234,9 @@ func _geopolitical_tension() -> float:
 
 ## Total Nuclear Plants standing across every world.
 func _nuclear_plant_count() -> int:
-	var c: int = 0
-	for p: String in planet_buildings:
-		for b in planet_buildings[p]:
-			if b == "Nuclear Plant":
-				c += 1
-	return c
+	if _prod_dirty:
+		_recompute_production_cache()
+	return int(_cached_nuclear)
 
 ## Latent weapons capability from the civilian fission fleet (0..1): more reactors mean
 ## more fissile material and know-how a tense world can turn to arms.  Saturating, so

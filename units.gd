@@ -33,6 +33,17 @@ const MASS_SCALE: float = 1.25e6
 ## must skip them.
 const NON_MASS_KEYS: Array = ["energy", "science", "compute"]
 
+# ── Energy storage scale ──────────────────────────────────────────────────────
+## Energy STORAGE was authored at a token scale — a "Battery Bank" held 1 MJ, against a grid
+## producing 3.3e12 J a day.  Fine while nothing expensive was ever bought with energy, but a
+## launch campaign costs 1e13–1e15 J, so the pool's ceiling made launches unaffordable no matter
+## how long you saved.  This lifts stored energy onto real installation capacities:
+##   Battery Bank  1 MJ → 10 TJ  (2.8 GWh — Moss-Landing class grid battery)
+##   Pumped Hydro  5 MJ → 50 TJ  (13.9 GWh — Bath-County class facility)
+## Applied only to the "energy" entry of a storage block (and the per-world base cap); energy
+## COSTS are untouched, since those were always in real Joules.
+const ENERGY_STORAGE_SCALE: float = 1.0e7
+
 const RESOURCE_DEFS: Dictionary = {
 	# key       label        stored unit   rate unit
 	"science":  {"label": "Science",  "unit": "FLOP",    "rate_unit": "FLOP/s"},

@@ -8,6 +8,8 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Workshop":          "",
 	"Factory":           "mass_production_systems",
 	"Automated Factory": "autonomous_factories",
+	# Gas turbines are a post-war technology, unlike the coal and oil fleet already standing.
+	"Natural Gas Burner": "industrial_mechanization",
 	"Nuclear Plant":   "nuclear_power",
 	# Civil defence becomes a live concern the moment the bomb does.
 	"Bunker":          "nuclear_power",
