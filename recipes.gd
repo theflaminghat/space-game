@@ -27,6 +27,108 @@ class_name RecipeData
 ##   minerals, energy, science
 
 const RECIPES: Array = [
+	# ── Agriculture ──────────────────────────────────────────────────
+	# What a Farm actually grows is chosen HERE, not by the building: one Farm is arable
+	# capacity, and these recipes decide what that capacity is turned into.  "work" is set
+	# explicitly rather than derived from inputs, because what limits a field is land and
+	# season, not the tonnage of water pumped onto it.
+	#
+	# Water figures are NET irrigation draw — the share that has to be supplied rather than
+	# fallen out of the sky — which is why they are small next to a crop's real thirst.
+	#
+	# ENERGY IS IN WATT-DAYS, NOT SI JOULES — one unit is 86 400 real joules (see units.gd).
+	# So 0.030 here is 2 592 real J per gram of wheat, which is industrial cereal's true cost
+	# of 2-4 GJ per tonne.  Writing the SI figure directly asked for 6 000x the planet's entire
+	# output and starved everyone; divide real joules by 86 400 before putting them here.
+	#
+	# Grain holds ~14 000 real J/g of food energy, so a field returns roughly five joules for
+	# each one spent — farming with machines, not a free lunch.  The whole slate comes to ~7 %
+	# of the energy budget, which is what agriculture costs an industrial society.
+	#
+	# The gap between a field and a lamp is the reason living off Earth is hard.  Photosynthesis
+	# runs at 1-2 %, so a gram of biomass needs on the order of a MILLION real joules of light.
+	# On a planet with a sky the Sun donates it; under LEDs you buy it, which is why Algae
+	# Culture costs 200x what wheat does.
+	{
+		"name":        "Wheat Cultivation",
+		"category":    "agriculture",
+		"description": "Sow, irrigate and harvest cereal grain — the cheapest calories per unit of land ever found.",
+		"requires":    "",
+		"work":        1.0,
+		"inputs":  {"H2O": 0.02, "energy": 0.030},
+		"outputs": {"Wheat": 1.0},
+	},
+	{
+		"name":        "Rice Cultivation",
+		"category":    "agriculture",
+		"description": "Flooded-paddy cultivation. Feeds more people per hectare than any other grain, and drinks accordingly.",
+		"requires":    "",
+		"work":        1.0,
+		"inputs":  {"H2O": 0.06, "energy": 0.048},
+		"outputs": {"Rice": 1.0},
+	},
+	{
+		"name":        "Vegetable Cultivation",
+		"category":    "agriculture",
+		"description": "Mixed truck farming — more edible mass off the same ground than grain, and none of it keeps.",
+		"requires":    "",
+		"work":        0.8,
+		"inputs":  {"H2O": 0.04, "energy": 0.018},
+		"outputs": {"Vegetables": 1.0},
+	},
+	{
+		"name":        "Algae Culture",
+		"category":    "agriculture",
+		"description": "Photobioreactor cultivation of edible algae — the only crop that needs neither soil nor season.",
+		"requires":    "",
+		"work":        1.2,
+		"inputs":  {"H2O": 0.03, "CO2": 0.02, "energy": 6.0},
+		"outputs": {"Algae": 1.0},
+	},
+
+	# ── Livestock ────────────────────────────────────────────────────
+	# A Ranch is pens, pasture and handling — which animal stands in it is chosen here.  Every
+	# one of them is a converter that runs at a loss: you are spending grain you could have
+	# eaten to get back a smaller mass of something else.  The feed ratios are the real ones,
+	# and they are the whole decision — poultry returns a gram for every two spent, cattle
+	# wants ten.
+	{
+		"name":        "Poultry Farming",
+		"category":    "livestock",
+		"description": "Broiler flocks. The most efficient animal ever domesticated: roughly two grams of feed per gram of meat.",
+		"requires":    "",
+		"work":        2.0,
+		"inputs":  {"Wheat": 2.0, "H2O": 0.12, "energy": 0.096},
+		"outputs": {"Chicken": 1.0},
+	},
+	{
+		"name":        "Aquaculture",
+		"category":    "livestock",
+		"description": "Netted pens and raceways. Fish are cold-blooded and weightless in water, so almost nothing is spent holding them up.",
+		"requires":    "",
+		"work":        1.5,
+		"inputs":  {"Wheat": 1.5, "H2O": 0.20, "energy": 0.072},
+		"outputs": {"Fish": 1.0},
+	},
+	{
+		"name":        "Swine Husbandry",
+		"category":    "livestock",
+		"description": "Pig lots. Four grams of feed per gram of pork — twice a bird's cost, half a steer's.",
+		"requires":    "",
+		"work":        4.0,
+		"inputs":  {"Wheat": 4.0, "H2O": 0.25, "energy": 0.120},
+		"outputs": {"Pork": 1.0},
+	},
+	{
+		"name":        "Cattle Raising",
+		"category":    "livestock",
+		"description": "Beef herds. Ten grams of grain walked through an animal to yield one — the most expensive food a civilisation can choose to make.",
+		"requires":    "",
+		"work":        10.0,
+		"inputs":  {"Wheat": 10.0, "H2O": 0.50, "energy": 0.180},
+		"outputs": {"Beef": 1.0},
+	},
+
 	# ── Iron ─────────────────────────────────────────────────────────────────────
 
 	# Hematite route (Earth / Mars): blast-furnace reduction of Fe2O3 with coke.
@@ -55,7 +157,7 @@ const RECIPES: Array = [
 		"name":        "Wüstite Reduction",
 		"category":    "metals",
 		"description": "Carbothermic reduction of wüstite (FeO) — the dominant iron ore in Venus' basaltic crust.",
-		"requires":    "",
+		"requires":    "metallurgy",
 		"inputs":  {"FeO": 8.0, "Coal": 1.5, "energy": 40.0},
 		"outputs": {"Fe": 6.0},
 	},
@@ -345,6 +447,20 @@ const RECIPES: Array = [
 		"outputs": {"Berserker": 1.0},
 	},
 
+	# von Neumann Probe — a colony seed that builds copies of itself out of whatever it finds.
+	# One probe reaching one star becomes two probes leaving it, which is why a single launch
+	# eventually reaches everything: the fleet is not something you build, it is something you
+	# start.  That is also the danger, and why it needs Self-Replicating Industry to make.
+	{
+		"name":        "von Neumann Probe Assembly",
+		"category":    "aerospace",
+		"description": "Integrate a self-replicating colony seed: fabricators, a mining head, avionics and a starship, able to rebuild all of it from raw asteroid.",
+		"requires":    "self_replicating_industry",
+		"inputs":  {"Al": 1_200.0, "Steel": 800.0, "Microchip": 240.0, "Superconductor": 120.0,
+			"SelfHealingComposite": 60.0, "energy": 9_000.0},
+		"outputs": {"VNProbe": 1.0},
+	},
+
 	# ── Chemicals ────────────────────────────────────────────────────────────────
 
 	# Water electrolysis: split abundant crustal H2O into O2.
@@ -545,6 +661,28 @@ const RECIPES: Array = [
 ## one gram for a recipe that yields matter, or one Joule for the fuel recipes that yield only
 ## energy.  The stoichiometric ratios in the table are preserved — every input and output is
 ## simply scaled together — so "3× Iron Smelting" reads directly as 3 g of iron per day.
+## "Work" one unit of rate demands from a world's capacity pool — the currency both the
+## Production panel and the simulation throttle against.  An explicit "work" key wins (used by
+## agriculture, where land and season set the limit rather than tonnage); otherwise it is the
+## mass of everything non-energy that has to be handled.
+##
+## Lives here rather than in Game.gd so the panel showing the number and the simulation
+## enforcing it cannot drift apart.
+static func work(recipe: Dictionary) -> float:
+	if recipe.has("work"):
+		return maxf(1.0, float(recipe["work"]))
+	var w: float = 0.0
+	var inputs: Dictionary = recipe.get("inputs", {})
+	for key: String in inputs:
+		if key == "energy" or key == "science":
+			continue
+		w += float(inputs[key])
+	return maxf(1.0, w)
+
+## Work per unit of the panel's normalised rate (1x = 1 g of product/day).
+static func work_per_rate(recipe: Dictionary) -> float:
+	return scale(recipe) * work(recipe)
+
 static func scale(recipe: Dictionary) -> float:
 	var outputs: Dictionary = recipe.get("outputs", {})
 	var mass: float = 0.0

@@ -44,7 +44,9 @@ const LEVEL_RESEARCH: Array = ["", "precision_manufacturing", "autonomous_factor
 ## burns proportionally more fuel, so tiers don't quietly become free energy.
 const LEVEL_OUTPUT_KEYS: Array = ["production", "storage", "consumption"]
 ## Bare numeric keys scaled the same way.
-const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "atmo_rate", "radiator_capacity", "detection", "shelter"]
+const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacity",
+	"atmo_rate", "radiator_capacity", "detection", "shelter",
+	"beam_send", "beam_recv"]
 
 # ── Single buildings, not complexes ───────────────────────────────────────────
 ## Entries were originally authored at REGIONAL FLEET scale — one "Coal Plant" meant 132 GW of
@@ -73,6 +75,10 @@ const UNITS: Dictionary = {
 	"Fusion Reactor":   1000,    # 1.5 TW fleet → 1.5 GW plant
 	"Thermal Radiator": 1000,    # 4 TW fleet   → 4 GW radiator array
 	"Bunker":           1000,    # 200 M sheltered → 200 k per shelter
+	"Ground Rectenna":  1000,    # 5 TW fleet    -> 5 GW station
+	"Microwave Uplink": 1000,    # 5 TW fleet    -> 5 GW station
+	"Orbital Rectenna": 1000,    # 20 TW fleet   -> 20 GW platform
+	"Power Relay Satellite": 1000,  # 25 TW fleet -> 25 GW relay
 }
 
 ## How many real buildings the authored entry for `base_name` represented (1 when unlisted).
@@ -105,8 +111,11 @@ static func _to_real_mass(b: Dictionary) -> Dictionary:
 				blk[res] = float(blk[res]) * m
 	if b.has("atmo_rate"):          # grams pulled from the atmosphere per day
 		b["atmo_rate"] = float(b["atmo_rate"]) * m
-	if b.has("mc_capacity"):        # work units are material throughput — a mass-like quantity
-		b["mc_capacity"] = float(b["mc_capacity"]) * m
+	# Work units are material throughput — a mass-like quantity — for factory floor space
+	# and for arable land alike.
+	for wk: String in ["mc_capacity", "farm_capacity", "ranch_capacity"]:
+		if b.has(wk):
+			b[wk] = float(b[wk]) * m
 	# Stored energy is not a mass, but it was authored at a token scale — lift it to the real
 	# capacity of the installation (see Units.ENERGY_STORAGE_SCALE).
 	var stor: Dictionary = b.get("storage", {})
@@ -323,7 +332,12 @@ const BUILDINGS := [
 		"category": "power",
 		"allowed_types": ["rocky", "gas_giant"],
 		"cost": {"SolarPanel": 80_000, "Steel": 20_000, "energy": 50_000},
-		"production": {"energy": 5.0e10}},   # 50 GW (50e9 × 2.0e-6 = 100 000 g)
+		"production": {"energy": 5.0e10},   # 50 GW (50e9 × 2.0e-6 = 100 000 g)
+		# Output follows the Sun.  A panel is not a generator, it is a collector, so its yield
+		# rises with the ageing main sequence, spikes absurdly on the red-giant branch, and goes
+		# effectively dark once nothing is left but a white dwarf.  Everything that makes power
+		# in this game runs out eventually; this is how the solar fleet does it.
+		"solar": true},
 
 	# Mine — surface excavator on a concrete pad.  Concrete is coal-free and needs
 	# no research, so the first mines are always buildable (no bootstrap lock).
@@ -464,7 +478,11 @@ const BUILDINGS := [
 		"category": "power",
 		"allowed_types": ["rocky"],
 		"cost": {"Steel": 2_300_000, "Ceramic": 650_000, "Superconductor": 50_000, "energy": 200_000},
-		"production": {"energy": 1.5e12}},   # 1.5 TW (1.5e12 × 2.0e-6 = 3.0e6 g)
+		"production": {"energy": 1.5e12},   # 1.5 TW fleet -> 1.5 GW plant
+		# D-He3 releases ~3.4e11 J per gram; at ~40 % conversion a 1.5 GW plant burns
+		# 1.1e-2 g/s = ~950 g/day.  Fusion is astonishingly fuel-light -- but the fuel only
+		# exists in lunar regolith and gas-giant envelopes, so it still has to be gone and got.
+		"consumption": {"He3": 950.0}},
 
 	# Automated Factory — lights-out robotic plant.  ~8× a Factory; the densest source
 	# of Manufacturing Capacity, and where the automation research lane really pays off
@@ -503,6 +521,192 @@ const BUILDINGS := [
 		"cost": {"Steel": 1_200_000, "Ceramic": 400_000, "Cu": 100_000, "energy": 200_000},
 		"production": {},
 		"radiator_capacity": 4.0e12},   # +4 TW of heat-shedding capacity
+
+	# ── Agriculture ──────────────────────────────────────────────────
+	# Two buildings, not seven.  A Farm is arable capacity and a Ranch is pens and pasture;
+	# WHAT they grow is a recipe chosen in the Production panel, exactly like a smelter.  That
+	# is what agriculture actually is — the same field grows wheat or rice depending on what
+	# was sown, and the same pens hold cattle or hogs.
+	#
+	# "farm_capacity" / "ranch_capacity" are work-units per day, the agricultural twins of
+	# mc_capacity: recipes in the "agriculture" and "livestock" categories draw on them
+	# instead of on factory floor space (see Game._process_production).
+
+	# Farm — open ground under an open sky.  Cheap, enormous, and only possible on a world
+	# that already has weather; on anything else the crop freezes, boils or suffocates.
+	{"name": "Farm",
+		"category": "agriculture",
+		"allowed_types": ["rocky"],
+		"cost": {"Steel": 3_000, "Concrete": 2_500, "energy": 2_000},
+		"production": {},
+		"farm_capacity": 1_800.0},
+
+	# Ranch — pens, pasture, water and handling.  Which animal stands in it is a recipe.
+	{"name": "Ranch",
+		"category": "agriculture",
+		"allowed_types": ["rocky"],
+		"cost": {"Steel": 3_500, "Concrete": 2_000, "energy": 1_800},
+		"production": {},
+		"ranch_capacity": 1_800.0},
+
+	# Hydroponics Bay — sealed racks under lamps.  Arable capacity where there is no soil and
+	# no sky, which is what makes a colony possible at all; it buys that with power and with
+	# water it cannot get from weather.  A fraction of open ground's capacity per building.
+	{"name": "Hydroponics Bay",
+		"category": "agriculture",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Steel": 12_000, "Glass": 5_000, "Plastic": 4_000, "Microchip": 500, "energy": 15_000},
+		"production": {},
+		"farm_capacity": 600.0,
+		"consumption": {"energy": 2.0e8}},
+
+	# Climate-Controlled Farm — a sealed, pressurised, temperature-regulated field under glass.
+	# Where a Hydroponics Bay grows racks, this grows ground: it holds a whole artificial
+	# climate steady against whatever is outside, and so returns nearly open-field capacity on
+	# a world that has no business supporting a field.
+	#
+	# Aerogel is what makes the envelope possible at all — the only insulator light enough to
+	# roof a field with and still hold a Martian night out.
+	{"name": "Climate-Controlled Farm",
+		"category": "agriculture",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Steel": 20_000, "Glass": 12_000, "Aerogel": 6_000, "Microchip": 1_500,
+			"Superconductor": 800, "energy": 40_000},
+		"production": {},
+		"farm_capacity": 1_500.0,
+		"ranch_capacity": 400.0,
+		"consumption": {"energy": 5.0e8, "CO2": 8.0e7, "NH3": 2.0e7}},
+
+
+	# ── Power transmission ────────────────────────────────────────────────────
+	# Energy made where nobody lives has to be moved.  A Dyson swarm hangs inside Mercury's
+	# orbit and a colony's reactors sit on another world entirely, so their output reaches the
+	# grid only as a beam -- and a beam needs an aperture at both ends.  "beam_send" (W) is how
+	# much power a structure can put into the network; "beam_recv" (W) is how much can be caught
+	# and rectified.  Transmitted power is capped by whichever side is narrower, so the two have
+	# to be built out together (see Game._link_capacity).
+
+	# Ground Rectenna -- a rectifying antenna farm, kilometres of dipole mesh over farmland.
+	# The NASA reference design lands ~5 GW per site.  Air and weather eat part of the beam;
+	# that loss is already reflected in the figure below, which is DELIVERED power.
+	{"name": "Ground Rectenna",
+		"category": "support",
+		"allowed_types": ["rocky"],
+		"cost": {"Steel": 800_000, "Cu": 600_000, "Plastic": 200_000, "Microchip": 50_000, "energy": 300_000},
+		"production": {},
+		"beam_recv": 5.0e12},
+
+	# Microwave Uplink -- the other end of the same technology: a phased array that puts a
+	# world's surplus generation into the network.  Metamaterial lensing is what lets an
+	# aperture this size hold a beam together across astronomical distances.
+	{"name": "Microwave Uplink",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Steel": 600_000, "Cu": 800_000, "Metamaterial": 40_000, "Microchip": 150_000, "energy": 500_000},
+		"production": {},
+		"beam_send": 5.0e12},
+
+	# Orbital Rectenna -- the same collector in free fall, where there is no atmosphere to
+	# scatter the beam and no structural limit on aperture.  Four times a ground station's
+	# throughput, at the price of putting it up there.
+	{"name": "Orbital Rectenna",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Al": 500_000, "Cu": 400_000, "Ceramic": 300_000, "Microchip": 200_000, "energy": 800_000},
+		"production": {},
+		"beam_recv": 2.0e13},
+
+	# Power Relay Satellite -- a mirror-and-array platform that catches the swarm's output and
+	# throws it inward.  Superconducting busbars carry the current between aperture and emitter
+	# without dissipating it as the waste heat that limits every terrestrial design.
+	{"name": "Power Relay Satellite",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Al": 600_000, "Superconductor": 250_000, "Metamaterial": 60_000, "Microchip": 200_000, "energy": 1_000_000},
+		"production": {},
+		"beam_send": 2.5e13},
+
+	# ── Orbital-scale infrastructure ──────────────────────────────────
+	# The rung between a planet and a star.  A mature fusion grid runs ~1e15 W, which needs
+	# 37 000 Thermal Radiators to shed and has no receiver to match at all — while the swarm-
+	# class structures below start at 2e21 and are absurd until a swarm actually exists.  These
+	# two fill a gap of eleven orders of magnitude that the player would otherwise cross one
+	# gigawatt at a time.
+
+	# Orbital Radiator Array — free-flying panels in high orbit, shedding a fusion economy's
+	# waste heat where there is no atmosphere to carry it and no night to wait for.
+	{"name": "Orbital Radiator Array",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Steel": 900_000, "Ceramic": 400_000, "Graphene": 120_000,
+			"Superconductor": 60_000, "energy": 900_000},
+		"production": {},
+		"radiator_capacity": 4.0e14},
+
+	# Orbital Power Grid — a receiving and relaying constellation around one world, the step
+	# between a rectenna farm and an aperture that can catch a fraction of a star.
+	{"name": "Orbital Power Grid",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Al": 800_000, "Superconductor": 500_000, "Metamaterial": 90_000,
+			"Microchip": 300_000, "energy": 1_200_000},
+		"production": {},
+		"beam_recv": 2.0e15,
+		"beam_send": 2.0e15},
+
+
+	# ── Stellar-scale infrastructure ──────────────────────────────────
+	# A finished swarm delivers ~9.5e23 W.  Nothing built a gigawatt at a time can radiate,
+	# catch or hold that: it would take 2e14 Thermal Radiators, which is not a build order but
+	# a wall.  These four are the swarm's counterparts — structures of the same class as the
+	# collectors themselves, sized so a complete ring needs a few hundred of each rather than
+	# a few hundred trillion.  They are the reason a Dyson swarm is a PROJECT and not a button.
+	#
+	# All four are built from the exotic materials the late tree unlocks; that is what those
+	# recipes were always for.
+
+	# Radiator Swarm — films co-orbiting the collectors, dumping the waste heat of everything
+	# the civilisation does.  Thermodynamics, not collection, is what caps a Dyson economy:
+	# every joule you use has to leave again as heat or you cook.
+	{"name": "Radiator Swarm",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Graphene": 12_000_000, "CarbonNanotube": 8_000_000, "Aerogel": 5_000_000,
+			"Steel": 20_000_000, "energy": 40_000_000},
+		"production": {},
+		"radiator_capacity": 2.0e21},
+
+	# Stellar Rectenna Grid — receiving aperture at planetary-orbit scale.  A ground station
+	# measured in kilometres cannot land a fraction of a percent of a star.
+	{"name": "Stellar Rectenna Grid",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Metamaterial": 10_000_000, "Superconductor": 9_000_000,
+			"CarbonNanotube": 6_000_000, "Al": 18_000_000, "energy": 50_000_000},
+		"production": {},
+		"beam_recv": 2.0e21},
+
+	# Swarm Relay Network — the transmitting half: phased apertures strung between the
+	# collectors and everywhere the power is actually spent.
+	{"name": "Swarm Relay Network",
+		"category": "support",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Metamaterial": 12_000_000, "Superconductor": 11_000_000,
+			"QuantumProcessor": 900_000, "Al": 15_000_000, "energy": 60_000_000},
+		"production": {},
+		"beam_send": 2.5e21},
+
+	# Orbital Ring Store — a superconducting loop the diameter of a planet's orbit, holding
+	# current indefinitely.  A swarm's output is only useful if it can be banked between the
+	# moments a civilisation needs all of it at once.
+	{"name": "Orbital Ring Store",
+		"category": "storage",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Superconductor": 15_000_000, "SelfHealingComposite": 7_000_000,
+			"CarbonNanotube": 5_000_000, "Steel": 25_000_000, "energy": 45_000_000},
+		"production": {},
+		"storage": {"energy": 5.0e17}},
+
 
 	# ── Megastructure infrastructure ──────────────────────────────────────────
 	# Space Elevator — a tether from the surface to beyond geostationary altitude.

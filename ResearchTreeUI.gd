@@ -763,9 +763,9 @@ func _format_cost(cost: Dictionary) -> String:
 	if cost.is_empty():
 		return "Free"
 
-	# Costs are production-scaled (science can reach ~1e29), so format with SI
-	# prefixes instead of printing a raw 30-digit integer.
-	const UNITS := {"science": "FLOP", "energy": "J", "minerals": "g"}
+	# Science is the only research currency, and it is production-scaled (it can reach ~1e29),
+	# so format with SI prefixes rather than printing a raw 30-digit integer.
+	const UNITS := {"science": "FLOP", "minerals": "g"}
 	var total: float = 0.0
 	var parts: Array[String] = []
 	for key_value: Variant in cost.keys():

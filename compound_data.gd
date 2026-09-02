@@ -28,6 +28,18 @@ const NAMES: Dictionary = {
 	"Oil":     "Crude Oil",
 	# Fractions off the crude still — see the Oil Refining recipe.
 	"He3":     "Helium-3",
+	# -- Foodstuffs -----------------------------------------------------------
+	# Edible mass.  People eat these and nothing else; see Game.FOOD_TYPES.  They are
+	# nutritionally interchangeable by mass -- what separates them is what it costs to
+	# grow them, which is where the interesting decision lives.
+	"Wheat":      "Wheat",
+	"Rice":       "Rice",
+	"Vegetables": "Vegetables",
+	"Fish":       "Fish",
+	"Beef":       "Beef",
+	"Pork":       "Pork",
+	"Chicken":    "Chicken",
+	"Algae":      "Culture Algae",
 	"CH4":     "Natural Gas",
 	"EnrichedU": "Enriched Uranium",
 	"FuelOil":  "Fuel Oil",
@@ -82,6 +94,7 @@ const NAMES: Dictionary = {
 	"Antimatter":    "Antimatter",
 	"Missile":       "Relativistic Missile",
 	"Berserker":     "Berserker Seed",
+	"VNProbe":    "von Neumann Probe",
 }
 
 ## Formula → category bucket (anything not listed defaults to "raw").
@@ -136,11 +149,23 @@ const CATEGORIES: Dictionary = {
 	"Antimatter":    "manufactured",
 	"Missile":       "manufactured",
 	"Berserker":     "manufactured",
+
+	# Foodstuffs get their own bucket so the Inventory tab reads as a larder, not as ore.
+	"Wheat": "food",
+	"Rice": "food",
+	"Vegetables": "food",
+	"Fish": "food",
+	"Beef": "food",
+	"Pork": "food",
+	"Chicken": "food",
+	"Algae": "food",
+	"VNProbe": "manufactured",
 }
 
-const CATEGORY_ORDER: Array[String] = ["raw", "refined", "components", "manufactured"]
+const CATEGORY_ORDER: Array[String] = ["food", "raw", "refined", "components", "manufactured"]
 
 const CATEGORY_LABELS: Dictionary = {
+	"food":         "Food",
 	"raw":          "Raw Materials",
 	"refined":      "Refined Materials",
 	"components":   "Components",
@@ -148,6 +173,7 @@ const CATEGORY_LABELS: Dictionary = {
 }
 
 const CATEGORY_COLORS: Dictionary = {
+	"food":         Color(0.55, 0.80, 0.45),
 	"raw":          Color(0.80, 0.70, 0.50),
 	"refined":      Color(0.50, 0.80, 0.65),
 	"components":   Color(0.50, 0.70, 1.00),

@@ -14,6 +14,10 @@ class_name MissionData
 ## One "Rocket" unit is a real launch vehicle, not an abstract token: ~500 t of stage hardware,
 ## tankage and structure — Falcon-9 through Saturn-V class.  Mission "rockets" counts VEHICLES;
 ## this converts the count into the grams of Rocket actually drawn from the origin's inventory.
+## Grams of payload one deployable unit costs.  Without this a "satellite" cost a single gram,
+## which made the largest structure a civilisation can build cheaper than a rivet.
+const PAYLOAD_MASS_PER_UNIT: float = 1.0e13
+
 const ROCKET_UNIT_MASS_G: float = 5.0e8
 
 ## Energy a launch campaign expends per gram of vehicle put on a trajectory.  Low Earth orbit
@@ -33,9 +37,15 @@ const MISSION_TYPES := [
 	{"name": "Research Probe",  "rockets": 2,  "fuel": 16},
 	# Cargo resupply to an established colony.
 	{"name": "Supply Run",      "rockets": 4,  "fuel": 50},
-	# Carrier that ferries a single Solar Satellite to the Sun and slots it into the
-	# swarm.  Only valid with the Sun as target; each panel is deployed individually
-	# (one collector per launch), so the swarm is built out one piece at a time.
+	# Carrier that ferries one collector array to the Sun and slots it into the swarm.  Only
+	# valid with the Sun as target, and one array per launch, so the swarm is built out a piece
+	# at a time — 1 409 launches for a complete ring.
+	#
+	# What is launched is a SEED, not the finished article: PAYLOAD_MASS_PER_UNIT grams of
+	# self-replicating machinery that arrives, mines the inner system, and grows itself into a
+	# shell segment of ~2e10 collectors (Game.SWARM_COLLECTORS_PER_PANEL).  That is the only way
+	# a megastructure is ever built, and it is why the launched mass is merely industrial while
+	# the deployed area is stellar.
 	{"name": "Solar Deployment", "rockets": 2, "fuel": 20,
 		"payload": "SolarSatellite", "payload_per_launch": 1, "sun_only": true},
 ]

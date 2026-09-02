@@ -176,7 +176,8 @@ func _origin_sat_stock() -> int:
 	var o := origin_option.selected
 	if o < 0 or o >= PLANETS.size():
 		return 0
-	return int(_sat_stock.get(PLANETS[o].to_lower(), 0))
+	# _sat_stock is in grams; a deployable unit costs MissionData.PAYLOAD_MASS_PER_UNIT of them.
+	return int(float(_sat_stock.get(PLANETS[o].to_lower(), 0)) / MissionData.PAYLOAD_MASS_PER_UNIT)
 
 ## Number of satellites the selected Solar Deployment would actually carry.
 func _payload_batch(mission_idx: int) -> int:
@@ -393,13 +394,18 @@ func _update_cost() -> void:
 	var rockets: int    = _mission_rockets(idx)
 	var fuel_amt: float = _mission_fuel(idx)
 	var have_f: float   = float(_origin_stock(str(fuel["id"])))
-	# A launch consumes ONE thing: propellant.  The energy figure is shown because it is what
-	# sets that quantity — the vehicle flies again, so nothing else is expended.
+	# A launch expends propellant AND the vehicles carrying it -- staging is not recovered.  The
+	# energy figure is shown because it is what sets the propellant quantity.
 	var e_cost: float = _launch_energy(idx)
-	var txt: String = "%s %s (have %s)%s\n%d vehicle%s · %s of work to fly" % [
+	var rk_need: float = float(rockets) * MissionData.ROCKET_UNIT_MASS_G
+	var have_rk: float = float(_origin_stock("Rocket"))
+	var txt: String = "%s %s (have %s)%s\n%d vehicle%s, %s (have %s)%s\n%s of work to fly" % [
 		Units.format_si(fuel_amt, "g"), str(fuel["name"]), Units.format_si(have_f, "g"),
 		("" if have_f >= fuel_amt else "  ✗"),
-		rockets, ("" if rockets == 1 else "s"), Units.format_si(e_cost, "J")]
+		rockets, ("" if rockets == 1 else "s"),
+		Units.format_si(rk_need, "g"), Units.format_si(have_rk, "g"),
+		("" if have_rk >= rk_need else "  ✗"),
+		Units.format_si(e_cost, "J")]
 	# Surface the launch-window quality so the player can see why fuel varies and
 	# can pick a better start date.
 	if not _is_local_orbit():
@@ -471,8 +477,10 @@ func _on_launch_pressed() -> void:
 	var fuel: Dictionary = _selected_fuel()
 	var rockets: int    = _mission_rockets(m_idx)
 	var fuel_amt: float = _mission_fuel(m_idx)
-	# Propellant is the whole cost of a launch — nothing else is checked or spent.
+	# Propellant and the launch vehicles are both expended; either shortfall blocks the launch.
 	if float(_origin_stock(str(fuel["id"]))) < fuel_amt:
+		return
+	if float(_origin_stock("Rocket")) < float(rockets) * MissionData.ROCKET_UNIT_MASS_G:
 		return
 	var start_offset: int = 0
 	if _calendar:

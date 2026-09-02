@@ -21,8 +21,8 @@ extends PanelContainer
 ##     "enabled": bool }
 
 signal automation_changed(rules: Array)
-## Emitted when the player toggles autonomous von Neumann colonisation.
-signal vn_colonization_changed(enabled: bool)
+## Emitted when the player picks how this civilisation answers contact with another.
+signal doctrine_changed(doctrine: String)
 
 ## Build/launch origins (planets only); launch targets add the Sun.
 const PLANETS: Array = [
@@ -36,7 +36,8 @@ const TARGETS: Array = [
 
 var _rules:   Array = []
 var _next_id: int   = 1
-var _vn_check: CheckButton = null
+var _doctrine_opt:  OptionButton = null
+var _doctrine_desc: Label = null
 
 # ── Build-form refs ───────────────────────────────────────────────────────────
 var _b_planet:   OptionButton = null
@@ -76,10 +77,6 @@ func load_rules(rules: Array) -> void:
 		_next_id = maxi(_next_id, int((r as Dictionary).get("id", 0)) + 1)
 	_rebuild_rule_list()
 
-## Reflect the loaded von Neumann toggle state without re-emitting the signal.
-func set_vn_enabled(on: bool) -> void:
-	if _vn_check:
-		_vn_check.set_pressed_no_signal(on)
 
 ## A serialisable copy of the current rules.
 func get_rules() -> Array:
@@ -120,14 +117,9 @@ func _build_ui() -> void:
 	# One global directive: seed a self-replicating colony probe and let it spread on its own.
 	# Behaviour is gated on Relativistic Navigation + Self-Replicating Industry (checked by Game).
 	_section_label(vbox, "Autonomous Expansion")
-	_vn_check = CheckButton.new()
-	_vn_check.text = "von Neumann colonisation"
-	_vn_check.tooltip_text = "Seed a self-replicating colony probe; on arrival it colonises the star and \
-launches fresh probes to nearby systems — spreading hands-free.  Needs Relativistic Navigation + \
-Self-Replicating Industry.  A launched swarm keeps replicating even if you switch this off."
-	_vn_check.toggled.connect(func(on: bool) -> void: vn_colonization_changed.emit(on))
-	vbox.add_child(_vn_check)
 
+	vbox.add_child(HSeparator.new())
+	_build_doctrine_form(vbox)
 	vbox.add_child(HSeparator.new())
 
 	_build_build_form(vbox)
@@ -175,6 +167,64 @@ func _count_spin() -> SpinBox:
 	sb.value     = 1
 	sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return sb
+
+## Contact doctrine: the standing rule for answering another civilisation.  It sits here rather
+## than on the star map because it is not an order aimed at one system — it is what this
+## civilisation does every time, and the other side can read it from the choice itself.
+func _build_doctrine_form(parent: Control) -> void:
+	var title := Label.new()
+	title.text = "Contact Doctrine"
+	title.add_theme_font_size_override("font_size", 13)
+	parent.add_child(title)
+
+	_doctrine_opt = OptionButton.new()
+	_doctrine_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for i in range(DoctrineData.DOCTRINES.size()):
+		var d: Dictionary = DoctrineData.DOCTRINES[i]
+		_doctrine_opt.add_item(str(d["name"]), i)
+	_doctrine_opt.item_selected.connect(func(idx: int) -> void:
+		var d: Dictionary = DoctrineData.DOCTRINES[idx]
+		_refresh_doctrine_desc(idx)
+		doctrine_changed.emit(str(d["id"])))
+	parent.add_child(_doctrine_opt)
+
+	_doctrine_desc = Label.new()
+	_doctrine_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_doctrine_desc.add_theme_font_size_override("font_size", 10)
+	_doctrine_desc.modulate = Color(0.72, 0.78, 0.88)
+	parent.add_child(_doctrine_desc)
+	_refresh_doctrine_desc(0)
+
+## Show what the selected doctrine actually commits you to, including the parts that cost.
+func _refresh_doctrine_desc(idx: int) -> void:
+	if _doctrine_desc == null or idx < 0 or idx >= DoctrineData.DOCTRINES.size():
+		return
+	var d: Dictionary = DoctrineData.DOCTRINES[idx]
+	var prov: float = float(d["provocation"])
+	var salvo: int = int(d["retaliate"])
+	var parts: Array = []
+	parts.append("provokes ×%.2f" % prov)
+	if salvo > 0:
+		parts.append("answers with %d missile%s" % [salvo, "" if salvo == 1 else "s"])
+	else:
+		parts.append("never answers")
+	if bool(d["first_strike"]):
+		parts.append("fires on sight")
+	if not bool(d["forgives"]):
+		parts.append("never forgives")
+	_doctrine_desc.text = "%s
+%s
+[%s]" % [str(d["desc"]), str(d["detail"]), "  ·  ".join(parts)]
+
+## Reflect the loaded doctrine without re-emitting.
+func set_doctrine(id: String) -> void:
+	if _doctrine_opt == null:
+		return
+	for i in range(DoctrineData.DOCTRINES.size()):
+		if str((DoctrineData.DOCTRINES[i] as Dictionary)["id"]) == id:
+			_doctrine_opt.select(i)
+			_refresh_doctrine_desc(i)
+			return
 
 func _build_build_form(vbox: VBoxContainer) -> void:
 	_section_label(vbox, "Automated Building")

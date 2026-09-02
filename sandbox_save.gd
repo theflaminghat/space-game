@@ -18,7 +18,10 @@ const WORLDS: Array = [
 	"earth", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune",
 ]
 
-const HUGE_MATTER:   float = 1.0e12   # per-planet stock of every compound (uncapped)
+## Per-planet stock of every compound (uncapped).  Raised from 1e12 once the swarm became a
+## stellar-scale project: one collector array alone costs 1e13 g of SolarSatellite, so the old
+## "huge" figure could not buy a single piece of the thing this save exists to test.
+const HUGE_MATTER:   float = 1.0e18
 const HUGE_SCIENCE:  float = 1.0e15   # science is uncapped
 const HUGE_ENERGY:   float = 5.0e9    # kept under the storage cap the loadout provides
 const HUGE_MINERALS: float = 1.0e9    # ditto
@@ -30,8 +33,15 @@ const HUGE_MINERALS: float = 1.0e9    # ditto
 const PLANET_LOADOUT: Dictionary = {
 	"Superconducting Storage Ring": 100,   # 100 × 5e7 = 5e9 energy cap per world
 	"Orbital Vault":                100,   # 100 × 1e7 = 1e9 matter cap per world
-	"Automated Factory":             40,   # manufacturing capacity
-	"Fusion Reactor":                20,   # power
+	# 40 of these asked for ~350 billion workers even fully automated, pinning STAFFING at 6 %
+	# for the whole save.  That was survivable when low staffing only slowed manufacturing; now
+	# that food runs on the same workforce it starved every world.  Eight is what this
+	# population can actually run.
+	"Automated Factory":              8,   # manufacturing capacity
+	# Power.  20 of these ran the industry fine but could not light a tenth of the food: a world
+	# of ten billion spends ~1e12 units/day growing what it eats, which dwarfs everything else
+	# on this list put together.
+	"Fusion Reactor":             1_900,   # power
 	"Automated Mine":                40,   # raw extraction
 	"AI Research Hub":               10,   # compute / science
 	"Colony Dome":                    1,
@@ -58,9 +68,10 @@ static func build() -> Dictionary:
 		"year":               1945,
 		"month":              0,
 		"day":                0,
-		"population":         2_300_000_000.0,
+		"population":         EARTH_POP,
+		"world_pop":          _world_pop(),
 		"people_ever_lived":  8.5e10,
-		"production_jobs":    [],
+		"production_jobs":    _food_jobs(),
 		"automation_rules":   [],
 		"planet_buildings":   _buildings(),
 		"resources":          _global_resources(),
@@ -72,7 +83,6 @@ static func build() -> Dictionary:
 		"split_thresholds":   _per_world_int(750_000),
 		"colony_parent":      _colony_parents(),
 		"variant_parent":     {},
-		"surveyed_planets":   WORLDS.duplicate(),
 		"policies":           PoliticsData.default_state(),
 		"stats_history":      {},
 		"compound_inventory": _inventory(),
@@ -104,15 +114,56 @@ static func _global_resources() -> Dictionary:
 	return {"science": HUGE_SCIENCE, "energy": HUGE_ENERGY, "minerals": HUGE_MINERALS}
 
 ## { world → [building names…] } with the full loadout on every world.
+## The roster is saved as COUNTS, matching Game._buildings_to_counts() -- the loadout is already
+## a name->count map, so there is no reason to expand it into thousands of repeated strings just
+## to have the loader tally them straight back up.
+## Population per world.  Earth sits at its carrying capacity; the colonies stay small, because
+## feeding people under lamps costs ~12 GW per million (see the Algae Culture recipe) and no
+## amount of sandbox generosity changes that arithmetic.
+const EARTH_POP:  float = 1.0e10
+const COLONY_POP: float = 1.0e6
+
 static func _buildings() -> Dictionary:
 	var out: Dictionary = {}
 	for w: String in WORLDS:
-		var list: Array = []
-		for bname: String in PLANET_LOADOUT:
-			for _i in range(int(PLANET_LOADOUT[bname])):
-				list.append(bname)
-		out[w] = list
+		var r: Dictionary = PLANET_LOADOUT.duplicate()
+		# Agriculture is sized per world rather than issued uniformly: a world of ten billion
+		# needs an Earth's worth of ground, and one of a million needs a few sealed bays.
+		if w == "earth":
+			r["Farm"] = 12_500
+			r["Ranch"] = 1_300
+		else:
+			r["Hydroponics Bay"] = 20
+		out[w] = r
 	return out
+
+## Every world runs a food slate sized to feed it with room to spare.  Earth grows the full
+## diet on open ground; everywhere else runs algae under lamps, which is what a world with no
+## sky can actually do.
+static func _world_pop() -> Dictionary:
+	var out: Dictionary = {}
+	for w: String in WORLDS:
+		out[w] = EARTH_POP if w == "earth" else COLONY_POP
+	return out
+
+static func _food_jobs() -> Array:
+	var jobs: Array = []
+	var id: int = 1
+	for w: String in WORLDS:
+		var pop: float = EARTH_POP if w == "earth" else COLONY_POP
+		var need: float = pop * 2000.0 * 1.35        # 35 % headroom
+		if w == "earth":
+			for spec: Array in [["Wheat Cultivation", 0.58], ["Rice Cultivation", 0.29],
+					["Vegetable Cultivation", 0.19], ["Poultry Farming", 0.016],
+					["Aquaculture", 0.013], ["Swine Husbandry", 0.008],
+					["Cattle Raising", 0.002]]:
+				jobs.append({"id": id, "recipe": str(spec[0]), "planet": w,
+					"rate": need * float(spec[1])})
+				id += 1
+		else:
+			jobs.append({"id": id, "recipe": "Algae Culture", "planet": w, "rate": need})
+			id += 1
+	return jobs
 
 ## Massive amounts of every known compound on every world.
 static func _inventory() -> Dictionary:

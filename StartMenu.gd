@@ -2,6 +2,7 @@ extends Control
 
 const SAVE_DIR  := "user://saves/"
 const GAME_SCENE := "res://node_3d.tscn"
+const SETUP_SCENE := "res://game_setup.tscn"
 
 @onready var _load_panel: PanelContainer = $LoadPanel
 @onready var _save_list:  ItemList       = $LoadPanel/MarginContainer/VBoxContainer/SaveList
@@ -46,9 +47,7 @@ func _on_save_selected(index: int) -> void:
 
 
 func _on_new_game_button_pressed() -> void:
-	GameSession.should_load_on_start = false
-	get_tree().change_scene_to_file(GAME_SCENE)
-
+	get_tree().change_scene_to_file(SETUP_SCENE)
 
 func _on_load_game_button_pressed() -> void:
 	_load_panel.visible = true

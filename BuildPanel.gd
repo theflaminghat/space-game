@@ -58,6 +58,24 @@ func refresh_affordability(have: Dictionary) -> void:
 ## button's disabled state, and affordability — recreating no nodes.  Falls back to a full rebuild
 ## only when the row set or a building's availability changed (a planet/research/colony change
 ## reshapes the list).  This is what keeps building from stuttering every click.
+## Cheap per-frame refresh of the green/red split alone.  Supply moves continuously as fuel
+## drains or a mine catches up, none of which touches the roster — so this cannot ride on
+## apply_counts(), which only runs when a building is raised or demolished.  `factors` is the
+## world's { building name -> share of inputs met } straight out of Game._fuel_factor; anything
+## absent from it consumes nothing and is always fully running.
+func refresh_supply(factors: Dictionary) -> void:
+	for bname: String in _rows:
+		var r: Dictionary = _rows[bname]
+		var bar = r.get("supply_bar", null)
+		if bar == null:
+			continue
+		var asl: HSlider = r.get("active_slider", null)
+		if asl == null:
+			continue
+		_apply_supply(bar, r.get("active_label", null), int(asl.value), int(asl.max_value),
+			float(factors.get(bname, 1.0)))
+
+
 func apply_counts(catalog: Array) -> void:
 	if catalog.size() != _rows.size():
 		_populate(catalog)
@@ -85,9 +103,10 @@ func apply_counts(catalog: Array) -> void:
 				asl.max_value = count
 				asl.value = act
 				asl.set_block_signals(false)
-				var alb: Label = r.get("active_label", null)
-				if alb != null:
-					alb.text = "%d / %d" % [act, count]
+			# Refresh the green/red split every pass: supply moves on its own as fuel runs
+			# down or a mine catches up, with no slider event to hang it off.
+			_apply_supply(r.get("supply_bar", null), r.get("active_label", null),
+				act, count, float(building.get("supply", 1.0)))
 		# Each batch button is gated on whether that many can actually be acted on.
 		var dem: Array = r["demolish"]
 		var ups: Array = r["upgrade"]
@@ -112,6 +131,57 @@ func apply_counts(catalog: Array) -> void:
 		badge.text = "+%d⚙" % q
 		badge.visible = q > 0
 	refresh_affordability(have_all)
+
+
+## The Active slider's track, drawn in two tones: green for the buildings whose inputs are
+## actually being met, red for the ones switched on that cannot run.  Lives as a child of the
+## slider with show_behind_parent set, so it replaces the track the theme would have drawn.
+class SupplyBar extends Control:
+	var running: float = 0.0     # 0..1 of the FULL width — green
+	var starved: float = 0.0     # 0..1 of the FULL width — red, drawn after the green
+
+	func set_split(run_frac: float, starve_frac: float) -> void:
+		running = clampf(run_frac, 0.0, 1.0)
+		starved = clampf(starve_frac, 0.0, 1.0 - running)
+		queue_redraw()
+
+	## Track height and how it sits inside the slider's full height.  Drawn as a band rather
+	## than filling the control, so it reads as a slider track and leaves room for the grabber
+	## to stand proud of it.
+	const TRACK_H: float = 6.0
+
+	func _draw() -> void:
+		var w: float = size.x
+		var y: float = (size.y - TRACK_H) * 0.5
+		# Unlit remainder: standing buildings the player has deliberately switched off.
+		draw_rect(Rect2(0.0, y, w, TRACK_H), Color(0.18, 0.20, 0.26))
+		if running > 0.0:
+			draw_rect(Rect2(0.0, y, w * running, TRACK_H), Color(0.35, 0.80, 0.40))
+		if starved > 0.0:
+			draw_rect(Rect2(w * running, y, w * starved, TRACK_H), Color(0.88, 0.30, 0.28))
+
+
+## Set the green/red split and annotate the count label when some are starved.  `supply` is the
+## share of this type's inputs being met (Game passes it per building type).
+func _apply_supply(bar: Control, lbl: Label, act: int, count: int, supply: float) -> void:
+	if bar == null or count <= 0:
+		return
+	var authorised: float = float(act) / float(count)
+	var run_frac: float = authorised * clampf(supply, 0.0, 1.0)
+	(bar as SupplyBar).set_split(run_frac, authorised - run_frac)
+	var running_n: int = int(floor(float(act) * clampf(supply, 0.0, 1.0)))
+	if lbl == null:
+		return
+	if act > 0 and running_n < act:
+		# Say what is actually running, and colour the readout to match the bar.
+		lbl.text = "%d of %d / %d" % [running_n, act, count]
+		lbl.modulate = Color(0.88, 0.45, 0.40)
+		lbl.tooltip_text = "%d switched on, %d running — the rest are short of inputs" % [
+			act, running_n]
+	else:
+		lbl.text = "%d / %d" % [act, count]
+		lbl.modulate = Color(0.85, 0.90, 0.70)
+		lbl.tooltip_text = ""
 
 func _populate(catalog: Array) -> void:
 	_cost_items.clear()
@@ -324,6 +394,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	# building stops its output AND its running cost, which is the lever when the grid is short.
 	var active_lbl: Label = null
 	var active_slider: HSlider = null
+	var supply_bar: Control = null
 	if count > 0:
 		var act: int = clampi(int(building.get("active", count)), 0, count)
 		var act_row := HBoxContainer.new()
@@ -349,8 +420,24 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		active_lbl.modulate = Color(0.85, 0.90, 0.70)
 		act_row.add_child(active_lbl)
 		parent.add_child(act_row)
+
+		# The supply split IS the slider's track.  The bar is a child of the slider drawn
+		# BEHIND it (show_behind_parent), and the slider's own track styleboxes are blanked so
+		# the colour shows through — the grabber still draws on top and stays draggable.  So
+		# green/red is not a second readout under the control; it is the control.
+		active_slider.add_theme_stylebox_override("slider", StyleBoxEmpty.new())
+		active_slider.add_theme_stylebox_override("grabber_area", StyleBoxEmpty.new())
+		active_slider.add_theme_stylebox_override("grabber_area_highlight", StyleBoxEmpty.new())
+		var bar := SupplyBar.new()
+		bar.show_behind_parent = true
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+		active_slider.add_child(bar)
+		_apply_supply(bar, active_lbl, act, count, float(building.get("supply", 1.0)))
+		supply_bar = bar
+
 		active_slider.value_changed.connect(func(v: float) -> void:
-			active_lbl.text = "%d / %d" % [int(v), count]
+			_apply_supply(bar, active_lbl, int(v), count, float(building.get("supply", 1.0)))
 			active_changed.emit(current_planet, bname, int(v)))
 
 	# Build / demolish / upgrade, each in 1 / 10 / 100 batches — at single-building scale you
@@ -425,6 +512,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		"count": count_label, "demolish": demolish_btns, "build": build_btns,
 		"available": available, "min_count": min_count, "upgrade": upgrade_btns,
 		"active_slider": active_slider, "active_label": active_lbl,
+		"supply_bar": supply_bar,
 	}
 
 
@@ -449,6 +537,14 @@ func _format_production(prod: Dictionary) -> String:
 	for key: String in ["compute", "energy", "minerals"]:
 		if prod.has(key) and float(prod[key]) > 0.0:
 			parts.append(Units.format_rate(key, float(prod[key])))
+	# Foodstuffs are produced by name rather than as a pooled resource, so they need listing
+	# individually — without this every farm reads as producing nothing at all.
+	for key: String in prod:
+		if key in ["compute", "energy", "minerals"]:
+			continue
+		var rate: float = float(prod[key])
+		if rate > 0.0:
+			parts.append("%s %s/day" % [Units.format_si(rate, "g"), key])
 	return "  ".join(parts)
 
 ## Fuel a building burns per game-day, e.g. {"Coal": 1.5} → "Burns 1.5 g Coal/day".
@@ -457,11 +553,16 @@ func _format_consumption(burn: Dictionary) -> String:
 	var parts: Array = []
 	for key: String in burn:
 		var amount: float = float(burn[key])
-		if amount > 0.0:
+		if amount <= 0.0:
+			continue
+		# Energy is not a mass — a farm drawing 3.5e12 J/day must not read as "3.5 TG".
+		if key == "energy":
+			parts.append("%s/day" % Units.format_si(amount, "J"))
+		else:
 			parts.append("%s %s/day" % [Units.format_si(amount, "g"), key])
 	if parts.is_empty():
 		return ""
-	return "Burns " + "  ".join(parts)
+	return "Consumes " + "  ".join(parts)
 
 ## Compact description of special infrastructure effects shown in teal under the
 ## building's production line.  Currently covers launch cost/time discounts (the
@@ -478,8 +579,21 @@ func _format_effects(building: Dictionary) -> String:
 			parts.append("Launch time −%d%%" % dpct)
 	if building.has("detection") and float(building["detection"]) > 0.0:
 		parts.append("Signature detection +%d" % int(round(float(building["detection"]))))
+	# Capacity a building adds to one of its world's work pools.  This is what a Factory or a
+	# Farm actually IS — the building produces nothing on its own, it raises the ceiling on what
+	# the Production panel's lines can draw — and until now the panel never said so.
+	for cap: Array in [["mc_capacity", "Factory"], ["farm_capacity", "Arable"],
+			["ranch_capacity", "Pasture"]]:
+		var key: String = str(cap[0])
+		if building.has(key) and float(building[key]) > 0.0:
+			parts.append("%s capacity +%s work/day" % [
+				str(cap[1]), Units.format_si(float(building[key]), "")])
 	if building.has("radiator_capacity") and float(building["radiator_capacity"]) > 0.0:
 		parts.append("Heat radiating +%s" % Units.format_si(float(building["radiator_capacity"]), "W"))
+	if building.has("beam_send") and float(building["beam_send"]) > 0.0:
+		parts.append("Power transmit +%s" % Units.format_si(float(building["beam_send"]), "W"))
+	if building.has("beam_recv") and float(building["beam_recv"]) > 0.0:
+		parts.append("Power receive +%s" % Units.format_si(float(building["beam_recv"]), "W"))
 	if building.has("atmo_rate") and float(building["atmo_rate"]) > 0.0:
 		parts.append("Condenses %s/day from the atmosphere"
 			% Units.format_si(float(building["atmo_rate"]), "g"))

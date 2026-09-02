@@ -11,7 +11,6 @@ var description: String
 var prerequisites: Array = []
 var cost: Dictionary = {}
 var boosts: Dictionary = {}   # e.g. {"research_speed": 0.10, "energy_production": 0.15}
-var research_time: float = 0.0
 var position: Vector2 = Vector2.ZERO
 
 
@@ -24,8 +23,6 @@ var state: State = State.LOCKED
 
 ## Progress toward completion (0.0 – 1.0) when state == RESEARCHING
 var progress: float = 0.0
-
-## How many "ticks" of research this costs
 
 ## Tier in the tree (0 = root tier). Set automatically by ResearchTree.
 var tier: int = 0

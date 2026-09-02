@@ -100,9 +100,11 @@ func load_tree(node_list: Array) -> void:
 # Research actions
 # ---------------------------------------------------------------------------
 
-## Attempt to start researching `node_id`.
-## Returns true on success, false if prerequisites / resources not met.
-func start_research(node_id: String, force: bool = false) -> bool:
+## Begin `node_id`, or add it to the queue when the bench is busy or its prerequisites are
+## still pending.  Returns false only for an unknown node, one already unlocked, or a locked
+## one whose prerequisites are not even scheduled — a click that gets past those always ends
+## with the project either running or planned.
+func start_research(node_id: String) -> bool:
 	if not nodes.has(node_id):
 		push_warning("ResearchTree: unknown node '%s'" % node_id)
 		return false
@@ -121,19 +123,24 @@ func start_research(node_id: String, force: bool = false) -> bool:
 		push_warning("ResearchTree: '%s' is locked (prerequisites unmet)." % node_id)
 		return false
 
-	if not _can_afford(node) and not force:
-		push_warning("ResearchTree: cannot afford '%s'." % node_id)
-		return false
-
-	# Queue it if something is already running — or if it is locked, since its prerequisites
-	# have to actually finish before it can start.
-	if active_research != null or locked:
+	# A project BEGINS only if nothing else is running, its prerequisites are already met, and
+	# the opening cost can be paid.  Anything else is QUEUED — including a project the grid
+	# cannot currently afford, which is planned now and started when the power is there.
+	#
+	# Queueing must never fail where can_queue() said yes.  It used to: can_queue() says nothing
+	# about resources, so the UI enabled "Add to Queue", then this returned false on the
+	# affordability check and the node silently never arrived — pressing the button did
+	# visibly nothing, which is exactly what it looked like.
+	# Research costs science and nothing else, and science is poured in over time by tick() —
+	# so there is no up-front bill to pay and nothing that can refuse a project.  A node begins
+	# the moment the bench is free and its prerequisites are met; otherwise it is planned.
+	var can_begin_now: bool = active_research == null and not locked
+	if not can_begin_now:
 		if not research_queue.has(node_id):
 			research_queue.append(node_id)
 			queue_changed.emit()
 		return true
 
-	_spend_resources(node)
 	active_research = node
 	node.state = ResearchNode.State.RESEARCHING
 	node.progress = 0.0
@@ -155,12 +162,13 @@ func toggle_research_paused() -> bool:
 	return research_paused
 
 
-## Cancel the active research job and refund resources.
+## Cancel the active research job.  Nothing is refunded because nothing was charged up front:
+## the science already poured in is simply lost, which is what makes cancelling a real decision
+## rather than a free reroll.
 func cancel_research() -> void:
 	if active_research == null:
 		return
 	var node := active_research
-	_refund_resources(node)
 	node.state = ResearchNode.State.AVAILABLE
 	node.progress = 0.0
 	active_research = null
@@ -189,7 +197,7 @@ func _prereqs_scheduled(node: ResearchNode) -> bool:
 		var pre: ResearchNode = nodes.get(pre_id)
 		if pre == null:
 			continue
-		if pre.state == ResearchNode.State.UNLOCKED 				or pre.state == ResearchNode.State.RESEARCHING 				or research_queue.has(pre_id):
+		if pre.state == ResearchNode.State.UNLOCKED or pre.state == ResearchNode.State.RESEARCHING or research_queue.has(pre_id):
 			continue
 		return false
 	return true
@@ -379,19 +387,32 @@ func _complete_research(node: ResearchNode) -> void:
 ## still pending are left in place — popping them blindly would either drop them or bounce them
 ## straight back to the end of the queue, and nothing would ever run.
 func _advance_queue() -> void:
+	# Candidates already attempted this pass, so a project that cannot start is tried once and
+	# then left alone instead of being picked forever.
+	var tried: Dictionary = {}
 	while true:
 		var idx: int = -1
 		for i in range(research_queue.size()):
-			var n: ResearchNode = nodes.get(research_queue[i])
+			var qid: String = str(research_queue[i])
+			if tried.has(qid):
+				continue
+			var n: ResearchNode = nodes.get(qid)
 			if n != null and n.state != ResearchNode.State.LOCKED:
 				idx = i
 				break
 		if idx == -1:
 			break                       # everything left is still waiting on a prerequisite
-		var next_id: String = research_queue[idx]
+		var next_id: String = str(research_queue[idx])
+		tried[next_id] = true
 		research_queue.remove_at(idx)
-		if start_research(next_id):
-			break
+		start_research(next_id)
+		if active_research != null:
+			break                       # it began; the queue moves on
+		# It could not begin — it is still PLANNED, so put it back exactly where it was.
+		# start_research may have re-appended it at the tail; take that out first so the
+		# player's ordering survives a project that simply could not afford to start.
+		research_queue.erase(next_id)
+		research_queue.insert(mini(idx, research_queue.size()), next_id)
 	queue_changed.emit()
 
 
@@ -439,32 +460,3 @@ func _recompute_boosts() -> void:
 ## Returns the total additive bonus for a boost type (0.0 if none active).
 func get_boost(boost_type: String) -> float:
 	return float(active_boosts.get(boost_type, 0.0))
-
-
-## Whether a project can be STARTED.  Science is not checked here: it is poured in over time by
-## tick(), so a node you can't yet pay for simply takes longer rather than being unavailable.
-## Everything else (energy — the capital outlay to stand the programme up) is due immediately.
-func _can_afford(node: ResearchNode) -> bool:
-	for resource_type in node.cost:
-		if resource_type == "science":
-			continue
-		if float(resources.get(resource_type, 0.0)) < float(node.cost[resource_type]):
-			return false
-	return true
-
-
-## Charge the up-front cost.  Science is excluded — tick() draws that down as the work proceeds.
-func _spend_resources(node: ResearchNode) -> void:
-	for resource_type in node.cost:
-		if resource_type == "science":
-			continue
-		resources[resource_type] = resources.get(resource_type, 0.0) - node.cost[resource_type]
-
-
-## Give back the up-front cost on cancel.  Science already poured in is NOT refunded — that
-## work was done, and refunding it would make cancel-and-restart a free reroll.
-func _refund_resources(node: ResearchNode) -> void:
-	for resource_type in node.cost:
-		if resource_type == "science":
-			continue
-		resources[resource_type] = resources.get(resource_type, 0.0) + node.cost[resource_type]

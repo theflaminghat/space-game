@@ -1,20 +1,16 @@
 class_name ResearchTreeData
 
 # ── Cost scaling (match production magnitudes) ───────────────────────────────
-# The hand-authored per-node costs below carry the *relative* curve (≈1.43×
-# science per column).  Their raw magnitudes (science 18–4525, energy 2–2798)
-# were trivially affordable: science income is uncapped at ~population × 10^17
-# FLOP/s (≈2.3e26 FLOP/s at the 1945 start), and energy refills its storage tank
-# almost instantly.  These multipliers lift the magnitudes onto the same scale as
-# actual production so research becomes a real, time-gated sink:
+# The hand-authored per-node costs below carry the *relative* curve (≈1.43× science per
+# column).  Their raw magnitudes (science 18–4525) were trivially affordable, since science
+# income is uncapped at ~population × 10^17 FLOP/s (≈2.3e26 FLOP/s at the 1945 start).  The
+# multiplier lifts them onto the same scale as actual production, so research becomes a real,
+# time-gated sink: an early node (science 30) costs 3e27 ≈ a dozen game-days of starting
+# output, while late nodes (science ~4500) cost ~4.5e29 ≈ centuries — and production only
+# grows ~4× (population 2.3e9 → ~1e10), so the escalation is felt.
 #
-#   • Science is uncapped, so its cost is scaled to the FLOP economy.  An early
-#     node (science 30) now costs 3e27 ≈ a dozen game-days of starting output;
-#     late nodes (science ~4500) cost ~4.5e29 ≈ centuries, while production only
-#     grows ~4× (population 2.3e9 → ~1e10), so research escalates meaningfully.
-#   • Energy is storage-capped (base 1e5, +1e6 per Storage Depot), so its cost is
-#     scaled to that pool: early nodes fit the base tank, advanced nodes require
-#     building dedicated storage first.
+# Science is the ONLY thing a project costs.  See the cost-philosophy note below for why
+# there is no energy charge.
 ## Science costs are paid down out of research output (see ResearchTree.tick), so this scale is
 ## what sets how long a project takes.  A fresh 1945 civilisation produces ~2.3e26 FLOP/game-day.
 const SCIENCE_COST_SCALE: float = 1.0e27
@@ -26,18 +22,18 @@ const SCIENCE_COST_SCALE: float = 1.0e27
 ## push above has already finalised, so a node that got shoved right pays for the depth it
 ## actually sits at.
 const TIER_COST_GROWTH: float = 1.35
-const ENERGY_COST_SCALE:  float = 1.0e3
 
 # ── Cost philosophy ─────────────────────────────────────────────────────────
-# Science grows ~1.43× per column; energy is weighted by research infrastructure:
-#   Theory/math          → energy × 0.1–0.3
-#   Materials/chemistry  → energy × 0.8–1.2
-#   Computing/robotics   → energy × 0.6–1.0
-#   Nuclear/power        → energy × 1.5–2.5
-#   Space launch         → energy × 1.2–1.8
-#   Plasma/fusion        → energy × 3.0–4.5
-#   Particle physics     → energy × 5–8      (LHC ≈ 200 MW·yr)
-#   Antimatter           → energy × 12+
+# Research has ONE currency: science, which tick() pours in over time.  A project therefore
+# takes as long as it takes to think through, and the only way to go faster is to be able to
+# think faster — compute, population, and the research-speed boosts.
+#
+# There is deliberately no up-front energy charge.  It made a discovery something you had to
+# save up a lump of power for, which is not what research is, and it meant a grid having a bad
+# afternoon could refuse to accept a project at all.  The power cost of a laboratory is real,
+# but it is already charged where it belongs: the building's own upkeep, every day it stands.
+#
+# Science grows ~1.43× per column, and TIER_COST_GROWTH compounds on top of that.
 
 static func lane_pos(
 	col: int,
@@ -97,7 +93,6 @@ static func build() -> Array:
 		n.description = desc
 		n.prerequisites = prereqs
 		n.cost = cost
-		n.research_time = time
 		n.position = pos
 		return n
 
@@ -111,7 +106,7 @@ static func build() -> Array:
 		"Transistors",
 		"Solid-state electronics enabling modern digital systems.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -121,7 +116,7 @@ static func build() -> Array:
 		"Numerical Methods",
 		"Computational mathematics for simulation, approximation, and engineering analysis.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -131,7 +126,7 @@ static func build() -> Array:
 		"Nuclear Power",
 		"Controlled fission for industrial-scale power generation.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -141,7 +136,7 @@ static func build() -> Array:
 		"Metallurgy",
 		"Industrial knowledge of metals, alloys, and structural engineering.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -151,7 +146,7 @@ static func build() -> Array:
 		"Industrialization",
 		"Mass production through powered tools, standardization, and mechanized workflows.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -161,7 +156,7 @@ static func build() -> Array:
 		"Early Rocketry",
 		"Liquid-fuel launch systems capable of reaching space.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -171,20 +166,20 @@ static func build() -> Array:
 		"Modern Medicine",
 		"Evidence-based medicine, sterile procedures, antibiotics, vaccines, and imaging.",
 		[],
-		{"science": 10, "energy": 3},
+		{"science": 10},
 		5.0,
 		lane_pos(0, BIO, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 1 — Early post-war R&D  (science ~18–35, energy ~2–18)
+	# Column 1 — Early post-war R&D  (science ~18–35)
 	# ════════════════════════════════════════════════════════════════════════
 	nodes.append(make.call(
 		"integrated_circuits",
 		"Integrated Circuits",
 		"Miniaturized electronics fabricated onto single chips.",
 		["transistors"],
-		{"science": 30, "energy": 8},
+		{"science": 30},
 		8.0,
 		lane_pos(1, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -194,7 +189,7 @@ static func build() -> Array:
 		"Control Theory",
 		"Mathematical methods for stable feedback, guidance, automation, and regulation.",
 		["numerical_methods"],
-		{"science": 18, "energy": 2},
+		{"science": 18},
 		7.0,
 		lane_pos(1, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -204,7 +199,7 @@ static func build() -> Array:
 		"Advanced Reactors",
 		"Improved reactor designs with safer control and better fuel utilization.",
 		["nuclear_power"],
-		{"science": 35, "energy": 18},
+		{"science": 35},
 		9.0,
 		lane_pos(1, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -217,7 +212,7 @@ static func build() -> Array:
 		"Energy Storage",
 		"Scalable electrochemical and physical systems for storing and releasing energy on demand — from portable batteries to grid-scale reservoirs.",
 		["metallurgy", "nuclear_power"],
-		{"science": 28, "energy": 14},
+		{"science": 28},
 		8.5,
 		lane_pos(1, ESTORAGE, X_SPACING, Y_SPACING)
 	))
@@ -227,7 +222,7 @@ static func build() -> Array:
 		"Advanced Alloys",
 		"Specialized alloys for heat, stress, and corrosion resistance.",
 		["metallurgy"],
-		{"science": 25, "energy": 10},
+		{"science": 25},
 		8.0,
 		lane_pos(1, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -237,7 +232,7 @@ static func build() -> Array:
 		"Mass Production",
 		"Scalable manufacturing with quality control, interchangeable parts, and throughput optimization.",
 		["industrial_mechanization"],
-		{"science": 22, "energy": 7},
+		{"science": 22},
 		7.0,
 		lane_pos(1, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -247,7 +242,7 @@ static func build() -> Array:
 		"Orbital Mechanics",
 		"Predictive modeling of trajectories, transfer windows, and stable orbital operations.",
 		["early_rocketry", "numerical_methods"],
-		{"science": 28, "energy": 3},
+		{"science": 28},
 		8.0,
 		lane_pos(1, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -257,20 +252,20 @@ static func build() -> Array:
 		"Biomedical Engineering",
 		"Medical devices, prosthetics, organ support systems, and diagnostic instrumentation.",
 		["modern_medicine"],
-		{"science": 25, "energy": 5},
+		{"science": 25},
 		8.0,
 		lane_pos(1, BIO, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 2 — Big-science era  (science ~45–78, energy ~3–38)
+	# Column 2 — Big-science era  (science ~45–78)
 	# ════════════════════════════════════════════════════════════════════════
 	nodes.append(make.call(
 		"semiconductor_manufacturing",
 		"Semiconductor Manufacturing",
 		"Precision fabrication of increasingly dense and reliable microelectronic systems.",
 		["integrated_circuits"],
-		{"science": 65, "energy": 28},
+		{"science": 65},
 		10.0,
 		lane_pos(2, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -280,7 +275,7 @@ static func build() -> Array:
 		"Information Theory",
 		"Formal treatment of communication, encoding, signal efficiency, and information limits.",
 		["numerical_methods", "integrated_circuits"],
-		{"science": 45, "energy": 4},
+		{"science": 45},
 		9.0,
 		lane_pos(2, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -291,7 +286,7 @@ static func build() -> Array:
 		"Power Grid",
 		"Large-scale power transmission, distribution, and load balancing.",
 		["advanced_reactor_systems", "energy_storage"],
-		{"science": 60, "energy": 35},
+		{"science": 60},
 		10.0,
 		lane_pos(2, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -301,7 +296,7 @@ static func build() -> Array:
 		"High-Perf Materials",
 		"Composites, ceramics, and structural materials for high stress and high temperature use.",
 		["advanced_alloys"],
-		{"science": 55, "energy": 18},
+		{"science": 55},
 		10.0,
 		lane_pos(2, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -311,7 +306,7 @@ static func build() -> Array:
 		"Industrial Robotics",
 		"Programmable machines for repeatable, high-precision manufacturing.",
 		["mass_production_systems", "control_theory"],
-		{"science": 72, "energy": 22},
+		{"science": 72},
 		11.0,
 		lane_pos(2, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -321,7 +316,7 @@ static func build() -> Array:
 		"Satellite Systems",
 		"Communication, navigation, and remote sensing infrastructure in orbit.",
 		["orbital_mechanics"],
-		{"science": 78, "energy": 32},
+		{"science": 78},
 		11.0,
 		lane_pos(2, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -335,7 +330,7 @@ static func build() -> Array:
 		"Advanced Propulsion",
 		"High-efficiency in-space drives including nuclear thermal rockets and electric ion systems, enabling practical deep-space transit.",
 		["orbital_mechanics", "advanced_reactor_systems"],
-		{"science": 58, "energy": 38},
+		{"science": 58},
 		10.5,
 		lane_pos(2, PROPULSION, X_SPACING, Y_SPACING)
 	))
@@ -345,20 +340,20 @@ static func build() -> Array:
 		"Medical Informatics",
 		"Digitized diagnostics, records, modeling, and data-driven clinical systems.",
 		["advanced_biomedical_engineering", "semiconductor_manufacturing"],
-		{"science": 55, "energy": 10},
+		{"science": 55},
 		10.0,
 		lane_pos(2, BIO, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 3 — Late 20th century  (science ~78–128, energy ~7–55)
+	# Column 3 — Late 20th century  (science ~78–128)
 	# ════════════════════════════════════════════════════════════════════════
 	nodes.append(make.call(
 		"microprocessors",
 		"Microprocessors",
 		"General-purpose programmable processors enabling widespread digital control and computation.",
 		["semiconductor_manufacturing"],
-		{"science": 100, "energy": 35},
+		{"science": 100},
 		12.0,
 		lane_pos(3, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -368,7 +363,7 @@ static func build() -> Array:
 		"Statistical Modeling",
 		"Probabilistic inference, estimation, forecasting, and data-driven decision frameworks.",
 		["information_theory", "numerical_methods"],
-		{"science": 78, "energy": 7},
+		{"science": 78},
 		11.0,
 		lane_pos(3, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -378,7 +373,7 @@ static func build() -> Array:
 		"Superconductors",
 		"High-field and low-loss electrical systems for advanced energy and scientific infrastructure.",
 		["grid_infrastructure", "high_performance_materials"],
-		{"science": 125, "energy": 55},
+		{"science": 125},
 		13.0,
 		lane_pos(3, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -388,7 +383,7 @@ static func build() -> Array:
 		"Precision Manufacturing",
 		"Fine-tolerance fabrication required for high-performance electronics, optics, and machinery.",
 		["high_performance_materials", "industrial_robotics"],
-		{"science": 95, "energy": 28},
+		{"science": 95},
 		12.0,
 		lane_pos(3, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -398,7 +393,7 @@ static func build() -> Array:
 		"Automated Logistics",
 		"Machine-coordinated transport, routing, warehousing, and industrial supply systems.",
 		["industrial_robotics", "microprocessors"],
-		{"science": 88, "energy": 22},
+		{"science": 88},
 		12.0,
 		lane_pos(3, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -409,7 +404,7 @@ static func build() -> Array:
 		"Reusable Launch",
 		"Recovery-oriented space launch infrastructure that lowers the cost of access to orbit.",
 		["satellite_systems", "precision_manufacturing", "advanced_propulsion"],
-		{"science": 128, "energy": 50},
+		{"science": 128},
 		13.0,
 		lane_pos(3, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -419,20 +414,20 @@ static func build() -> Array:
 		"Bioinformatics",
 		"Computational analysis of genomes, proteins, and biological networks.",
 		["medical_informatics", "statistical_modeling"],
-		{"science": 82, "energy": 14},
+		{"science": 82},
 		11.0,
 		lane_pos(3, BIO, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 4 — Early 21st century  (science ~125–165, energy ~12–88)
+	# Column 4 — Early 21st century  (science ~125–165)
 	# ════════════════════════════════════════════════════════════════════════
 	nodes.append(make.call(
 		"networked_computing",
 		"Networked Computing",
 		"Distributed information systems linking computation, communication, and remote services.",
 		["microprocessors", "information_theory"],
-		{"science": 145, "energy": 42},
+		{"science": 145},
 		14.0,
 		lane_pos(4, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -442,7 +437,7 @@ static func build() -> Array:
 		"Materials Physics",
 		"Advanced physical understanding of materials behaviour under extreme conditions.",
 		["statistical_modeling", "high_performance_materials"],
-		{"science": 132, "energy": 48},
+		{"science": 132},
 		14.0,
 		lane_pos(4, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -456,7 +451,7 @@ static func build() -> Array:
 		"Predictive Modeling",
 		"Rigorous mathematical forecasting of complex system behavior — from climate and economics to engineering failure modes and logistics optimization.",
 		["statistical_modeling", "information_theory"],
-		{"science": 128, "energy": 12},
+		{"science": 128},
 		13.5,
 		lane_pos(4, FORECAST, X_SPACING, Y_SPACING)
 	))
@@ -468,7 +463,7 @@ static func build() -> Array:
 		"Dense Power Systems",
 		"Power architectures suitable for large industrial systems, dense storage, and advanced transport.",
 		["superconducting_systems", "energy_storage"],
-		{"science": 162, "energy": 88},
+		{"science": 162},
 		15.0,
 		lane_pos(4, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -478,7 +473,7 @@ static func build() -> Array:
 		"Extreme Materials",
 		"Materials capable of surviving radiation, vacuum, large thermal gradients, and high energy flux.",
 		["materials_physics", "precision_manufacturing"],
-		{"science": 148, "energy": 52},
+		{"science": 148},
 		15.0,
 		lane_pos(4, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -492,7 +487,7 @@ static func build() -> Array:
 		"Additive Manufacturing",
 		"Layer-by-layer construction from digital models, enabling complex geometries, rapid prototyping, and on-demand part production with minimal waste.",
 		["precision_manufacturing", "industrial_robotics"],
-		{"science": 142, "energy": 42},
+		{"science": 142},
 		14.5,
 		lane_pos(4, ADDITIVE, X_SPACING, Y_SPACING)
 	))
@@ -502,7 +497,7 @@ static func build() -> Array:
 		"Space Habitation",
 		"Environmental control, shielding, rotation, and support systems for long-duration living in space.",
 		["reusable_launch_systems", "advanced_biomedical_engineering"],
-		{"science": 162, "energy": 58},
+		{"science": 162},
 		15.0,
 		lane_pos(4, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -512,20 +507,20 @@ static func build() -> Array:
 		"Genome Engineering",
 		"Deliberate editing and design of biological systems for medicine and adaptation.",
 		["bioinformatics"],
-		{"science": 138, "energy": 30},
+		{"science": 138},
 		14.0,
 		lane_pos(4, BIO, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 5 — Near-future  (science ~188–262, energy ~45–215)
+	# Column 5 — Near-future  (science ~188–262)
 	# ════════════════════════════════════════════════════════════════════════
 	nodes.append(make.call(
 		"high_performance_computing",
 		"High-Performance Computing",
 		"Large-scale compute infrastructure for simulation, optimization, and scientific modeling.",
 		["networked_computing"],
-		{"science": 205, "energy": 70},
+		{"science": 205},
 		16.0,
 		lane_pos(5, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -535,7 +530,7 @@ static func build() -> Array:
 		"Plasma Physics",
 		"Applied understanding of high-energy ionized matter for fusion and advanced propulsion research.",
 		["materials_physics", "high_energy_density_power"],
-		{"science": 228, "energy": 178},
+		{"science": 228},
 		17.0,
 		lane_pos(5, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -545,7 +540,7 @@ static func build() -> Array:
 		"Fusion Engineering",
 		"Engineering capability for practical high-output fusion systems.",
 		["high_energy_density_power", "plasma_physics", "superconducting_systems"],
-		{"science": 262, "energy": 215},
+		{"science": 262},
 		18.0,
 		lane_pos(5, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -555,7 +550,7 @@ static func build() -> Array:
 		"Nanomaterials",
 		"Fine-structure engineering of matter for tailored thermal, electrical, and mechanical properties.",
 		["extreme_environment_materials", "materials_physics"],
-		{"science": 198, "energy": 62},
+		{"science": 198},
 		16.0,
 		lane_pos(5, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -565,7 +560,7 @@ static func build() -> Array:
 		"Autonomous Factories",
 		"Largely self-coordinating production systems with minimal human intervention.",
 		["automated_logistics", "networked_computing", "high_performance_computing"],
-		{"science": 215, "energy": 72},
+		{"science": 215},
 		17.0,
 		lane_pos(5, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -577,7 +572,7 @@ static func build() -> Array:
 		"Orbital Construction",
 		"Assembly, maintenance, and heavy construction techniques for persistent infrastructure in orbit.",
 		["space_habitation_systems", "autonomous_factories"],
-		{"science": 245, "energy": 105},
+		{"science": 245},
 		17.0,
 		lane_pos(5, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -587,7 +582,7 @@ static func build() -> Array:
 		"Synthetic Biology",
 		"Engineering of cells, tissues, and biological pathways for designed functions.",
 		["genome_engineering"],
-		{"science": 192, "energy": 48},
+		{"science": 192},
 		16.0,
 		lane_pos(5, BIO, X_SPACING, Y_SPACING)
 	))
@@ -601,20 +596,20 @@ static func build() -> Array:
 		"Institutional Science",
 		"Formal research institutions, peer review, international collaboration frameworks, and coordinated funding that multiply collective discovery rates.",
 		["networked_computing", "statistical_modeling"],
-		{"science": 208, "energy": 52},
+		{"science": 208},
 		17.0,
 		lane_pos(5, CIV, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 6 — Advanced civilisation  (science ~305–425, energy ~62–240)
+	# Column 6 — Advanced civilisation  (science ~305–425)
 	# ════════════════════════════════════════════════════════════════════════
 	nodes.append(make.call(
 		"machine_learning_systems",
 		"Machine Learning",
 		"Data-driven adaptive systems for prediction, perception, optimization, and control.",
 		["high_performance_computing", "statistical_modeling"],
-		{"science": 305, "energy": 115},
+		{"science": 305},
 		18.0,
 		lane_pos(6, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -624,7 +619,7 @@ static func build() -> Array:
 		"Quantum Information",
 		"Operational understanding of quantum systems for computation, sensing, and communication.",
 		["information_theory", "materials_physics"],
-		{"science": 348, "energy": 132},
+		{"science": 348},
 		19.0,
 		lane_pos(6, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -634,7 +629,7 @@ static func build() -> Array:
 		"Space Power Grid",
 		"Large-scale orbital or off-world energy generation, storage, and transmission systems.",
 		["fusion_engineering", "orbital_construction", "high_energy_density_power"],
-		{"science": 418, "energy": 238},
+		{"science": 418},
 		20.0,
 		lane_pos(6, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -644,7 +639,7 @@ static func build() -> Array:
 		"Radiation Hardening",
 		"Hardware and structures designed for sustained operation in intense radiation environments.",
 		["nanostructured_materials", "extreme_environment_materials"],
-		{"science": 312, "energy": 88},
+		{"science": 312},
 		18.0,
 		lane_pos(6, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -654,7 +649,7 @@ static func build() -> Array:
 		"Industrial AI",
 		"Planetary and orbital coordination of production, extraction, and logistics by intelligent systems.",
 		["autonomous_factories", "machine_learning_systems"],
-		{"science": 375, "energy": 130},
+		{"science": 375},
 		19.0,
 		lane_pos(6, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -666,7 +661,7 @@ static func build() -> Array:
 		"ISRU",
 		"Extraction and processing of local extraterrestrial materials for construction and support.",
 		["orbital_construction", "radiation_hardened_systems"],
-		{"science": 425, "energy": 165},
+		{"science": 425},
 		20.0,
 		lane_pos(6, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -676,7 +671,7 @@ static func build() -> Array:
 		"Closed-Loop Life Support",
 		"Recycling of air, water, nutrients, and waste for sustained independent habitats.",
 		["synthetic_biology", "space_habitation_systems"],
-		{"science": 355, "energy": 98},
+		{"science": 355},
 		19.0,
 		lane_pos(6, BIO, X_SPACING, Y_SPACING)
 	))
@@ -690,13 +685,13 @@ static func build() -> Array:
 		"Global Governance",
 		"Planetary coordination frameworks for shared resource allocation, conflict resolution, and long-horizon civilizational planning.",
 		["institutional_science"],
-		{"science": 318, "energy": 78},
+		{"science": 318},
 		19.5,
 		lane_pos(6, CIV, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 7 — Deep capability  (science ~520–770, energy ~95–595)
+	# Column 7 — Deep capability  (science ~520–770)
 	# ════════════════════════════════════════════════════════════════════════
 
 	# NEW — Quantum Computing (hardware)
@@ -709,7 +704,7 @@ static func build() -> Array:
 		"Quantum Computing",
 		"Physical quantum processors that exploit superposition and entanglement to solve problems intractable for classical hardware.",
 		["quantum_information_theory", "high_performance_computing"],
-		{"science": 542, "energy": 248},
+		{"science": 542},
 		22.5,
 		lane_pos(7, QCOMP, X_SPACING, Y_SPACING)
 	))
@@ -719,7 +714,7 @@ static func build() -> Array:
 		"General AI",
 		"Flexible AI systems capable of broad engineering, scientific, and industrial support.",
 		["machine_learning_systems", "autonomous_industrial_coordination"],
-		{"science": 520, "energy": 195},
+		{"science": 520},
 		21.0,
 		lane_pos(7, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -729,7 +724,7 @@ static func build() -> Array:
 		"High Energy Physics",
 		"Experimental and theoretical capability for extreme-energy particles, fields, and interactions.",
 		["quantum_information_theory", "fusion_engineering"],
-		{"science": 648, "energy": 525},
+		{"science": 648},
 		23.0,
 		lane_pos(7, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -739,7 +734,7 @@ static func build() -> Array:
 		"Particle Engineering",
 		"Engineering control of high-energy particle systems for manufacturing, science, and power applications.",
 		["high_energy_physics", "space_power_infrastructure"],
-		{"science": 718, "energy": 592},
+		{"science": 718},
 		24.0,
 		lane_pos(7, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -749,7 +744,7 @@ static func build() -> Array:
 		"Field Materials",
 		"Advanced materials designed to operate with extreme electromagnetic, thermal, and radiation loads.",
 		["radiation_hardened_systems", "high_energy_physics"],
-		{"science": 568, "energy": 218},
+		{"science": 568},
 		21.0,
 		lane_pos(7, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -761,7 +756,7 @@ static func build() -> Array:
 		"Self-Replication",
 		"Industrial systems able to reproduce large parts of their own production base from available resources.",
 		["autonomous_industrial_coordination", "in_situ_resource_utilization"],
-		{"science": 768, "energy": 258},
+		{"science": 768},
 		24.0,
 		lane_pos(7, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -773,7 +768,7 @@ static func build() -> Array:
 		"Precision Orbital Assembly",
 		"High-accuracy assembly of large, delicate, or tightly toleranced orbital structures.",
 		["orbital_construction", "field_stabilized_materials"],
-		{"science": 662, "energy": 235},
+		{"science": 662},
 		22.0,
 		lane_pos(7, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -786,13 +781,13 @@ static func build() -> Array:
 		"Human Adaptation",
 		"Biological and medical systems for long-duration survival in altered, artificial, or hostile environments.",
 		["closed_loop_ecosystems", "genome_engineering"],
-		{"science": 595, "energy": 142},
+		{"science": 595},
 		21.0,
 		lane_pos(7, BIO, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 8 — Civilisation transition  (science ~920–1252, energy ~150–885)
+	# Column 8 — Civilisation transition  (science ~920–1252)
 	# ════════════════════════════════════════════════════════════════════════
 
 	# MODIFIED — added predictive_modeling as prerequisite (planetary-scale
@@ -802,7 +797,7 @@ static func build() -> Array:
 		"Planetary Simulation",
 		"Integrated simulation of climate, economy, infrastructure, logistics, and biosystems at planetary scale.",
 		["general_ai_assistance", "high_performance_computing", "predictive_modeling"],
-		{"science": 925, "energy": 295},
+		{"science": 925},
 		25.0,
 		lane_pos(8, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -812,7 +807,7 @@ static func build() -> Array:
 		"Relativistic Physics",
 		"Applied understanding of high-velocity systems, time dilation, and extreme-energy trajectories.",
 		["high_energy_physics"],
-		{"science": 1085, "energy": 458},
+		{"science": 1085},
 		26.0,
 		lane_pos(8, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -822,7 +817,7 @@ static func build() -> Array:
 		"Antimatter Handling",
 		"Containment, transfer, and controlled use of antimatter at nontrivial engineering scales.",
 		["high_energy_particle_engineering", "field_stabilized_materials"],
-		{"science": 1252, "energy": 885},
+		{"science": 1252},
 		28.0,
 		lane_pos(8, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -834,7 +829,7 @@ static func build() -> Array:
 		"Molecular Manufacturing",
 		"Fine-grained construction of matter at extremely small scales for ultra-precise products and systems.",
 		["field_stabilized_materials", "nanostructured_materials", "additive_manufacturing"],
-		{"science": 968, "energy": 315},
+		{"science": 968},
 		25.0,
 		lane_pos(8, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -844,7 +839,7 @@ static func build() -> Array:
 		"Autonomous Economy",
 		"Large-scale economic coordination among autonomous industrial and logistical systems across many sites.",
 		["self_replicating_industry", "planetary_simulation"],
-		{"science": 1125, "energy": 338},
+		{"science": 1125},
 		27.0,
 		lane_pos(8, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -857,7 +852,7 @@ static func build() -> Array:
 		"Deep Space Logistics",
 		"Sustained movement of materials, equipment, and habitats between distant off-world industrial zones.",
 		["precision_orbital_construction", "in_situ_resource_utilization", "advanced_propulsion"],
-		{"science": 1068, "energy": 392},
+		{"science": 1068},
 		26.0,
 		lane_pos(8, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -867,7 +862,7 @@ static func build() -> Array:
 		"Longevity Engineering",
 		"Medical control of aging, degeneration, and long-term health maintenance.",
 		["human_adaptation_systems", "synthetic_biology"],
-		{"science": 1012, "energy": 282},
+		{"science": 1012},
 		25.0,
 		lane_pos(8, BIO, X_SPACING, Y_SPACING)
 	))
@@ -879,13 +874,13 @@ static func build() -> Array:
 		"Brain-Computer Interface",
 		"High-bandwidth links between nervous systems and digital systems.",
 		["human_adaptation_systems", "general_ai_assistance", "global_governance"],
-		{"science": 1125, "energy": 318},
+		{"science": 1125},
 		26.0,
 		lane_pos(8, CIV, X_SPACING, Y_SPACING)
 	))
 
 	# ════════════════════════════════════════════════════════════════════════
-	# Column 9 — Endgame enablers  (science ~1500–2245, energy ~282–1295)
+	# Column 9 — Endgame enablers  (science ~1500–2245)
 	# ════════════════════════════════════════════════════════════════════════
 
 	# MODIFIED — added quantum_computing as prerequisite (automated science
@@ -895,7 +890,7 @@ static func build() -> Array:
 		"Automated Science",
 		"AI-driven experimental design, theory generation, simulation, and discovery workflows.",
 		["planetary_simulation", "general_ai_assistance", "quantum_computing"],
-		{"science": 1598, "energy": 532},
+		{"science": 1598},
 		29.0,
 		lane_pos(9, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -905,7 +900,7 @@ static func build() -> Array:
 		"Relativistic Navigation",
 		"Trajectory design, guidance, and error correction for extreme-velocity interplanetary and interstellar travel.",
 		["relativistic_physics", "deep_space_logistics"],
-		{"science": 1905, "energy": 648},
+		{"science": 1905},
 		31.0,
 		lane_pos(9, THEORY, X_SPACING, Y_SPACING)
 	))
@@ -917,7 +912,7 @@ static func build() -> Array:
 		"Stellar Power",
 		"Engineering capability for capturing and routing energy at massive orbital scales.",
 		["space_power_infrastructure", "precision_orbital_construction"],
-		{"science": 2198, "energy": 1295},
+		{"science": 2198},
 		33.0,
 		lane_pos(9, ENERGY, X_SPACING, Y_SPACING)
 	))
@@ -927,7 +922,7 @@ static func build() -> Array:
 		"Megastructure Materials",
 		"Materials and structural systems suitable for immense orbital and stellar engineering projects.",
 		["molecular_manufacturing", "field_stabilized_materials"],
-		{"science": 2085, "energy": 745},
+		{"science": 2085},
 		32.0,
 		lane_pos(9, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -940,7 +935,7 @@ static func build() -> Array:
 		"Megastructure Fabrication",
 		"Industrial methods for assembling structures on scales far beyond ordinary spacecraft or stations.",
 		["distributed_autonomous_economy", "megastructure_materials"],
-		{"science": 2245, "energy": 848},
+		{"science": 2245},
 		33.0,
 		lane_pos(9, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -952,7 +947,7 @@ static func build() -> Array:
 		"Interstellar Readiness",
 		"Capability for building systems robust enough for precursor interstellar missions and settlement infrastructure.",
 		["deep_space_logistics", "relativistic_navigation"],
-		{"science": 2085, "energy": 748},
+		{"science": 2085},
 		32.0,
 		lane_pos(9, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -962,7 +957,7 @@ static func build() -> Array:
 		"Biosphere Engineering",
 		"Design and long-term stabilisation of complex artificial ecologies for habitats and colonies.",
 		["closed_loop_ecosystems", "longevity_engineering", "planetary_simulation"],
-		{"science": 1898, "energy": 582},
+		{"science": 1898},
 		31.0,
 		lane_pos(9, BIO, X_SPACING, Y_SPACING)
 	))
@@ -972,7 +967,7 @@ static func build() -> Array:
 		"Digital Consciousness",
 		"Technical and philosophical basis for stable digital persons, cognition transfer, or equivalent mind emulation.",
 		["brain_computer_interfaces", "automated_science_systems"],
-		{"science": 2085, "energy": 642},
+		{"science": 2085},
 		32.0,
 		lane_pos(9, CIV, X_SPACING, Y_SPACING)
 	))
@@ -987,7 +982,7 @@ static func build() -> Array:
 		"Stellar Computation",
 		"Computation sustained by massive off-world energy and industrial infrastructure.",
 		["stellar_energy_harvesting", "automated_science_systems"],
-		{"science": 4185, "energy": 2198},
+		{"science": 4185},
 		42.0,
 		lane_pos(10, COMPUTE, X_SPACING, Y_SPACING)
 	))
@@ -997,27 +992,18 @@ static func build() -> Array:
 		"Interstellar Mission Design",
 		"Integrated design of ultra-long-duration missions, settlement packages, and autonomous expansion architectures.",
 		["relativistic_navigation", "interstellar_preparation"],
-		{"science": 3598, "energy": 1298},
+		{"science": 3598},
 		39.0,
 		lane_pos(10, THEORY, X_SPACING, Y_SPACING)
 	))
 
-	nodes.append(make.call(
-		"exotic_energy_management",
-		"Exotic Energy",
-		"Ultra-high-energy storage, routing, and containment for civilisation-scale engineering.",
-		["antimatter_handling", "stellar_energy_harvesting"],
-		{"science": 4525, "energy": 2798},
-		43.0,
-		lane_pos(10, ENERGY, X_SPACING, Y_SPACING)
-	))
 
 	nodes.append(make.call(
 		"self_healing_megastructures",
 		"Self-Healing Megastructures",
 		"Large engineered systems able to monitor damage, repair themselves, and maintain structural integrity over long timescales.",
 		["megastructure_materials", "self_replicating_industry"],
-		{"science": 3798, "energy": 1498},
+		{"science": 3798},
 		40.0,
 		lane_pos(10, MATERIALS, X_SPACING, Y_SPACING)
 	))
@@ -1027,7 +1013,7 @@ static func build() -> Array:
 		"Macro Coordination",
 		"Management and optimisation of industry, logistics, habitats, energy, and computation across vast distributed systems.",
 		["megastructure_fabrication", "stellar_scale_computation", "distributed_autonomous_economy"],
-		{"science": 4198, "energy": 1895},
+		{"science": 4198},
 		42.0,
 		lane_pos(10, INDUSTRY, X_SPACING, Y_SPACING)
 	))
@@ -1037,7 +1023,7 @@ static func build() -> Array:
 		"Multi-Habitat Support",
 		"Integrated life support, logistics, and industrial support for many large habitats and colonies.",
 		["synthetic_biosphere_engineering", "deep_space_logistics", "civilization_scale_coordination"],
-		{"science": 3698, "energy": 1495},
+		{"science": 3698},
 		40.0,
 		lane_pos(10, SPACE, X_SPACING, Y_SPACING)
 	))
@@ -1052,7 +1038,7 @@ static func build() -> Array:
 		"Terraforming",
 		"Deliberate and sustained modification of a world's atmosphere, temperature, and surface chemistry to support life or large-scale industry.",
 		["synthetic_biosphere_engineering", "in_situ_resource_utilization", "stellar_energy_harvesting"],
-		{"science": 2848, "energy": 1648},
+		{"science": 2848},
 		40.0,
 		lane_pos(10, PROPULSION, X_SPACING, Y_SPACING)
 	))
@@ -1062,7 +1048,7 @@ static func build() -> Array:
 		"Post-Biological",
 		"Stable coexistence or migration between biological, augmented, and digital forms of personhood.",
 		["digital_consciousness_frameworks", "longevity_engineering", "brain_computer_interfaces"],
-		{"science": 4398, "energy": 1398},
+		{"science": 4398},
 		42.0,
 		lane_pos(10, BIO, X_SPACING, Y_SPACING)
 	))
@@ -1072,7 +1058,7 @@ static func build() -> Array:
 		"Civilization Architecture",
 		"Governance, coordination, and social architecture for civilisations spread across habitats, worlds, and substrates.",
 		["post_biological_transition", "civilization_scale_coordination"],
-		{"science": 3995, "energy": 1095},
+		{"science": 3995},
 		40.0,
 		lane_pos(10, CIV, X_SPACING, Y_SPACING)
 	))
@@ -1086,7 +1072,7 @@ static func build() -> Array:
 		"Radio Astronomy",
 		"Wide-field radio surveys and correlation processing capable of resolving faint, non-natural electromagnetic signatures against the galactic background.",
 		["information_theory"],
-		{"science": 185, "energy": 42},
+		{"science": 185},
 		15.0,
 		lane_pos(5, FORECAST, X_SPACING, Y_SPACING)
 	))
@@ -1101,7 +1087,7 @@ static func build() -> Array:
 		"Thermal Management",
 		"High-emissivity radiator engineering and heat-cycle optimisation for shedding the waste heat of terawatt-scale industry to space.",
 		["space_power_infrastructure"],
-		{"science": 540, "energy": 300},
+		{"science": 540},
 		21.0,
 		lane_pos(7, ESTORAGE, X_SPACING, Y_SPACING)
 	))
@@ -1177,7 +1163,6 @@ static func build() -> Array:
 		var depth_mult: float = pow(TIER_COST_GROWTH, tier)
 		if n.cost.has("science"):
 			n.cost["science"] = float(n.cost["science"]) * SCIENCE_COST_SCALE * depth_mult
-		if n.cost.has("energy"):
-			n.cost["energy"] = float(n.cost["energy"]) * ENERGY_COST_SCALE * depth_mult
+
 
 	return nodes

@@ -48,6 +48,21 @@ const RESOURCE_DEFS: Dictionary = {
 	# key       label        stored unit   rate unit
 	"science":  {"label": "Science",  "unit": "FLOP",    "rate_unit": "FLOP/s"},
 	"minerals": {"label": "Matter",   "unit": "Grams",   "rate_unit": "Grams/s"},
+	# NOTE ON THE ENERGY UNIT — read this before pricing anything in energy.
+	#
+	# Production figures ARE real watts: a Coal Plant listed at 6.6e8 is a genuine 660 MW
+	# station.  Check it against its own fuel line — 6.25e9 g/day of coal at ~24 kJ/g is
+	# 1.5e14 J/day in, and 660 MW out is 5.7e13 J/day, a 38 % thermal efficiency.  The oil and
+	# fusion plants land on 38 % and 39 % by the same test, so the watts are watts.
+	#
+	# But the POOL accumulates production * delta_days with no per-second step, so its unit is
+	# WATT-DAYS: one unit is one watt sustained for a game-day, i.e. 86 400 real joules.  Stocks
+	# and costs are therefore in watt-days while rates are in watts, and the two are consistent
+	# — a 3.3 TW grid banks 3.3e12 units a day.
+	#
+	# The trap: a cost written in real SI joules is 86 400x too large.  Pricing wheat at a
+	# correct-looking 2 500 J/g once asked for 6 000x the entire planet's output and starved
+	# everyone.  Divide real joules by 86 400 to get the figure that belongs here.
 	"energy":   {"label": "Energy",   "unit": "Joules",  "rate_unit": "Watts"},
 	"compute":  {"label": "Compute",  "unit": "FLOP/s",  "rate_unit": "FLOP/s"},
 }

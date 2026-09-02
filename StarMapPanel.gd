@@ -22,6 +22,10 @@ signal missile_requested(star_name: String, gamma_max: float, accel: float, coun
 ## Send a lightweight recon probe to a star at a chosen max γ / acceleration (like a colony
 ## ship, but it gathers full intel on arrival instead of settling).
 signal probe_requested(star_name: String, gamma_max: float, accel: float)
+## Send a crafted von Neumann Probe to seed a star.  Unlike a colony ship this one replicates
+## on arrival and keeps going, so it is a decision about the whole galaxy, not one system.
+signal vn_probe_requested(star_name: String, gamma_max: float, accel: float,
+		mission: String, doctrine: String)
 ## Transmit a diplomatic message to a detected alien system.
 ## kind ∈ {"contact", "ally", "trade", "war"}.
 signal message_requested(star_name: String, kind: String)
@@ -56,6 +60,8 @@ const ENERGY_GAME_PER_JOULE: float = 5.0e-17
 const MISSILE_MASS_FRAC:   float = 0.15
 const BERSERKER_MASS_FRAC: float = 0.02
 const PROBE_MASS_FRAC:     float = 0.004
+## A colony seed is heavier than a survey probe — it has to carry a factory.
+const VN_PROBE_MASS_FRAC:  float = 0.03
 
 ## Relativistic launch-energy for a craft of the given mass fraction, via the shared flight
 ## model — same speed/accel logic as a colony ship, just scaled by rest mass.
@@ -209,6 +215,27 @@ const STARS: Array = [
 # is identical every session and consistent between the star map and Game.
 const PROC_STAR_COUNT:   int   = 10000
 const PROC_SEED:         int   = 0x57A6_5EED
+
+# ── Star formation ────────────────────────────────────────────────────────────
+## The galaxy is not a fixed cast.  Stars die — StellarEvolution already takes them off the
+## main sequence and leaves white dwarfs, neutron stars and black holes behind — and until now
+## nothing replaced them, so the sky could only ever get emptier.
+##
+## New stars are NOT generated at runtime.  The whole future population is drawn once from the
+## same seed with a BIRTH YEAR attached, and each one joins the catalogue when the clock reaches
+## it.  That keeps the galaxy deterministic (the same run always sees the same sky), keeps
+## generation off the frame budget entirely, and means a save restores the right stars simply by
+## restoring the year.
+const FUTURE_STARS:      int   = 4000
+## Star formation ends here.  The Milky Way's gas reservoir is finite and is not replenished
+## faster than it is locked into remnants; by ~1e14 years there is nothing left to collapse and
+## the last stars ever to exist have already been born.
+const STAR_FORMATION_END_YEAR: float = 1.0e14
+## First year a newly-formed star can appear.  Birth years are drawn log-uniformly between the
+## two bounds and then skewed early (BIRTH_SKEW > 1), so formation is fastest at the start and
+## thins out across the decades rather than arriving all at once at the end.
+const STAR_FORMATION_START_YEAR: float = 1.0e6
+const BIRTH_SKEW:        float = 1.6
 const PROC_BASE_RANGE_LY: float = 4000.0   # naked-eye / early-telescope reach (always visible)
 ## [spectral, weight, base-mass M☉, colour] — weights skew heavily toward M dwarfs, as reality does.
 const PROC_TYPES: Array = [
@@ -225,6 +252,10 @@ static var _proc_stars:   Array = []
 static var _all_stars:    Array = []
 static var _all_full:     Array = []   # real + EVERY procedural star, ignoring range (debug view)
 static var _obs_range_ly: float = PROC_BASE_RANGE_LY
+## Stars not yet born, sorted by birth year, plus how many of them have joined the catalogue.
+static var _future:       Array = []
+static var _born_count:   int = 0
+static var _born_year:    float = 0.0
 static var _stars_dirty:  bool  = true
 
 ## The complete star catalogue — real STARS + ALL procedural stars, regardless of observation
@@ -262,6 +293,88 @@ static func observation_range() -> float:
 
 ## Seed-deterministic invented stars across the galactic disk + bulge (same distribution the
 ## field uses), each a full star dict named "proceduralN".
+## The stars that do not exist yet.  Same generator as the standing population, but each entry
+## carries the year it forms; `age` is 0 at birth because it is born then.
+static func _generate_future_stars() -> Array:
+	var out: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = PROC_SEED ^ 0x5748_0000
+	for i in range(FUTURE_STARS):
+		# Births are spread LOGARITHMICALLY across the decades, not linearly across the span:
+		# a linear draw over 1e6..1e14 puts almost everything in the final decade, which is the
+		# opposite of how star formation behaves.  The skew then weights the early decades, so
+		# the rate visibly declines — half the remaining stars are born in the first few
+		# hundred million years and the last ones trickle in over the following trillions.
+		var u: float = pow(rng.randf(), BIRTH_SKEW)
+		var born: float = STAR_FORMATION_START_YEAR * pow(STAR_FORMATION_END_YEAR / STAR_FORMATION_START_YEAR, u)
+		var st: Dictionary = _proc_star_at(rng, "newborn%d" % (i + 1))
+		if st.is_empty():
+			continue
+		# _star_age_now computes age*1e9 + (year - STELLAR_EPOCH), so to make a star exactly
+		# (year - born) old we store a NEGATIVE seed age.  It reads as "not yet formed" until
+		# the clock passes its birth year, then ages from zero like any other star.
+		st["age"] = (float(STELLAR_EPOCH) - born) / 1.0e9
+		st["born"] = born
+		out.append(st)
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["born"]) < float(b["born"]))
+	return out
+
+## Advance the catalogue to `y`, admitting every star whose formation year has arrived.  Cheap:
+## the pool is sorted, so this is a pointer walk that almost always does nothing.
+static func advance_star_formation(y: float) -> void:
+	if _future.is_empty():
+		_future = _generate_future_stars()
+	_born_year = y
+	var added: bool = false
+	while _born_count < _future.size() and float(_future[_born_count]["born"]) <= y:
+		_proc_stars.append(_future[_born_count])
+		_born_count += 1
+		added = true
+	if added:
+		_all_full.clear()      # force the catalogue views to rebuild with the new stars
+		_all_stars.clear()
+		_stars_dirty = true
+
+## How many stars have yet to form, and when the next one does — for the galaxy readout.
+static func pending_star_formation() -> Dictionary:
+	if _future.is_empty():
+		_future = _generate_future_stars()
+	return {
+		"pending": _future.size() - _born_count,
+		"next_year": float(_future[_born_count]["born"]) if _born_count < _future.size() else -1.0,
+		"ended": _born_count >= _future.size() or _born_year >= STAR_FORMATION_END_YEAR,
+	}
+
+## One procedurally-placed star (disk or bulge), or {} if the draw fell outside the disk.
+static func _proc_star_at(rng: RandomNumberGenerator, star_name: String) -> Dictionary:
+	var basis: Array = _galactic_basis()
+	var gx: Vector3 = basis[0]
+	var gy: Vector3 = basis[1]
+	var gz: Vector3 = basis[2]
+	var gc: Vector3 = gx * SOL_GC_LY
+	var pos: Vector3
+	if rng.randf() < BULGE_FRAC:
+		pos = gc + _proc_rand_unit(rng) * absf(rng.randfn(0.0, BULGE_LY * 0.6))
+	else:
+		var radius: float = -DISK_SCALE_LY * (log(maxf(rng.randf(), 1e-6)) + log(maxf(rng.randf(), 1e-6)))
+		if radius > DISK_MAX_LY:
+			return {}
+		var phi: float = rng.randf() * TAU
+		var z: float = rng.randfn(0.0, DISK_H_LY)
+		pos = gc + (gx * (radius * cos(phi))) + (gy * (radius * sin(phi))) + (gz * z)
+	var dist: float = pos.length()
+	if dist < 1.0:
+		return {}
+	var t: Array = _proc_pick_type(rng.randf())
+	return {
+		"name": star_name, "pos": pos, "dist": dist,
+		"spectral": str(t[0]), "color": t[3],
+		"mass": float(t[2]) * rng.randf_range(0.7, 1.3),
+		"age": rng.randf_range(0.4, 9.0),
+		"procedural": true,
+	}
+
 static func _generate_procedural_stars() -> Array:
 	var out: Array = []
 	var rng := RandomNumberGenerator.new()
@@ -558,7 +671,7 @@ var _gc_pos: Vector3 = Vector3.ZERO # galactic centre, relative to Sol
 ## Interstellar state pushed by Game.gd.
 var _colonized: Dictionary = {}      # star name → true
 var _factions: Dictionary = {}       # star name → "aggressive" | "peaceful"
-var _missions: Array = []            # [{ "target": name, "progress": 0..1 }]
+var _missions: Array = []            # [{ target, progress, origin, kind: "colony"|"vn", mission }]
 var _avail_energy: float = 0.0       # current energy, for the launch affordability readout
 var _dash_phase: float = 0.0         # animates the travel-line dashes
 var _cosmic_scale: float = 1.0       # proper-distance multiplier for unbound galaxies (≥1)
@@ -576,6 +689,9 @@ var _intel: Dictionary = {}          # star → {alignment, dyson, telescopes, l
 var _colony_intel: Dictionary = {}   # colonised star → {dyson, telescopes, lasers} (own infrastructure)
 var _missile_btn: Button = null
 var _probe_btn: Button = null
+var _vn_btn:         Button = null
+var _dlg_mission_row:  HBoxContainer = null
+var _dlg_doctrine_row: HBoxContainer = null
 var _contact_btn: Button = null
 var _ally_btn: Button = null
 var _trade_btn: Button = null
@@ -597,7 +713,7 @@ var _berserker_btn: Button  = null
 ## number to send (weapons) or energy output (laser), with a live cost readout and a confirm.
 var _dialog_backdrop: ColorRect      = null   # dims the map + eats clicks while the dialog is up
 var _action_dialog:  PanelContainer  = null
-var _dlg_kind:       String          = ""     # "colonize" | "probe" | "berserker" | "missile" | "laser"
+var _dlg_kind:       String          = ""     # "colonize" | "probe" | "vnprobe" | "berserker" | "missile" | "laser"
 var _dlg_title:      Label           = null
 var _dlg_speed_row:  HBoxContainer    = null
 var _dlg_accel_row:  HBoxContainer    = null
@@ -684,7 +800,16 @@ func _build_launch_ui() -> void:
 	_probe_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_probe_btn.add_theme_color_override("font_color", Color(0.7, 0.9, 0.85))
 	_probe_btn.pressed.connect(func(): _open_action_dialog("probe"))
+
 	vb.add_child(_probe_btn)
+
+	_vn_btn = Button.new()
+	_vn_btn.text = "Seed von Neumann probe…"
+	_vn_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_vn_btn.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	_vn_btn.tooltip_text = "Send a crafted von Neumann Probe. It colonises the star and builds fresh probes there, which leave for the next systems on their own — one launch eventually reaches everything."
+	_vn_btn.pressed.connect(func(): _open_action_dialog("vnprobe"))
+	vb.add_child(_vn_btn)
 
 	_berserker_btn = Button.new()
 	_berserker_btn.text = "Send berserkers…"
@@ -802,6 +927,10 @@ func _build_action_dialog() -> void:
 	_dlg_energy_val = _dlg_energy_row.get_meta("value")
 	vb.add_child(_dlg_energy_row)
 
+	# Probe orders (von Neumann only): what it does on arrival, and how it treats what it finds.
+	_dlg_mission_row  = _make_option_row(vb, "Mission", DoctrineData.PROBE_MISSIONS)
+	_dlg_doctrine_row = _make_option_row(vb, "Doctrine", DoctrineData.DOCTRINES)
+
 	_dlg_info = Label.new()
 	_dlg_info.add_theme_font_size_override("font_size", 11)
 	_dlg_info.modulate = Color(0.78, 0.85, 0.97)
@@ -850,6 +979,26 @@ func _dlg_slider_row(label: String, lo: float, hi: float, step: float, val: floa
 	row.set_meta("value", v)
 	return row
 
+## An option row for the dialog: a label and a dropdown, used for a probe's mission and its
+## contact doctrine.  Both re-cost the flight when changed, since mission decides probe mass.
+func _make_option_row(parent: Control, label: String, entries: Array) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var l := Label.new()
+	l.text = label
+	l.custom_minimum_size = Vector2(96, 0)
+	l.add_theme_font_size_override("font_size", 11)
+	row.add_child(l)
+	var opt := OptionButton.new()
+	opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for i in range(entries.size()):
+		opt.add_item(str((entries[i] as Dictionary)["name"]), i)
+	opt.item_selected.connect(func(_i: int) -> void: _update_dialog_info())
+	row.add_child(opt)
+	row.set_meta("opt", opt)
+	parent.add_child(row)
+	return row
+
 ## Open the dialog for `kind`, showing only the rows that action needs.  Buttons are disabled
 ## when an action is unavailable, so this only ever opens for a valid, affordable-in-principle move.
 func _open_action_dialog(kind: String) -> void:
@@ -865,6 +1014,12 @@ func _open_action_dialog(kind: String) -> void:
 	_dlg_accel_row.visible  = not is_laser
 	_dlg_count_row.visible  = wants_count
 	_dlg_energy_row.visible = is_laser
+	# A von Neumann probe carries its ORDERS: what to do on arrival, and how to behave toward
+	# whoever it meets.  Both are copied into every probe it goes on to build, so this is the
+	# last moment either can be chosen.
+	var is_vn := kind == "vnprobe"
+	_dlg_mission_row.visible  = is_vn
+	_dlg_doctrine_row.visible = is_vn
 	if wants_count:
 		var stock := _berserker_stock if kind == "berserker" else _missile_stock
 		_dlg_count.min_value = 1
@@ -872,7 +1027,8 @@ func _open_action_dialog(kind: String) -> void:
 		_dlg_count.value = 1
 	var titles := {
 		"colonize": "Launch colony ship", "probe": "Send recon probe",
-		"berserker": "Launch berserkers", "missile": "Fire missiles", "laser": "Fire orbital laser"}
+		"berserker": "Launch berserkers", "missile": "Fire missiles", "laser": "Fire orbital laser",
+		"vnprobe": "Seed von Neumann probe"}
 	_dlg_title.text = "%s  →  %s" % [str(titles.get(kind, "Launch")), star]
 	_update_dialog_info()
 	_dialog_backdrop.show()
@@ -921,6 +1077,8 @@ func _update_dialog_info() -> void:
 				count = int(_dlg_count.value)
 			"probe":
 				per *= PROBE_MASS_FRAC
+			"vnprobe":
+				per *= DoctrineData.mission_mass_frac(_selected_mission())
 		var total := per * float(count)
 		affordable = total <= _avail_energy
 		var speed_str := _fmt_speed(g)
@@ -930,9 +1088,30 @@ func _update_dialog_info() -> void:
 		text = "%s  ·  %s  ·  %s travel  ·  %s each%s%s" % [
 			speed_str, _fmt_accel(a), _fmt_years(years), Units.format_si(per, "J"),
 			tail, "" if affordable else "   ✗ insufficient energy"]
+		if _dlg_kind == "vnprobe":
+			# Say what the orders actually commit to — a probe cannot be recalled or re-tasked.
+			var mi: Dictionary = DoctrineData.get_mission(_selected_mission())
+			var dd: Dictionary = DoctrineData.get_doctrine(_selected_doctrine())
+			text += "
+%s  %s" % [str(mi["name"]), str(mi["desc"])]
+			text += "
+On contact: %s  %s" % [str(dd["name"]), str(dd["desc"])]
 	_dlg_info.text = text
 	if _dlg_confirm:
 		_dlg_confirm.disabled = not affordable
+
+## The probe orders currently selected in the dialog.
+func _selected_mission() -> String:
+	if _dlg_mission_row == null:
+		return DoctrineData.DEFAULT_MISSION
+	var i: int = (_dlg_mission_row.get_meta("opt") as OptionButton).selected
+	return str((DoctrineData.PROBE_MISSIONS[maxi(i, 0)] as Dictionary)["id"])
+
+func _selected_doctrine() -> String:
+	if _dlg_doctrine_row == null:
+		return DoctrineData.DEFAULT_ID
+	var i: int = (_dlg_doctrine_row.get_meta("opt") as OptionButton).selected
+	return str((DoctrineData.DOCTRINES[maxi(i, 0)] as Dictionary)["id"])
 
 ## Commit the configured action: emit the matching request (weapons carry the salvo count).
 func _on_dialog_confirm() -> void:
@@ -947,6 +1126,8 @@ func _on_dialog_confirm() -> void:
 			colonize_requested.emit(star, g, a)
 		"probe":
 			probe_requested.emit(star, g, a)
+		"vnprobe":
+			vn_probe_requested.emit(star, g, a, _selected_mission(), _selected_doctrine())
 		"berserker":
 			berserker_requested.emit(star, g, a, int(_dlg_count.value))
 		"missile":
@@ -1141,6 +1322,15 @@ func set_weapon_caps(can_laser: bool, can_berserker: bool, can_missile: bool) ->
 	_update_launch_ui()
 
 ## Push the player's crafted-weapon stockpile (Missile / Berserker units on hand).
+## Crafted von Neumann Probes on hand, so the Seed button can gate on having one.
+var _vn_stock: int = 0
+
+func set_vn_stock(n: int) -> void:
+	_vn_stock = n
+	if _vn_btn:
+		_vn_btn.disabled = n <= 0
+		_vn_btn.tooltip_text = ("Send a crafted von Neumann Probe (%d in stock)." % n) if n > 0 			else "No von Neumann Probes built. Assemble one in the Production panel."
+
 func set_arsenal(missiles: int, berserkers: int) -> void:
 	_missile_stock = missiles
 	_berserker_stock = berserkers
@@ -1200,13 +1390,31 @@ func _update_launch_ui() -> void:
 	_launch_title.text = "%s  —  %.2f ly" % [name, dist]
 	_launch_info.text = "Energy available: %s.  Pick an action to set speed / acceleration / number and confirm." % \
 		Units.format_si(_avail_energy, "J")
-	if not _can_colonize:
+	# A detected civilisation makes the system a neighbour, not a site.  Blocked here rather
+	# than refused on confirm, so the map says why before the player commits to anything.
+	var inhabited: bool = _intel.has(name)
+	if inhabited:
+		_launch_btn.disabled = true
+		_launch_btn.text = "Inhabited — cannot be colonised"
+		_launch_btn.tooltip_text = "%s already holds a civilisation." % name
+	elif not _can_colonize:
 		# Interstellar flight not yet unlocked — show the target's data but block the launch.
 		_launch_btn.disabled = true
 		_launch_btn.text = "Colony ship — research Relativistic Navigation"
+		_launch_btn.tooltip_text = ""
 	else:
 		_launch_btn.disabled = false
 		_launch_btn.text = "Launch colony ship…"
+		_launch_btn.tooltip_text = ""
+	if _vn_btn:
+		if inhabited:
+			_vn_btn.disabled = true
+			_vn_btn.text = "Inhabited — cannot be seeded"
+			_vn_btn.tooltip_text = "Seeding a self-replicating probe into an inhabited system would not be colonisation."
+		else:
+			_vn_btn.disabled = _vn_stock <= 0
+			_vn_btn.text = "Seed von Neumann probe…"
+			_vn_btn.tooltip_text = ("Send a crafted von Neumann Probe (%d in stock)." % _vn_stock) if _vn_stock > 0 else "No von Neumann Probes built. Assemble one in the Production panel."
 	_update_weapon_buttons(dist, false)
 	# Keep an open dialog's cost readout current if energy/stock changed underneath it.
 	if _dialog_backdrop and _dialog_backdrop.visible:
@@ -1325,6 +1533,21 @@ func _star_index(name: String) -> int:
 			return i
 	return -1
 
+## Map position of anything a mission can be addressed to — a catalogued star OR a cluster in
+## the outer shell.  Game.gd already indexes both by name, so a launch at a cluster works; only
+## the RENDERER could not resolve one, which is why those flights drew no path at all.
+## Returns false when the name matches nothing (an in-flight target that no longer exists).
+func _target_pos(name: String, out: Array) -> bool:
+	var idx := _star_index(name)
+	if idx >= 0:
+		out.append(all_stars()[idx]["pos"])
+		return true
+	for c: Dictionary in star_clusters():
+		if str(c["name"]) == name:
+			out.append(c["pos"])
+			return true
+	return false
+
 ## Dashed line from `from` to `to` whose dashes flow toward `to`; the leg already
 ## traversed (≤ progress) is tinted green, the remainder blue, with a ship marker.
 func _draw_travel_dashes(from: Vector2, to: Vector2, progress: float) -> void:
@@ -1346,6 +1569,46 @@ func _draw_travel_dashes(from: Vector2, to: Vector2, progress: float) -> void:
 		s += period
 	var ship := from + dir * (total * clampf(progress, 0.0, 1.0))
 	draw_circle(ship, 3.0, Color(0.85, 0.97, 1.0, 0.95))
+
+## Colour per probe mission, so a swarm's purpose is readable from the map alone: a survey
+## front, a relay network, and a colonisation wave look like three different things because
+## they are.
+const PROBE_COLOURS: Dictionary = {
+	"recon":    Color(0.60, 0.90, 0.95),   # pale cyan — looking
+	"comms":    Color(0.70, 0.65, 1.00),   # violet    — listening
+	"colonize": Color(0.55, 0.95, 0.60),   # green     — claiming
+}
+
+## A von Neumann probe in transit.  Deliberately NOT the colony ship's dashed lane: a solid
+## hairline with a forward-pointing chevron at the probe, because the thing that matters about
+## a probe is its heading — it is going somewhere and will not stop when it gets there.
+func _draw_probe_track(from: Vector2, to: Vector2, progress: float, mission: String) -> void:
+	var d := to - from
+	var total := d.length()
+	if total < 1.0:
+		return
+	var dir := d / total
+	var col: Color = PROBE_COLOURS.get(mission, PROBE_COLOURS["colonize"])
+	var p := clampf(progress, 0.0, 1.0)
+	var head := from + dir * (total * p)
+	# Faint hairline over the whole route, brighter along the part already flown.
+	draw_line(from, to, Color(col.r, col.g, col.b, 0.16), 1.0, true)
+	draw_line(from, head, Color(col.r, col.g, col.b, 0.55), 1.0, true)
+	# A short bright wake trailing the probe, so direction reads even when it is barely moving.
+	var wake := maxf(0.0, total * p - 14.0)
+	draw_line(from + dir * wake, head, Color(col.r, col.g, col.b, 0.95), 1.6, true)
+	# Chevron at the probe, pointing along the heading.
+	var n := Vector2(-dir.y, dir.x)
+	var tip := head + dir * 5.0
+	draw_polyline(PackedVector2Array([
+		tip - dir * 6.0 + n * 4.0, tip, tip - dir * 6.0 - n * 4.0]),
+		Color(1.0, 1.0, 1.0, 0.95), 1.6, true)
+	# Replicating probes travel as a group; a second faint chevron behind says "and more".
+	if wake > 0.0:
+		var t2 := head - dir * 7.0
+		draw_polyline(PackedVector2Array([
+			t2 - dir * 4.0 + n * 2.6, t2, t2 - dir * 4.0 - n * 2.6]),
+			Color(col.r, col.g, col.b, 0.60), 1.2, true)
 
 ## A soft, blended star: faint halo layers under a bright antialiased core.
 func _draw_soft_star(sp: Vector2, rad: float, col: Color) -> void:
@@ -1538,8 +1801,31 @@ func _draw_landmark(sp: Vector2, kind: String, col: Color, alpha: float, name: S
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(col.r, col.g, col.b, 0.8 * alpha))
 
 ## Orthographic projection of a world point onto the camera's right/up axes.
+## How far back the eye sits, in units of the current view radius.  Small values give a wide,
+## dramatic cone; large values flatten toward the orthographic projection this replaced.  This
+## is the only knob that decides how strongly the map reads as a volume rather than a chart.
+const CAMERA_DIST_VR: float = 2.6
+## Nearest depth a point may be projected at, again in view radii.  Anything closer (or behind
+## the eye) is clamped rather than flung off-screen or mirrored through the origin.
+const NEAR_CLIP_VR: float = 0.35
+
+## Perspective foreshortening at a point: 1.0 at the focal plane, >1 nearer, <1 further.
+## Everything on the map — positions, star radii, track widths — goes through this, which is
+## what makes depth readable instead of merely sorted.
+func _persp(p: Vector3, b: Basis) -> float:
+	var cam: float = _view_radius_now() * CAMERA_DIST_VR
+	var near: float = _view_radius_now() * NEAR_CLIP_VR
+	# Depth measured from the eye: the focal plane sits at the origin of the current frame.
+	var d: float = maxf(cam - p.dot(b.z), near)
+	return cam / d
+
 func _project(p: Vector3, b: Basis, center: Vector2, scale: float) -> Vector2:
-	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * scale
+	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * scale * _persp(p, b)
+
+## View radius for the current zoom.  Computed rather than cached: _persp runs during picking
+## as well as drawing, and a per-frame cache would be stale for the first click after a zoom.
+func _view_radius_now() -> float:
+	return maxf(_max_display_radius() / _zoom, 1.0e-6)
 
 ## Signed depth along the view axis (larger = nearer the viewer).
 func _depth(p: Vector3, b: Basis) -> float:
@@ -1556,19 +1842,6 @@ func _draw() -> void:
 	var b := _view_basis()
 	var scale := _fit_scale(center)
 	var star_maxdr := _max_star_display_radius()
-
-	# The Milky Way as a faint sampled star field — a hundred-billion-star galaxy rendered as a
-	# deterministic point cloud filling the decades between the named stars and the galaxies.
-	# Drawn first (behind the rings and everything else) as a dim backdrop; fades in with the
-	# view radius like every other object, so it reads at galactic zoom and vanishes up close.
-	for fs: Dictionary in _field:
-		var flp: Vector3 = _rel(fs["pos"])
-		var fa: float = _detail_alpha(flp.length())
-		if fa <= 0.0:
-			continue
-		var fsp := _project(flp, b, center, scale)
-		var fr: float = float(fs["r"])
-		draw_rect(Rect2(fsp - Vector2(fr, fr) * 0.5, Vector2(fr, fr)), _fade(fs["col"], fa * 0.65))
 
 	# Order-of-magnitude reference rings: one per decade of light-years, out to the
 	# Hubble horizon.  On the log scale they're evenly spaced (log₁₀(10ᵏ) = k), so each
@@ -1707,6 +1980,10 @@ func _draw() -> void:
 		# Stars shrink with distance from Sol (perspective): near = bigger, far = smaller.
 		var dist_frac := clampf(lp.length() / star_maxdr, 0.0, 1.0)
 		var rad := lerpf(6.0, 2.2, dist_frac)
+		# Size with perspective too, not just position: foreshortening the spacing while every
+		# star stays the same size reads as a warped chart rather than a volume.  Damped and
+		# clamped, so a star drifting near the eye swells convincingly without filling the panel.
+		rad *= clampf(1.0 + (_persp(lp, b) - 1.0) * 0.6, 0.45, 2.6)
 		# Draw each star at its CURRENT evolved state: giants swell and redden, compact remnants
 		# shrink to a dim point, and colour tracks the phase — so the map visibly ages over time.
 		var st: Dictionary = _star_state(s)
@@ -1761,19 +2038,33 @@ func _draw() -> void:
 	# In-transit colony missions: an animated dashed line from Sol to the target star,
 	# with dashes flowing toward the destination and a marker at the ship's progress.
 	for m: Dictionary in _missions:
-		var idx := _star_index(str(m.get("target", "")))
-		if idx < 0:
+		var tpos: Array = []
+		if not _target_pos(str(m.get("target", "")), tpos):
 			continue
-		var dst := _project(_rel(all_stars()[idx]["pos"]), b, center, scale)
-		_draw_travel_dashes(sol_px, dst, float(m.get("progress", 0.0)))
+		var dst := _project(_rel(tpos[0]), b, center, scale)
+		# A probe replicated at a colony departs from THAT star, not from Sol.  Empty origin
+		# means it was launched from home, which is every mission the player sends directly.
+		var src_px := sol_px
+		var origin := str(m.get("origin", ""))
+		if origin != "":
+			var opos: Array = []
+			if _target_pos(origin, opos):
+				src_px = _project(_rel(opos[0]), b, center, scale)
+		# A colony ship and a self-replicating probe are not the same object and should not
+		# read as the same line.
+		if str(m.get("kind", "colony")) == "vn":
+			_draw_probe_track(src_px, dst, float(m.get("progress", 0.0)),
+				str(m.get("mission", "colonize")))
+		else:
+			_draw_travel_dashes(src_px, dst, float(m.get("progress", 0.0)))
 
 	# In-flight attacks: a white laser pulse racing out at light speed, or a red von
 	# Neumann berserker swarm crawling toward its target.
 	for atk: Dictionary in _attacks:
-		var aidx := _star_index(str(atk.get("target", "")))
-		if aidx < 0:
+		var apos: Array = []
+		if not _target_pos(str(atk.get("target", "")), apos):
 			continue
-		var adst := _project(_rel(all_stars()[aidx]["pos"]), b, center, scale)
+		var adst := _project(_rel(apos[0]), b, center, scale)
 		var ap := float(atk.get("progress", 0.0))
 		match str(atk.get("kind", "")):
 			"laser":
@@ -1786,16 +2077,16 @@ func _draw() -> void:
 	# Incoming relativistic missiles: a red streak from the hostile source toward the target
 	# (Sol, or one of our colonies), with a bright head at the missile's progress.
 	for inc: Dictionary in _incoming:
-		var sidx := _star_index(str(inc.get("source", "")))
-		if sidx < 0:
+		var ipos: Array = []
+		if not _target_pos(str(inc.get("source", "")), ipos):
 			continue
-		var src_px := _project(_rel(all_stars()[sidx]["pos"]), b, center, scale)
+		var src_px := _project(_rel(ipos[0]), b, center, scale)
 		var tgt_name := str(inc.get("target", "sol"))
 		var tgt_px := sol_px
 		if tgt_name != "sol":
-			var tidx := _star_index(tgt_name)
-			if tidx >= 0:
-				tgt_px = _project(_rel(all_stars()[tidx]["pos"]), b, center, scale)
+			var itg: Array = []
+			if _target_pos(tgt_name, itg):
+				tgt_px = _project(_rel(itg[0]), b, center, scale)
 		var ip := float(inc.get("progress", 0.0))
 		match str(inc.get("kind", "missile")):
 			"berserker":

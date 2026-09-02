@@ -152,7 +152,30 @@ func set_planet_info(data: Dictionary) -> void:
 		_storage_energy_label.text   = Units.format_si(en_cap,  "J") if en_cap  > 0.0 else "None"
 
 	energy_label.text     = Units.format_si_verbose(float(data.get("energy",  0.0)), "Watts")
+	# Power made off-world only counts once it has been beamed home.  When the link is the
+	# binding constraint, say so here -- otherwise a swarm that is throttled just looks broken.
+	var l_off: float = float(data.get("link_offered", 0.0))
+	var l_del: float = float(data.get("link_delivered", 0.0))
+	if l_off > l_del + 1.0:
+		energy_label.text += "  · link full, %s stranded" % Units.format_si(l_off - l_del, "W")
+		energy_label.modulate = Color(0.95, 0.65, 0.30)
+	else:
+		energy_label.modulate = Color(1, 1, 1)
 	population_label.text = _fmt_population(int(data.get("population", 0)))
+	# Food: how long the larder lasts at the current rate, and who is going hungry.  A world
+	# eating into its stores reads as a countdown; one that has run out reads as a death rate.
+	var fam: float = float(data.get("famine", 0.0))
+	var fdays: float = float(data.get("food_days", -1.0))
+	if fam > 0.0:
+		population_label.text += "  ·  FAMINE — %d%% unfed" % int(round(fam * 100.0))
+		population_label.modulate = Color(0.95, 0.35, 0.30)
+	elif fdays >= 0.0:
+		population_label.text += "  ·  %s food, %s left" % [
+			Units.format_si(float(data.get("food_stored", 0.0)), "g"),
+			("%.0f days" % fdays) if fdays < 720.0 else ("%.1f years" % (fdays / 365.25))]
+		population_label.modulate = Color(0.95, 0.65, 0.30) if fdays < 60.0 else Color(1, 1, 1)
+	else:
+		population_label.modulate = Color(1, 1, 1)
 	compute_label.text    = Units.format_si_verbose(float(data.get("compute", 0.0)), "FLOP/s")
 
 	if _mc_label:

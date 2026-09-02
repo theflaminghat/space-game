@@ -32,6 +32,7 @@ var _jobs:       Array = []   # active production jobs
 var _job_status_labels: Dictionary = {}   # job_id → Label  (running / stalled)
 var _job_rate_labels:   Dictionary = {}   # job_id → Label  (rate readout "1.0×")
 var _job_out_labels:    Dictionary = {}   # job_id → Label  (output flow)
+var _job_work_labels: Dictionary = {}
 var _job_in_labels:     Dictionary = {}   # job_id → Label  (input flow)
 var _next_id:    int   = 1
 var _all_recipes: Array = []   # full recipe list (updated on research change)
@@ -46,6 +47,16 @@ var _rate_slider:    HSlider      = null
 var _rate_label:     LineEdit     = null
 var _add_button:     Button       = null
 var _job_list:       VBoxContainer = null
+## Drag-to-reorder state.  Cards and their job ids are kept in display order so a drop can be
+## resolved to an insertion index by comparing the pointer against each card's midpoint.
+var _job_cards:      Array = []
+var _card_job_ids:   Array = []
+var _drag_job_id:    int = -1
+var _drag_started:   bool = false
+var _drag_press_y:   float = 0.0
+var _scroll:         ScrollContainer = null
+## Rank labels, refreshed in place after a drag so the list never has to be rebuilt mid-gesture.
+var _job_rank_labels: Dictionary = {}
 var _inputs_label:   Label        = null
 var _outputs_label:  Label        = null
 var _mc_label:       Label        = null
@@ -103,6 +114,7 @@ static func _parse_rate(text: String) -> float:
 func _ready() -> void:
 	_all_recipes = RecipeData.RECIPES
 	_build_ui()
+	set_process(false)   # only a live drag needs a per-frame tick (see _process)
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index in [
@@ -162,16 +174,41 @@ func set_mc_state(state: Dictionary) -> void:
 	_update_mc_label()
 
 ## Refresh the capacity readout for the active body.
+## Pools a world runs, in the order they read: factory floor, then the two agricultural ones.
+## Keys match Game's _last_mc_state — the factory pool is stored under the bare planet name,
+## the others under "planet|pool".
+const POOL_LABELS: Array = [["", "Factory"], ["|farm", "Arable"], ["|ranch", "Pasture"]]
+
 func _update_mc_label() -> void:
 	if _mc_label == null:
 		return
-	var info: Dictionary = _mc_state.get(_active_planet, {})
-	var cap: float = float(info.get("capacity", 0.0))
-	var used: float = float(info.get("demand", 0.0))
-	_mc_label.text = "Capacity %s / %s work/day" % [
-		Units.format_si(used, ""), Units.format_si(cap, "")]
-	# Tint amber when demand outstrips capacity (jobs on this world are throttled).
-	_mc_label.modulate = Color(0.95, 0.65, 0.30) if used > cap + 0.5 else Color(0.70, 0.80, 0.95)
+	# Show EVERY pool this world actually has, not just the factory one.  A world can be an
+	# industrial giant and still be out of arable land, and before this the panel only ever
+	# reported the pool that happened to be listed first.
+	var parts: Array = []
+	var over: bool = false
+	for entry: Array in POOL_LABELS:
+		var info: Dictionary = _mc_state.get(_active_planet + str(entry[0]), {})
+		var cap: float = float(info.get("capacity", 0.0))
+		var used: float = float(info.get("demand", 0.0))
+		if cap <= 0.0 and used <= 0.0:
+			continue                     # this world has no such capacity and asks nothing of it
+		if used > cap + 0.5:
+			over = true
+		parts.append("%s %s / %s" % [str(entry[1]),
+			Units.format_si(used, ""), Units.format_si(cap, "")])
+	_mc_label.text = ("  ·  ".join(parts) + "  work/day") if not parts.is_empty() else "No capacity here"
+	# Tint amber when any pool's demand outstrips it (jobs drawing on it are throttled).
+	_mc_label.modulate = Color(0.95, 0.65, 0.30) if over else Color(0.70, 0.80, 0.95)
+
+## "Draws 3.4 G work/day from Arable" — the line's own demand and the pool it competes in.
+func _fmt_work(recipe: Dictionary, rate: float) -> String:
+	var pool: String = POOL_OF.get(str(recipe.get("category", "")), "Factory")
+	return "Draws %s work/day from %s" % [
+		Units.format_si(RecipeData.work_per_rate(recipe) * rate, ""), pool]
+
+## Which capacity pool a recipe competes in — mirrors Game.RECIPE_POOL.
+const POOL_OF: Dictionary = {"agriculture": "Arable", "livestock": "Pasture"}
 
 ## Returns a serialisable copy of the current job list.
 func get_jobs() -> Array:
@@ -297,8 +334,10 @@ func _build_ui() -> void:
 
 	_job_list = VBoxContainer.new()
 	_job_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_job_list.add_theme_constant_override("separation", 4)
+	_job_list.add_theme_constant_override("separation", 8)
 	scroll.add_child(_job_list)
+
+	_scroll = scroll
 
 	_populate_recipes()
 	_update_io_preview()
@@ -410,9 +449,14 @@ func _selected_recipe() -> Dictionary:
 # ── Job list ─────────────────────────────────────────────────────────────────────
 
 func _rebuild_job_list() -> void:
+	_end_drag()          # a rebuild frees the cards, so no gesture may survive it
+	_job_cards.clear()
+	_card_job_ids.clear()
+	_job_rank_labels.clear()
 	_job_status_labels.clear()
 	_job_rate_labels.clear()
 	_job_out_labels.clear()
+	_job_work_labels.clear()
 	_job_in_labels.clear()
 	for child in _job_list.get_children():
 		child.queue_free()
@@ -430,9 +474,43 @@ func _add_job_row(job: Dictionary) -> void:
 	var card := VBoxContainer.new()
 	card.add_theme_constant_override("separation", 3)
 
-	# Row 1: recipe name + planet + remove button
+	# Row 1 doubles as the card's GRAB HANDLE: press anywhere on it and drag the line to a new
+	# place in the list.  It is wrapped in a PanelContainer so the bar reads as something you
+	# can take hold of, and so it has a background to tint while it is being dragged.
+	var handle := PanelContainer.new()
+	handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	handle.tooltip_text = "Drag to reorder — lines higher up are served first"
+	var hstyle := StyleBoxFlat.new()
+	hstyle.bg_color = Color(0.16, 0.19, 0.26, 1.0)
+	hstyle.set_corner_radius_all(3)
+	hstyle.content_margin_left = 6
+	hstyle.content_margin_right = 4
+	hstyle.content_margin_top = 2
+	hstyle.content_margin_bottom = 2
+	handle.add_theme_stylebox_override("panel", hstyle)
+	handle.gui_input.connect(_on_handle_input.bind(job_id))
+
 	var header_row := HBoxContainer.new()
 	header_row.add_theme_constant_override("separation", 6)
+	handle.add_child(header_row)
+
+	var grip := Label.new()
+	grip.text = "⣿"
+	grip.add_theme_font_size_override("font_size", 11)
+	grip.modulate = Color(0.45, 0.50, 0.60)
+	grip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header_row.add_child(grip)
+
+	# Priority rank.  A job's position in the list IS its claim on scarce inputs and on this
+	# world's capacity: the top line is served first and the bottom line gets the remainder.
+	var rank_lbl := Label.new()
+	rank_lbl.text = "%d." % (_priority_of(job_id) + 1)
+	rank_lbl.add_theme_font_size_override("font_size", 11)
+	rank_lbl.modulate = Color(0.55, 0.60, 0.70)
+	rank_lbl.custom_minimum_size = Vector2(22, 0)
+	rank_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	header_row.add_child(rank_lbl)
+	_job_rank_labels[job_id] = rank_lbl
 
 	var name_lbl := Label.new()
 	name_lbl.text = str(job.get("recipe", "?"))
@@ -453,9 +531,12 @@ func _add_job_row(job: Dictionary) -> void:
 	rm.flat = true
 	rm.custom_minimum_size = Vector2(28, 28)
 	rm.pressed.connect(_on_remove_pressed.bind(job_id))
+	rm.mouse_default_cursor_shape = Control.CURSOR_ARROW
 	header_row.add_child(rm)
 
-	card.add_child(header_row)
+	card.add_child(handle)
+	_job_cards.append(card)
+	_card_job_ids.append(job_id)
 
 	# Row 2: rate slider + readout
 	var slider_row := HBoxContainer.new()
@@ -503,6 +584,15 @@ func _add_job_row(job: Dictionary) -> void:
 		card.add_child(out_lbl)
 		_job_out_labels[job_id] = out_lbl
 
+		# What this line costs the world's capacity — the number that decides which job gets
+		# throttled when the pool runs short, and which pool it competes in.
+		var work_lbl := Label.new()
+		work_lbl.text = _fmt_work(recipe, rate)
+		work_lbl.add_theme_font_size_override("font_size", 10)
+		work_lbl.modulate = Color(0.62, 0.72, 0.88)
+		card.add_child(work_lbl)
+		_job_work_labels[job_id] = work_lbl
+
 		var in_lbl := Label.new()
 		in_lbl.text = "← " + _fmt_flow(recipe.get("inputs", {}), rate * norm)
 		in_lbl.add_theme_font_size_override("font_size", 10)
@@ -520,6 +610,8 @@ func _add_job_row(job: Dictionary) -> void:
 				break
 		# Update readout and flow labels
 		rate_lbl.text = _fmt_rate(actual_rate)
+		if _job_work_labels.has(job_id):
+			(_job_work_labels[job_id] as Label).text = _fmt_work(recipe, actual_rate)
 		if not recipe.is_empty():
 			if _job_out_labels.has(job_id):
 				(_job_out_labels[job_id] as Label).text = "→ " + _fmt_flow(recipe.get("outputs", {}), actual_rate * norm)
@@ -528,8 +620,10 @@ func _add_job_row(job: Dictionary) -> void:
 		production_changed.emit(_jobs.duplicate(true))
 	)
 
+	# No separator node between cards: the list's children have to be cards and nothing else,
+	# so a live drag can reorder them with move_child() and have the indices line up.  The gap
+	# is the container's own separation, and each card's handle bar draws its own edge.
 	_job_list.add_child(card)
-	_job_list.add_child(HSeparator.new())
 
 func _find_recipe(name: String) -> Dictionary:
 	for r in RecipeData.RECIPES:
@@ -563,6 +657,157 @@ func _on_add_pressed() -> void:
 	_next_id += 1
 	_jobs.append(job)
 	_add_job_row(job)
+	production_changed.emit(_jobs.duplicate(true))
+
+## Ids of this world's jobs, in priority order.  The master list interleaves every planet's
+## jobs, so a move has to hop over other worlds' entries rather than shifting one slot.
+func _planet_job_ids() -> Array:
+	var ids: Array = []
+	for j: Dictionary in _jobs:
+		if str(j.get("planet", "earth")).to_lower() == _active_planet:
+			ids.append(int(j.get("id", -1)))
+	return ids
+
+## This job's rank among the jobs shown on this world (-1 if it is not one of them).
+func _priority_of(job_id: int) -> int:
+	return _planet_job_ids().find(job_id)
+
+## How far the pointer must travel before a press becomes a drag rather than a click.
+const DRAG_THRESHOLD_PX: float = 4.0
+## Band at the top and bottom of the list where a held card starts scrolling the view, and how
+## fast it scrolls at the very edge.  Without this a list taller than the panel cannot be
+## reordered past the part of it you can see.
+const AUTOSCROLL_EDGE_PX: float = 44.0
+const AUTOSCROLL_PX_PER_SEC: float = 900.0
+
+## Handle events on a card's grab bar.  Press arms a drag, motion past the threshold starts it,
+## and every further motion re-sorts the list live so the other tiles slide past the one being
+## carried.  Godot keeps routing motion and the release to whichever control took the press, so
+## the pointer may leave the bar — and the card may be moved around the tree — without the
+## gesture breaking.
+func _on_handle_input(event: InputEvent, job_id: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_drag_job_id = job_id
+			_drag_started = false
+			_drag_press_y = event.global_position.y
+		else:
+			var moved: bool = _drag_started
+			_end_drag()
+			if moved:
+				_commit_order()
+		accept_event()
+	elif event is InputEventMouseMotion and _drag_job_id == job_id:
+		if not _drag_started:
+			if absf(event.global_position.y - _drag_press_y) < DRAG_THRESHOLD_PX:
+				return
+			_drag_started = true
+			_set_card_dragging(job_id, true)
+			set_process(true)          # autoscroll needs a per-frame tick, not just motion
+		_live_reorder(event.global_position.y)
+		accept_event()
+
+## While a card is held, drag it toward an edge and the list scrolls under it.  This runs every
+## frame rather than on motion because the pointer can sit still against the edge and still
+## expect the view to keep moving.
+func _process(delta: float) -> void:
+	if not _drag_started or _scroll == null:
+		set_process(false)
+		return
+	var rect: Rect2 = _scroll.get_global_rect()
+	var my: float = _scroll.get_global_mouse_position().y
+	var push: float = 0.0
+	if my < rect.position.y + AUTOSCROLL_EDGE_PX:
+		push = -clampf((rect.position.y + AUTOSCROLL_EDGE_PX - my) / AUTOSCROLL_EDGE_PX, 0.0, 1.0)
+	elif my > rect.end.y - AUTOSCROLL_EDGE_PX:
+		push = clampf((my - (rect.end.y - AUTOSCROLL_EDGE_PX)) / AUTOSCROLL_EDGE_PX, 0.0, 1.0)
+	if push == 0.0:
+		return
+	var before: int = _scroll.scroll_vertical
+	_scroll.scroll_vertical = before + int(push * AUTOSCROLL_PX_PER_SEC * delta)
+	# Re-sort against the view we just moved, so holding at the edge keeps walking the card
+	# down (or up) the list instead of stalling once the pointer stops moving.
+	if _scroll.scroll_vertical != before:
+		_live_reorder(_scroll.get_global_mouse_position().y)
+
+## Put the carried card where the pointer says it belongs, by moving the actual node.  The
+## VBoxContainer re-lays out immediately, so the displaced tiles visibly slide past it.
+func _live_reorder(gy: float) -> void:
+	var cur: int = _card_job_ids.find(_drag_job_id)
+	if cur < 0:
+		return
+	var card: Control = _job_cards[cur]
+	if not is_instance_valid(card):
+		return
+	# Insertion index = how many OTHER cards have their midpoint above the pointer.
+	#
+	# The midpoints are computed from the ORDER rather than read off global_position, because
+	# move_child() only queues the container's re-sort — the nodes still report last frame's
+	# coordinates until it runs.  Reading those stale positions makes a card jump two slots on
+	# one motion event and then oscillate.  Heights do not change while dragging, so walking
+	# the stack is both exact and immune to that race.
+	var sep: float = float(_job_list.get_theme_constant("separation"))
+	var y: float = _job_list.global_position.y
+	var want: int = 0
+	for i in range(_job_cards.size()):
+		var c: Control = _job_cards[i]
+		if not is_instance_valid(c):
+			continue
+		if i != cur and gy > y + c.size.y * 0.5:
+			want += 1
+		y += c.size.y + sep
+	if want == cur:
+		return
+	_job_list.move_child(card, want)
+	_job_cards.remove_at(cur)
+	_job_cards.insert(want, card)
+	var moved_id = _card_job_ids[cur]
+	_card_job_ids.remove_at(cur)
+	_card_job_ids.insert(want, moved_id)
+	_refresh_ranks()
+
+## Renumber the "1." "2." labels in place — cheaper than a rebuild, and a rebuild mid-drag
+## would free the very card the gesture is routed through.
+func _refresh_ranks() -> void:
+	for i in range(_card_job_ids.size()):
+		var lbl = _job_rank_labels.get(int(_card_job_ids[i]))
+		if lbl and is_instance_valid(lbl):
+			(lbl as Label).text = "%d." % (i + 1)
+
+## Tint the card being carried so it is obvious which line is in flight.
+func _set_card_dragging(job_id: int, on: bool) -> void:
+	var i: int = _card_job_ids.find(job_id)
+	if i < 0 or i >= _job_cards.size():
+		return
+	var c: Control = _job_cards[i]
+	if is_instance_valid(c):
+		c.modulate = Color(1, 1, 1, 0.55) if on else Color(1, 1, 1, 1)
+
+func _end_drag() -> void:
+	if _drag_job_id >= 0 and _drag_started:
+		_set_card_dragging(_drag_job_id, false)
+	_drag_job_id = -1
+	_drag_started = false
+	set_process(false)
+
+## Write the order the cards are now in back into the master job list.  Only the slots this
+## world's jobs already occupy are rewritten, so every other planet's ordering is untouched by
+## construction — no index arithmetic required.
+func _commit_order() -> void:
+	var slots: Array = []
+	for i in range(_jobs.size()):
+		if str((_jobs[i] as Dictionary).get("planet", "earth")).to_lower() == _active_planet:
+			slots.append(i)
+	if slots.size() != _card_job_ids.size():
+		return                       # list and view disagree — leave the data alone
+	var by_id: Dictionary = {}
+	for j: Dictionary in _jobs:
+		by_id[int(j.get("id", -1))] = j
+	for k in range(slots.size()):
+		var j = by_id.get(int(_card_job_ids[k]))
+		if j == null:
+			return
+		_jobs[int(slots[k])] = j
 	production_changed.emit(_jobs.duplicate(true))
 
 func _on_remove_pressed(job_id: int) -> void:

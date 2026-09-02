@@ -71,6 +71,22 @@ const EARTH_NATURAL_K:     float = 1.0e10    # people Earth supports uncondition
 const COLONY_HABITAT_K:    float = 5.0e9     # max people one fully-supplied colony houses
 const ENERGY_PER_CAPITA:   float = 200.0     # Watts of output per sustained off-world person
 const MINERALS_PER_CAPITA: float = 0.5 * Units.MASS_SCALE   # grams/s per sustained off-world person
+## ── Food ─────────────────────────────────────────────────────────────────────
+## Everything a person eats, by mass.  These are nutritionally interchangeable: a gram of
+## beef feeds exactly as well as a gram of wheat, and what separates them is what it cost
+## to grow.  A world eats from whatever it happens to be holding, drawn in proportion.
+const FOOD_TYPES: Array = ["Wheat", "Rice", "Vegetables", "Fish", "Beef", "Algae"]
+## Grams eaten per person per game-day — a real 2 kg daily diet, in the same real grams the
+## rest of the mass economy uses.  Earth's 2.3 billion therefore eat 4.6e12 g/day, which is
+## what the starting agriculture is sized to just barely cover.
+const FOOD_PER_CAPITA:     float = 2000.0
+## Yearly death rate of the fraction of a population that goes unfed.  A person survives
+## roughly seven weeks without food, so a world that is feeding nobody loses its population
+## on that timescale rather than instantly — long enough to see a famine coming and act.
+const STARVATION_RATE:     float = 7.3
+## Food landed with a colony's founders.  Ten years of eating for the seed population: time
+## to raise hydroponics before the larder runs out, and not a gram more.
+const COLONY_SEED_FOOD:    float = COLONY_SEED_POP * FOOD_PER_CAPITA * 3652.5
 const MIN_POPULATION:      float = 1.0e5     # floor short of outright extinction
 const COLONY_SEED_POP:     float = 1.0e6     # founding population of a new (or re-settled) colony
 const COLONY_FULL_POWER:   float = 2.0e11    # local power (W) that fully supplies a colony's habitat
@@ -97,6 +113,35 @@ var stats := {
 	"colony_count": 0
 }
 var planet_buildings: Dictionary = {}
+
+## Saves store the roster as COUNTS ("Coal Plant": 2000) rather than two thousand copies of the
+## string.  A single-structure catalogue means a developed world holds tens of thousands of
+## entries, and writing them out one by one made saves ~20x larger and turned every autosave
+## into a multi-second freeze while JSON.stringify chewed through them.
+func _buildings_to_counts() -> Dictionary:
+	var out: Dictionary = {}
+	for planet: String in planet_buildings:
+		var tally: Dictionary = {}
+		for b in planet_buildings[planet]:
+			tally[b] = int(tally.get(b, 0)) + 1
+		out[planet] = tally
+	return out
+
+## Rebuild the in-memory roster from a save.  Accepts BOTH shapes: the compact counts written
+## above, and the old flat list, so existing saves still load.
+func _buildings_from_counts(raw: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for planet: String in raw:
+		var v = raw[planet]
+		var lst: Array = []
+		if v is Dictionary:
+			for b: String in v:
+				for _i in range(int(v[b])):
+					lst.append(b)
+		elif v is Array:
+			lst = (v as Array).duplicate()
+		out[planet] = lst
+	return out
 ## Buildings under construction, per planet: planet → Array of {building, work, progress}.
 ## Construction advances at the planet's Manufacturing Capacity (work-units/day), so a
 ## world's industrial power sets how fast it can raise new structures.  Materials are
@@ -123,7 +168,22 @@ const SWARM_PANEL_ARC:  float = 0.30 * 1.4   # arc length per panel (PANEL_W × 
 var _pending_swarm: int = 0
 # An inner-lane collector beams back ~100 GW; solar flux falls as 1/r², so each lane
 # outward delivers proportionally less — the swarm's power grows with diminishing returns.
-const SWARM_SAT_POWER: float = 1.0e11          # watts from an innermost-lane collector
+const SWARM_SAT_POWER: float = 1.0e11          # watts from ONE innermost-lane collector
+## Each thing the player launches, and each panel drawn on the swarm ring, is not one collector
+## but a COLLECTOR ARRAY — a shell segment of this many elements, deployed and station-kept as a
+## unit.  It has to be: at one collector per launch the finished megastructure came to 47 TW,
+## which a few thousand fusion plants would beat.
+##
+## A full ring is ~9.5e23 W: a quarter of a percent of the Sun, about 1.5 % of the sphere at
+## 0.1 AU covered in collector, and — at ~1 kg/m² — roughly 2 % of Mercury disassembled, which
+## is the canonical way anyone proposes building one.
+##
+## That looks wildly over-provisioned against a planet: it is ten billion times what feeding
+## Earth under lamps costs.  It is not sized for a planet.  A galaxy of 1.5e11 stars at
+## COLONY_HABITAT_K each holds ~7.5e20 people, and feeding THEM under lamps costs ~9e24 W —
+## so one home-star swarm covers about a tenth of a settled galaxy's appetite, and the rest has
+## to come from swarms around other stars.  That is the scale this number answers to.
+const SWARM_COLLECTORS_PER_PANEL: float = 2.0e10
 
 ## Orbital radius (AU) of swarm lane `lane` (0 = innermost).
 func _swarm_lane_au(lane: int) -> float:
@@ -160,6 +220,12 @@ func _thermal_efficiency(load: float, capacity: float) -> float:
 	if load <= capacity or load <= 0.0:
 		return 1.0
 	return maxf(THERMAL_EFF_FLOOR, sqrt(capacity / load))
+
+## How much power the beam network can move: the narrower of what can be sent and what can be
+## caught.  Building one side alone buys nothing, which is the point -- a beam is an aperture at
+## each end, and the missing one is always the binding constraint.
+func _link_capacity() -> float:
+	return BASE_LINK_W + minf(_bld_beam_send, _bld_beam_recv)
 
 ## Accumulate entropy exported to the cold universe: dS = Q / T, where Q is the heat
 ## actually radiated this slice and T the (falling) universe temperature.  A pure counter.
@@ -214,7 +280,7 @@ func _swarm_power() -> float:
 		var n: int = mini(remaining, _swarm_lane_cap(lane))
 		total += float(n) * SWARM_SAT_POWER * pow(SWARM_INNER_AU / _swarm_lane_au(lane), 2.0)
 		remaining -= n
-	return total * Planet.sun_luminosity_lsun(year)
+	return total * SWARM_COLLECTORS_PER_PANEL * Planet.sun_luminosity_lsun(year)
 var colonized_planets: Array = []     # planets that have received a completed Colony Ship
 
 ## Interstellar colonies and in-flight colony ships (from the star map).
@@ -230,7 +296,6 @@ var _colony_year: Dictionary = {}
 ## and, if replication is unlocked, launches fresh probes to nearby uncolonised stars — spreading
 ## hands-free.  Probes ride in `interstellar_missions` tagged {"vn": true} so they render and
 ## resolve like colony ships; only the replication + hands-free seeding are extra.
-var _vn_enabled: bool = false                # the AutomationPanel directive (seeds new swarms)
 ## Von Neumann colonisation is autonomous and prolific, so its individual colony/region events are
 ## NOT put on the timeline (that flooded it).  Instead we announce only when the grand total of
 ## settled systems + regions crosses a milestone.  _vn_milestone_idx = how many we've passed.
@@ -305,6 +370,9 @@ var _alien_last_year: float = 2026.0
 var _alien_fired: Dictionary = {}
 ## Detection & expansion tuning.
 const ALIEN_DETECT_BASE:  float = 2.0e-3   # per-year detect chance at 1 ly with base optics
+## How much each communication relay widens the network's ear.  A dozen relays roughly doubles
+## what the civilisation can resolve — the payoff for a mission that claims nothing.
+const RELAY_DETECT_GAIN:  float = 0.08
 const ALIEN_SPREAD_RATE:  float = 3.0e-4   # per-year chance each alien system founds another
 const TELESCOPE_BASE_POWER: float = 1.0    # naked-eye/base astronomy every civilisation has
 
@@ -315,6 +383,24 @@ const TELESCOPE_BASE_POWER: float = 1.0    # naked-eye/base astronomy every civi
 var incoming_attacks: Array = []
 var _rkkv_notice_year: float = -1.0e18        # last year an "inbound" launch notice fired
 var _deterrent_active: bool = false           # are hostiles currently deterred by the player's berserkers?
+## Standing rule for answering contact — see doctrine.gd.  A doctrine is read from across
+## light-years: it scales how often hostiles pick this civilisation as a target, and it decides
+## whether an attack is answered at all.
+## Multipliers chosen on the setup screen.  Held as run state (and saved) rather than read from
+## GameSession each time, so a loaded game keeps the settings it was started with.
+var setup_hostility: float = 1.0
+var setup_climate:   float = 1.0
+
+var contact_doctrine: String = DoctrineData.DEFAULT_ID
+## Systems that have struck the player and not yet been answered — the memory Tit for Tat and
+## Grim Trigger both need.  star → attacks still owed a reply.
+var _grudges: Dictionary = {}
+## Stars carrying a communication relay built by a probe.  Every relay is another aperture
+## listening from somewhere that is not here, so the network resolves faint signatures the
+## home telescopes never would (see _telescope_power).
+var comm_relays: Dictionary = {}
+## Orders each in-flight or arrived probe lineage is operating under: star → {mission, doctrine}.
+var _vn_orders: Dictionary = {}
 const ALIEN_AGGRESSION_RATE: float = 9.0e-5   # per aggressive system per year, chance to launch
 const DETERRENCE_MULT:      float = 0.12      # aggression multiplier at one berserker (deterrence strength 1)
 const DETERRENCE_STACK:     float = 0.82      # each extra unit of arsenal multiplies the aggression further
@@ -378,13 +464,6 @@ var _colony_parent: Dictionary = {}
 ## which the save/load path replays to rebuild the tree.
 var _variant_parent: Dictionary = {}
 
-## Bodies that have been surveyed: Earth (home) plus any body a Survey probe has been
-## sent to.  Keyed by lower-case body name.  Persisted across saves.
-var surveyed_planets: Array = ["earth"]
-
-## Per-resource global storage caps (minerals, energy); recomputed whenever
-## _prod_dirty is set.  Science is never capped (knowledge needs no tank).
-## Default gives Earth's base allocation before the first production tick.
 var _cached_storage_caps: Dictionary = {"minerals": 100_000.0, "energy": 100_000.0}
 
 ## True once an extinction event fires — blocks further game logic.
@@ -498,6 +577,15 @@ var _bld_compute:  float = 0.0
 var _bld_minerals: float = 0.0
 var _bld_energy:   float = 0.0   # ALWAYS-ON energy: fuel-free buildings + swarm (pre-boost, pre-thermal)
 var _bld_radiator: float = 0.0
+## Fraction of its own draw the grid can still carry (1.0 = healthy, <1 = brownout).
+var _grid_ratio: float = 1.0
+var _bld_beam_send: float = 0.0
+var _bld_beam_recv: float = 0.0
+var _off_world_energy: float = 0.0
+## Power offered to the network vs. what it could actually carry (W) -- surfaced to the player
+## so a starved swarm reads as a missing link rather than as broken collectors.
+var _link_offered: float = 0.0
+var _link_delivered: float = 0.0
 
 # ── Fuel-burning plants ───────────────────────────────────────────────────────
 ## Buildings with a "consumption" block draw fuel from their world's inventory each game-day.
@@ -507,7 +595,9 @@ var _bld_radiator: float = 0.0
 ## tracked per BUILDING TYPE (so an exhausted fuel idles only the plants that burn it — running
 ## out of oil must not shut down coal plants standing beside them).
 var _cached_planet_fuel:   Dictionary = {}   # planet → { fuel → total grams/game-day demanded }
-var _cached_planet_plants: Dictionary = {}   # planet → { building → {"energy": W, "fuel": {f: rate}} }
+var _cached_planet_plants: Dictionary = {}
+## Worlds currently unable to feed everyone → the fraction going hungry (0..1), for the UI.
+var _famine: Dictionary = {}   # planet → { building → {"energy": W, "fuel": {f: rate}} }
 var _fuel_factor:          Dictionary = {}   # planet → { building → 0..1 share of its fuel met }
 var _live_fossil_energy:   float = 0.0       # fuel-burning energy actually running this tick
 
@@ -523,8 +613,21 @@ const BASE_MC: float       = 5000.0 * Units.MASS_SCALE   # manual industry every
 ## Labour is people per work-unit, so it scales INVERSELY — the same population staffs the same
 ## real industry, just expressed in bigger units.
 const LABOR_PER_CAP: float = 2000.0 / Units.MASS_SCALE
+## Agriculture gets its OWN coefficient, because a farm work-unit and a factory work-unit are
+## not the same amount of human attention — growing a gram of grain takes a small fraction of
+## what processing a gram of steel does, and the two scales were never calibrated against each
+## other.  Charging fields at the factory rate asked a 1945 Earth for twelve billion farmhands
+## to work land that two billion people farm, pinning STAFFING at 19 % and starving the world
+## at its own starting loadout.  This figure leaves 1945 comfortably staffed with room to grow
+## into, while agriculture still competes for the same finite workforce.
+const FARM_LABOR_PER_CAP: float = 290.0 / Units.MASS_SCALE
 ## planet → Σ factory mc_capacity, refreshed in _recompute_production_cache.
 var _cached_planet_built_mc: Dictionary = {}
+## The agricultural twins of _cached_planet_built_mc: arable and pasture work-units per world.
+## Recipes in the "agriculture" and "livestock" categories draw on these instead of on factory
+## capacity, so a world can be an industrial giant and still not be able to feed itself.
+var _cached_planet_built_farm: Dictionary = {}
+var _cached_planet_built_ranch: Dictionary = {}
 ## planet → roster-derived sums the per-frame passes read instead of re-walking every building:
 ## { mine, atmo, co2_base, co2_fuel{}, e_total, e_dirty, e_fuel_dirty{} }.  Rebuilt only when
 ## the roster changes — at ~10 000 structures, doing this per frame was the dominant tick cost.
@@ -552,6 +655,7 @@ const UPKEEP_CATEGORY_MULT: Dictionary = {
 	"observation": 0.30,
 	"habitation":  0.30,
 	"support":     0.30,
+	"agriculture": 0.20,   # sheds, silos, irrigation pumps — light beside the farm itself
 	"defense":     0.30,
 }
 
@@ -594,8 +698,19 @@ func _planet_free_mc(planet: String) -> float:
 ## rises as cosmic expansion cools the sink.  Power drawn beyond it is curtailed (you can't
 ## use energy you can't shed), so megastructures like the Dyson swarm demand radiators.
 const BASE_RADIATOR_W: float   = 8.0e12    # heat the base grid+biosphere sheds unaided (8 TW)
+## Baseline power the network can move with no dedicated link built: the collectors' own modest
+## onboard transmitters and the receiving dishes that come with any spaceflight program.  A
+## young swarm works out of the box; scaling one past a few dozen collectors does not.
+const BASE_LINK_W: float       = 2.0e12    # 2 TW of unaided transmission
+## The world whose grid is local: generation here is wired straight into the load and never
+## touches the beam network.  Everything made anywhere else has to be sent.
+const HOME_WORLD: String       = "earth"
 const CMB_TEMP_2026:   float   = 2.725     # K, universe background temperature at epoch 2026
-const THERMAL_EFF_FLOOR: float = 0.30      # usable-power floor even when badly over capacity
+## Usable-power floor when the grid is over its radiating capacity.  This was 0.30, which meant
+## a civilisation could ignore waste heat entirely and still keep a third of everything — fine
+## when the ceiling was terawatts, absurd once it is 1e24 W.  Thermodynamics is the binding
+## constraint on any Dyson-scale civilisation, so the floor is now low enough to be felt.
+const THERMAL_EFF_FLOOR: float = 0.05
 const DAY_SECONDS:     float   = 86_400.0  # simulated seconds per game-day (for J = W·s)
 ## Cumulative entropy (J/K) exported to the universe — a counter that only ever grows.
 var entropy_exported: float = 0.0
@@ -688,6 +803,11 @@ func _prepare_snap_year() -> void:
 	SolarSystem.snap_year = p.compute_anchor_year() if p else float(year)
 
 func start_new_game() -> void:
+	# Apply the setup screen's choices.  Defaults are the values the game used before the screen
+	# existed, so a run started by any other path is untouched.
+	setup_hostility = float(GameSession.choice("hostility").get("mult", 1.0))
+	setup_climate = float(GameSession.choice("climate").get("mult", 1.0))
+	contact_doctrine = str(GameSession.choice("doctrine").get("doctrine", DoctrineData.DEFAULT_ID))
 	ResearchTree.load_tree(ResearchTreeData.build())
 	ResearchTree.resources = {
 		"science": 0.0,
@@ -710,7 +830,6 @@ func start_new_game() -> void:
 	colonized_stars = []
 	interstellar_missions = []
 	_colony_year = {}
-	_vn_enabled = false
 	_vn_milestone_idx = 0
 	_regions = {}
 	_region_last_year = float(year)
@@ -756,6 +875,13 @@ func start_new_game() -> void:
 		var bname: String = str(spec[0])
 		for _i in range(int(spec[1]) * BuildingData.units(bname)):
 			earth_buildings.append(bname)
+	# A 1945 Earth already farms.  Farms are arable capacity and Ranches are pasture; WHAT they
+	# grow is the starting production slate below.  Together they feed 2.3 billion at 2 kg per
+	# person per day with about a third to spare — and nowhere near enough for the ten billion
+	# the planet can hold.  Feeding the growth is the player's problem from day one.
+	for spec: Array in [["Farm", 3000], ["Ranch", 320]]:
+		for _i in range(int(spec[1])):
+			earth_buildings.append(str(spec[0]))
 	earth_buildings.append("Research Lab")
 	planet_buildings = {"earth": earth_buildings}
 	# A starter buffer, not a reserve: roughly 90 days of the fossil fleet's full burn — about 1 %
@@ -766,6 +892,13 @@ func start_new_game() -> void:
 	_add_stockpile("Coal",    1.1e15, "earth")   # ~90 days for 2 000 coal stations
 	_add_stockpile("FuelOil", 3.0e14, "earth")   # ~90 days for 1 500 oil stations
 	_add_stockpile("Oil",     1.0e13, "earth")   # crude for the still to work while mining ramps
+	# Ninety days of eating in store, mirroring the fuel buffer: long enough to notice a
+	# harvest failing, short enough that the answer is to build farms rather than coast.
+	_add_stockpile("Wheat",      1.7e14, "earth")
+	_add_stockpile("Rice",       1.3e14, "earth")
+	_add_stockpile("Vegetables", 9.0e13, "earth")
+	_add_stockpile("Fish",       1.1e13, "earth")
+	_add_stockpile("Beef",       1.4e12, "earth")
 	build_queue = {}   # nothing under construction at the start
 	# The 1945 mining industry is already pointed at what the grid burns, not at whatever the
 	# ground happens to hold: nearly all of it goes to coal and oil, because that is what 3 500
@@ -777,7 +910,10 @@ func start_new_game() -> void:
 	# copper and construction ore you are not digging.
 	extraction_focus = {"earth": {
 		"Coal":   0.6250,   # 2 000 stations at 6.25e9 g/day each
-		"Oil":    0.3700,   # crude for the still; 45 % of the barrel comes out as fuel oil
+		"Oil":    0.3500,   # crude for the still; 45 % of the barrel comes out as fuel oil
+		# Irrigation for the agricultural slate — the rest is rainfall.  Sized with real headroom:
+		# at a bare 100 % of demand any wobble in extraction came straight off the harvest.
+		"H2O":    0.0200,
 		"Fe2O3":  0.0020,
 		"CaCO3":  0.0010,
 		"SiO2":   0.0010,
@@ -785,6 +921,10 @@ func start_new_game() -> void:
 		"CuFeS2": 0.0003,
 		"Al2O3":  0.0002,
 	}}
+	_grudges = {}
+	comm_relays = {}
+	_vn_orders = {}
+	keep_limits = {}        # no standing storage limits until the player sets one
 	active_buildings = {}   # everything the player owns starts switched on
 	entropy_exported = 0.0
 	_heat_alerted = false
@@ -808,6 +948,16 @@ func start_new_game() -> void:
 		{"id": 5, "recipe": "Steel Making",        "planet": "earth", "rate": 2.5e8},
 		{"id": 6, "recipe": "Copper Smelting",     "planet": "earth", "rate": 5.0e7},
 		{"id": 7, "recipe": "Oil Refining",        "planet": "earth", "rate": 1.0e8},
+		# Agriculture is already running: 1945 does not wait for the player to invent farming.
+		# Wheat carries the diet and also feeds every animal; the livestock lines are small
+		# because meat is grain spent at a loss, and this civilisation cannot spare much.
+		{"id": 8,  "recipe": "Wheat Cultivation",     "planet": "earth", "rate": 3.6e12},
+		{"id": 9,  "recipe": "Rice Cultivation",      "planet": "earth", "rate": 1.8e12},
+		{"id": 10, "recipe": "Vegetable Cultivation", "planet": "earth", "rate": 1.2e12},
+		{"id": 11, "recipe": "Poultry Farming",       "planet": "earth", "rate": 1.0e11},
+		{"id": 12, "recipe": "Aquaculture",           "planet": "earth", "rate": 8.0e10},
+		{"id": 13, "recipe": "Swine Husbandry",       "planet": "earth", "rate": 5.0e10},
+		{"id": 14, "recipe": "Cattle Raising",        "planet": "earth", "rate": 1.5e10},
 	]
 	if production_panel:
 		production_panel.load_jobs(_production_jobs)
@@ -831,7 +981,6 @@ func start_new_game() -> void:
 	_next_nuclear_year     = year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)
 	_nuclear_cooldown_ms   = 0
 	_arms_strain           = 0.0
-	surveyed_planets       = ["earth"]   # home world is always accessible
 	_mark_prod_dirty()
 	_cached_storage_caps = _compute_storage_caps()   # set caps before first _process tick
 	SolarSystem.paused     = true
@@ -867,13 +1016,14 @@ func _ready() -> void:
 	production_panel.production_changed.connect(_on_production_changed)
 	if sidebar and sidebar.automation_panel:
 		sidebar.automation_panel.automation_changed.connect(_on_automation_changed)
-		sidebar.automation_panel.vn_colonization_changed.connect(_on_vn_colonization_changed)
+		sidebar.automation_panel.doctrine_changed.connect(_on_doctrine_changed)
 	if sidebar and sidebar.star_map:
 		sidebar.star_map.colonize_requested.connect(_on_colonize_requested)
 		sidebar.star_map.laser_requested.connect(_on_laser_requested)
 		sidebar.star_map.berserker_requested.connect(_on_berserker_requested)
 		sidebar.star_map.missile_requested.connect(_on_missile_requested)
 		sidebar.star_map.probe_requested.connect(_on_probe_requested)
+		sidebar.star_map.vn_probe_requested.connect(_on_vn_probe_requested)
 		sidebar.star_map.message_requested.connect(_on_message_requested)
 	politics_page.policy_changed.connect(_on_policy_changed)
 	game_over_screen.restart_requested.connect(_on_restart_requested)
@@ -1038,6 +1188,7 @@ func _setup_planet_tabs() -> void:
 	_inventory_page = load("res://InventoryPage.gd").new()
 	_inventory_page.name = "Inventory"
 	_inventory_page.dump_requested.connect(_on_inventory_dump)
+	_inventory_page.keep_requested.connect(_on_inventory_keep)
 	tabs.add_child(_inventory_page)
 
 	_extraction_page = load("res://ExtractionPage.gd").new()
@@ -1048,7 +1199,7 @@ func _setup_planet_tabs() -> void:
 	# Manufacturing is now a per-body tab (no in-panel planet picker): it targets whichever
 	# planet or moon the tabs are showing.
 	production_panel.get_parent().remove_child(production_panel)
-	production_panel.name = "Manufacturing"
+	production_panel.name = "Production"
 	tabs.add_child(production_panel)
 	_manufacturing_tab_index = production_panel.get_index()
 
@@ -1075,6 +1226,7 @@ func _refresh_planet_tabs() -> void:
 		build_panel.set_planet(current_planet, _get_catalog_for_display())
 	if _population_page and _population_page.visible:
 		_population_page.set_stats(_population_stats(current_planet))
+		_push_evolution_population()
 	if _inventory_page and _inventory_page.visible:
 		_inventory_page.set_inventory(current_planet, get_planet_data(current_planet))
 	if production_panel and production_panel.visible:
@@ -1100,6 +1252,33 @@ func _population_stats(body: String) -> Dictionary:
 		"happiness":       _happiness(pop, k),
 		"inhabited":       inhabited,
 	}
+
+## Push live population figures to the evolution panel: one entry per inhabited world (reusing
+## _population_stats so the two pages can never disagree) plus the species-wide totals.  The
+## lineage tree shows how humanity has split; this is what each of those populations IS.
+func _push_evolution_population() -> void:
+	if evolution_ui == null or not evolution_ui.has_method("set_population_data"):
+		return
+	var worlds: Dictionary = {}
+	for w: String in _inhabited_worlds():
+		var d: Dictionary = _population_stats(w)
+		# Food is the constraint that actually ends a lineage, so it travels with the numbers.
+		var inv: Dictionary = _planet_inv(w)
+		var stored: float = 0.0
+		for fk: String in FOOD_TYPES:
+			stored += maxf(0.0, float(inv.get(fk, 0.0)))
+		var eat: float = float(world_pop.get(w, 0.0)) * FOOD_PER_CAPITA
+		d["food_stored"] = stored
+		d["food_days"] = (stored / eat) if eat > 0.0 else -1.0
+		d["famine"] = float(_famine.get(w, 0.0))
+		worlds[w] = d
+	evolution_ui.set_population_data(worlds, {
+		"population":        float(stats.get("current_population", 0.0)),
+		"galaxy_population": float(stats.get("galaxy_population", 0.0)),
+		"life_expectancy":   _life_expectancy(),
+		"ever_lived":        _people_ever_lived,
+		"worlds":            worlds.size(),
+	})
 
 ## Every world that currently holds people: home + in-system colonies + interstellar colonies,
 ## minus any planet the Sun has swallowed.
@@ -1145,10 +1324,30 @@ func _world_capacity(world: String) -> float:
 	return 0.0
 
 ## A single planet's own energy output (W) from its buildings, with tech/policy multipliers.
+## What a world's mines are ACTUALLY yielding: the production cache already counts only the
+## switched-on copies.  Shared by get_planet_data and extraction_data so the two pages can
+## never disagree about how much ground is being turned.
+func _planet_mine_rate(planet: String) -> float:
+	if _prod_dirty:
+		_recompute_production_cache()
+	return float((_cached_planet_stats.get(planet, {}) as Dictionary).get("mine", 0.0)) * (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
+
+## What a world's grid is ACTUALLY putting out right now: always-on generation from the copies
+## that are switched on, plus however much of its fuel-burning fleet is being fed, times the
+## same tech and policy multipliers the global figure gets.
+##
+## The old version summed the nameplate rating of every standing building, so it ignored the
+## Active slider, ignored whether a plant had any fuel, and changed only when something was
+## built or demolished — which is exactly how it looked in the info panel: frozen.
 func _planet_power(planet: String) -> float:
-	var energy: float = 0.0
-	for b_name: String in planet_buildings.get(planet, []):
-		energy += float((_bdef_cache.get(b_name, {}) as Dictionary).get("production", {}).get("energy", 0.0))
+	if _prod_dirty:
+		_recompute_production_cache()
+	var st: Dictionary = _cached_planet_stats.get(planet, {})
+	var energy: float = float(st.get("e_total", 0.0))
+	var pfac: Dictionary = _fuel_factor.get(planet, {})
+	for b_name: String in (_cached_planet_plants.get(planet, {}) as Dictionary):
+		var rec: Dictionary = _cached_planet_plants[planet][b_name]
+		energy += float(rec["energy"]) * clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
 	return energy * (1.0 + ResearchTree.get_boost("energy_production")) * _policy_energy_mult()
 
 ## Instantaneous net growth rate (%/yr) for a world at population `pop` and capacity `k`.
@@ -1207,13 +1406,6 @@ func _layout_bar_backgrounds() -> void:
 	if _side_bar_bg and side_strip:
 		_side_bar_bg.global_position = side_strip.global_position - pad
 		_side_bar_bg.size = side_strip.size + pad * 2.0
-
-## Mark a body as surveyed (called when a Survey mission is launched to it).
-## No-op if already surveyed.
-func _mark_surveyed(body: String) -> void:
-	if body == "" or surveyed_planets.has(body):
-		return
-	surveyed_planets.append(body)
 
 ## Research node that unlocks spaceflight; the Launches sidebar button (and panel)
 ## stay hidden until it is researched.
@@ -1327,6 +1519,7 @@ func _process(delta: float) -> void:
 		_accumulate_compounds(delta_days)
 		_accumulate_emissions(delta_days)
 		_process_production(delta_days)
+		_enforce_keep_limits()           # standing storage limits, after everything has deposited
 		_process_construction(delta_days)
 		_process_automation()
 		_accumulate_entropy(delta_days)   # heat shed to the cooling universe, dS = Q/T
@@ -1334,12 +1527,16 @@ func _process(delta: float) -> void:
 		# Clamp minerals and energy to their storage caps; science is never capped.
 		for resource: String in _cached_storage_caps:
 			if ResearchTree.resources.has(resource):
-				ResearchTree.resources[resource] = minf(
-					ResearchTree.resources[resource], _cached_storage_caps[resource]
+				# Floor as well as cap: a reserve can be emptied, never overdrawn.  Without
+				# this a grid running at a deficit drove the pool arbitrarily negative and
+				# nothing that cost energy could ever be afforded again.
+				ResearchTree.resources[resource] = clampf(
+					ResearchTree.resources[resource], 0.0, _cached_storage_caps[resource]
 				)
 		# Evolve population on the same game-day clock.
 		var pop_before: float = float(stats.get("current_population", 0))
 		_update_population(delta_days)
+		_consume_food(delta_days)        # grow first, then feed the result
 		var pop_after: float = float(stats.get("current_population", 0))
 		# Births = replacement (deaths ≈ population ÷ life expectancy) + net growth.
 		var life_exp: float = _life_expectancy()
@@ -1369,8 +1566,13 @@ func _process(delta: float) -> void:
 					build_panel.apply_counts(_get_catalog_for_display())   # roster changed — patch in place
 				else:
 					build_panel.refresh_affordability(_build_cost_stockpiles())          # recolour only
+				# The Active bar's green/red split tracks fuel supply, which moves on its own
+				# without ever dirtying the roster.  Pushed every pass from the live factors
+				# rather than rebuilding the catalogue, which is the expensive part.
+				build_panel.refresh_supply(_fuel_factor.get(current_planet, {}))
 			elif _population_page and _population_page.visible:
 				_population_page.set_stats(_population_stats(current_planet))
+				_push_evolution_population()
 			elif _inventory_page and _inventory_page.visible:
 				_inventory_page.set_inventory(current_planet, get_planet_data(current_planet))
 			elif _extraction_page and _extraction_page.visible:
@@ -1394,6 +1596,7 @@ func advance_day() -> void:
 		if month >= 12:
 			month = 0
 			year += 1
+			_advance_star_formation()
 			_update_timescale()
 			_refresh_stats()
 			statistics_page.push_snapshot(year, stats)
@@ -1403,9 +1606,9 @@ func advance_day() -> void:
 			_check_interstellar_arrivals()
 			_check_interstellar_attacks()
 			_process_aliens()
-			_process_vn_colonization()
 			_update_regions()
 			_check_incoming_attacks()
+			_apply_doctrine()
 			_check_probe_arrivals()
 			_check_message_arrivals()
 			_check_asteroid_impact()
@@ -1544,11 +1747,19 @@ func _compute_storage_caps() -> Dictionary:
 ## are applied cheaply afterwards by _combine_production, so this O(buildings) sweep happens
 ## only on build/demolish/colony/swarm changes.
 func _recompute_production_cache() -> void:
+	# The Sun's current output, in today's units — read once per rebuild and applied to every
+	# solar collector below.
+	var sun_lum: float = Planet.sun_luminosity_lsun(year)
 	var compute:  float = 0.0
 	var minerals: float = 0.0
 	var energy:   float = 0.0
 	var radiator: float = 0.0
+	var beam_send: float = 0.0
+	var beam_recv: float = 0.0
+	var off_energy: float = 0.0        # non-fuel generation away from the home grid
 	var built_mc: Dictionary = {}
+	var built_farm: Dictionary = {}
+	var built_ranch: Dictionary = {}
 	var fuel_demand: Dictionary = {}   # planet → { fuel → g/game-day }
 	var plants: Dictionary = {}        # planet → { building → {"energy", "fuel"} }
 	var pstats: Dictionary = {}        # planet → per-world sums the per-frame passes need
@@ -1558,6 +1769,8 @@ func _recompute_production_cache() -> void:
 	var counts: Dictionary = {}        # planet → { building → standing }, reused by the UI
 	for planet_name: String in planet_buildings:
 		var pmc: float = 0.0
+		var pfarm: float = 0.0
+		var pranch: float = 0.0
 		# Tally the roster ONCE, then work per building TYPE.  A world holds thousands of
 		# structures but only tens of kinds, so every per-building dictionary lookup below
 		# happens once per kind instead of once per instance.
@@ -1573,6 +1786,7 @@ func _recompute_production_cache() -> void:
 			"co2_base": 0.0, "co2_fuel": {}, # emissions: always-on vs fuel-gated
 			"e_total": 0.0, "e_dirty": 0.0,  # non-fuel energy, and how much of it emits
 			"e_fuel_dirty": {},              # fuel-gated energy that emits, by building
+			"compute": 0.0,                  # this world's building compute, active copies only
 		}
 		for b_name: String in tally:
 			var standing: int = int(tally[b_name])
@@ -1584,9 +1798,14 @@ func _recompute_production_cache() -> void:
 			var bdef: Dictionary = _bdef_cache.get(b_name, {})
 			var prod: Dictionary = bdef.get("production", {})
 			compute  += (prod.get("compute",  0.0) as float) * n
+			st["compute"] = float(st["compute"]) + (prod.get("compute", 0.0) as float) * n
 			minerals += (prod.get("minerals", 0.0) as float) * n
 			pmc      += float(bdef.get("mc_capacity", 0.0)) * n
+			pfarm    += float(bdef.get("farm_capacity", 0.0)) * n
+			pranch   += float(bdef.get("ranch_capacity", 0.0)) * n
 			radiator += float(bdef.get("radiator_capacity", 0.0)) * n
+			beam_send += float(bdef.get("beam_send", 0.0)) * n
+			beam_recv += float(bdef.get("beam_recv", 0.0)) * n
 			upkeep   += float(bdef.get("_upkeep", 0.0)) * n
 			st["mine"] = float(st["mine"]) + (prod.get("minerals", 0.0) as float) * n
 			st["atmo"] = float(st["atmo"]) + float(bdef.get("atmo_rate", 0.0)) * n
@@ -1600,8 +1819,14 @@ func _recompute_production_cache() -> void:
 			# aside (and tally its draw) instead of counting it as always-on.
 			var burn: Dictionary = bdef.get("consumption", {})
 			var e: float = (prod.get("energy", 0.0) as float) * n
+			# A solar collector's yield tracks the star it collects from, so the fleet brightens
+			# with the ageing Sun and dies with it (see the "solar" flag in buildings.gd).
+			if bool(bdef.get("solar", false)):
+				e *= sun_lum
 			if burn.is_empty():
 				energy += e
+				if planet_name != HOME_WORLD:
+					off_energy += e
 				st["e_total"] = float(st["e_total"]) + e
 				if co2f > 0.0:
 					st["co2_base"] = float(st["co2_base"]) + e * co2f
@@ -1620,6 +1845,8 @@ func _recompute_production_cache() -> void:
 				var ed: Dictionary = st["e_fuel_dirty"]
 				ed[b_name] = float(ed.get(b_name, 0.0)) + e
 		built_mc[planet_name] = pmc
+		built_farm[planet_name] = pfarm
+		built_ranch[planet_name] = pranch
 		pstats[planet_name] = st
 	_cached_planet_stats = pstats
 	_cached_planet_counts = counts
@@ -1627,22 +1854,31 @@ func _recompute_production_cache() -> void:
 	_cached_detection = detection
 	_cached_nuclear = nuclear
 	_cached_planet_built_mc = built_mc
+	_cached_planet_built_farm = built_farm
+	_cached_planet_built_ranch = built_ranch
 	_cached_planet_fuel = fuel_demand
 	_cached_planet_plants = plants
 	# Re-derive the live fuel-burning output from the last known supply ratios (a plant with no
 	# recorded ratio yet is assumed fed, so a roster change never blanks the grid for a frame).
 	var live: float = 0.0
+	var off_live: float = 0.0
 	for p: String in plants:
 		var pfac: Dictionary = _fuel_factor.get(p, {})
 		for b_name: String in plants[p]:
-			live += float((plants[p][b_name] as Dictionary)["energy"]) \
+			var pe: float = float((plants[p][b_name] as Dictionary)["energy"]) \
 				* clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
+			live += pe
+			if p != HOME_WORLD:
+				off_live += pe
 	_live_fossil_energy = live
+	_off_world_energy = off_energy + off_live
 	# Dyson swarm: collectors beam power to the grid, less per lane the farther out it sits.
 	_bld_compute  = compute
 	_bld_minerals = minerals
 	_bld_energy   = energy + _swarm_power()
 	_bld_radiator = radiator
+	_bld_beam_send = beam_send
+	_bld_beam_recv = beam_recv
 	# Storage caps are also roster-derived — refresh them in the same dirty pass.
 	_cached_storage_caps = _compute_storage_caps()
 	_prod_dirty = false
@@ -1661,6 +1897,16 @@ func _combine_production() -> void:
 	var energy: float = (_bld_energy + _live_fossil_energy) \
 		* (1.0 + ResearchTree.get_boost("energy_production")) * _policy_energy_mult()
 
+	# -- Transmission throttle --------------------------------------------------
+	# The swarm hangs inside Mercury's orbit and the colonies are worlds away; none of that
+	# power is where it is spent.  Only as much as the beam network can carry actually arrives,
+	# and what it cannot carry is simply never collected -- the collectors sit idle facing a
+	# link that is already full.
+	_link_offered = _off_world_energy + _swarm_power()
+	var link_cap: float = _link_capacity()
+	_link_delivered = minf(_link_offered, link_cap)
+	energy -= _link_offered - _link_delivered
+
 	# ── Waste-heat throttle ────────────────────────────────────────────────────
 	_cached_radiator_cap = (BASE_RADIATOR_W + _bld_radiator) \
 		* (1.0 + ResearchTree.get_boost("heat_management")) * _thermal_coldness()
@@ -1668,7 +1914,24 @@ func _combine_production() -> void:
 	energy *= _thermal_efficiency(energy, _cached_radiator_cap)
 	# Everything switched on draws maintenance power off the top.  This can go negative: a grid
 	# that can't carry its own infrastructure drains the reserve until the player idles something.
-	energy -= _bld_upkeep
+	# ── Brownout ───────────────────────────────────────────────────────────────
+	# Upkeep comes off the top.  If the infrastructure draws more than the plants make, the
+	# grid cannot simply run a deficit: there is nowhere for the missing joules to come from.
+	# What actually happens is a brownout — everything keeps standing, but industry runs at
+	# the fraction of its draw the grid can still carry, and net generation floors at zero
+	# rather than sliding negative for ever.
+	_grid_ratio = 1.0
+	if _bld_upkeep > energy and _bld_upkeep > 0.0:
+		_grid_ratio = clampf(energy / _bld_upkeep, 0.0, 1.0)
+		energy = 0.0
+	else:
+		energy -= _bld_upkeep
+
+	# A browned-out grid cannot run the factories or the mine hoists.  Curtailing output here
+	# — rather than letting the pool go negative — is what makes an over-built infrastructure
+	# a crisis the player can see and answer by idling something.
+	compute  *= _grid_ratio
+	minerals *= _grid_ratio
 
 	_cached_compute = compute
 	_cached_prod = {
@@ -1747,6 +2010,12 @@ func _check_population_splits() -> void:
 			timeline_panel.add_live_event(notif)
 
 # ── Timescale ─────────────────────────────────────────────────────────────────
+
+## Let the galaxy form new stars up to the current year.  Cheap: the future population was
+## drawn once and is sorted by birth year, so this is a pointer walk that almost always does
+## nothing.  Called on the year clock rather than per frame for the same reason.
+func _advance_star_formation() -> void:
+	StarMapPanel.advance_star_formation(float(year))
 
 ## Recompute SolarSystem.seconds_per_day from elapsed game-years.
 ## Formula: INIT * exp(-DECAY * elapsed), clamped to [MIN, INIT].
@@ -1886,6 +2155,7 @@ func _on_restart_requested() -> void:
 
 ## Called in fast mode: bulk-advance the game by years_advanced years per frame.
 func _on_years_advanced_fast(years_advanced: int) -> void:
+	_advance_star_formation()   # fast-forward can cross many stellar generations at once
 	_refresh_stats()
 	# Snapshot interval scales with the timescale so that roughly the same
 	# real-world time separates every graph point no matter how fast the sim runs.
@@ -1903,9 +2173,9 @@ func _on_years_advanced_fast(years_advanced: int) -> void:
 		_check_interstellar_arrivals()
 		_check_interstellar_attacks()
 		_process_aliens()
-		_process_vn_colonization()
 		_update_regions()
 		_check_incoming_attacks()
+		_apply_doctrine()
 		_check_probe_arrivals()
 		_check_message_arrivals()
 		_check_asteroid_impact()
@@ -1940,7 +2210,8 @@ func _process_production(delta_days: float) -> void:
 		var jp: String = str(job.get("planet", "earth"))
 		# Rates are in normalised units (1× = 1 g of product/day), so the work a job demands
 		# scales with the same factor its throughput does.
-		demand[jp] = float(demand.get(jp, 0.0)) \
+		var dk: String = jp + "|" + _recipe_pool(r)
+		demand[dk] = float(demand.get(dk, 0.0)) \
 			+ float(job.get("rate", 1.0)) * RecipeData.scale(r) * _recipe_work(r)
 
 	var automation: float = _automation_factor()
@@ -1955,13 +2226,40 @@ func _process_production(delta_days: float) -> void:
 		capacity_planets[p] = true
 
 	# Per-planet throttle factor (computed once, reused for every job on that world).
-	var throttle: Dictionary = {}
+	# Each world has THREE independent pools — factory, arable, pasture — and a job is only
+	# throttled by the one it actually draws on.  A steel line running flat out cannot slow the
+	# harvest, and a famine cannot stall the smelters.
+	var pool_left: Dictionary = {}     # planet|pool → capacity still unclaimed
 	_last_mc_state = {}
 	for p: String in capacity_planets:
-		var mc: float = (BASE_MC + float(_cached_planet_built_mc.get(p, 0.0))) * automation * staffing
-		var d: float = float(demand.get(p, 0.0))
-		throttle[p] = 1.0 if (d <= mc or d <= 0.0) else mc / d
-		_last_mc_state[p] = {"capacity": mc, "demand": d}
+		for pool: String in ["mc", "farm", "ranch"]:
+			var cap: float = _pool_built(pool, p) * automation * staffing
+			var key: String = p + "|" + pool
+			pool_left[key] = cap
+			var d: float = float(demand.get(key, 0.0))
+			if pool == "mc":
+				_last_mc_state[p] = {"capacity": cap, "demand": d}
+			else:
+				_last_mc_state[key] = {"capacity": cap, "demand": d}
+
+	# Capacity is handed out in LIST ORDER, not shared out evenly: the first line on a world
+	# takes what it needs and the next one gets the remainder.  That is what makes the order
+	# in the Production panel a priority — move a job up and it is served first when the world
+	# cannot run everything, move it down and it is what gets cut.
+	var throttle: Dictionary = {}
+	for job in _production_jobs:
+		var jr := _find_recipe_by_name(job.get("recipe", ""))
+		if jr.is_empty():
+			continue
+		var jkey: String = str(job.get("planet", "earth")) + "|" + _recipe_pool(jr)
+		var want: float = float(job.get("rate", 1.0)) * RecipeData.scale(jr) * _recipe_work(jr)
+		var left: float = float(pool_left.get(jkey, 0.0))
+		if want <= 0.0:
+			throttle[int(job.get("id", -1))] = 1.0
+			continue
+		var got: float = clampf(left, 0.0, want)
+		throttle[int(job.get("id", -1))] = got / want
+		pool_left[jkey] = maxf(0.0, left - got)
 
 	# ── Run each job at its MC-throttled effective rate ────────────────────────
 	for job in _production_jobs:
@@ -1971,7 +2269,7 @@ func _process_production(delta_days: float) -> void:
 		# A job runs on a specific planet, drawing from and feeding that planet's
 		# inventory (global resources like energy are shared).
 		var planet: String = str(job.get("planet", "earth"))
-		var mc_throttle: float = float(throttle.get(planet, 1.0))
+		var mc_throttle: float = float(throttle.get(int(job.get("id", -1)), 1.0))
 		# Normalised rate: the slider's 1× is one gram of product per day, whatever the
 		# recipe's raw stoichiometry says.
 		var rate: float = float(job.get("rate", 1.0)) * RecipeData.scale(recipe) * mc_throttle
@@ -2023,19 +2321,26 @@ func _process_production(delta_days: float) -> void:
 func _find_recipe_by_name(name: String) -> Dictionary:
 	return _recipe_cache.get(name, {})
 
+## Which capacity pool a recipe draws on.  Growing something is limited by land and season,
+## not by factory floor, so agriculture and livestock have their own pools — and a world with
+## a thousand factories is no closer to feeding itself for having them.
+const RECIPE_POOL: Dictionary = {"agriculture": "farm", "livestock": "ranch"}
+
+func _recipe_pool(recipe: Dictionary) -> String:
+	return str(RECIPE_POOL.get(str(recipe.get("category", "")), "mc"))
+
+## Built capacity of one pool on one world, before automation and staffing.
+func _pool_built(pool: String, planet: String) -> float:
+	match pool:
+		"farm":  return float(_cached_planet_built_farm.get(planet, 0.0))
+		"ranch": return float(_cached_planet_built_ranch.get(planet, 0.0))
+		_:       return BASE_MC + float(_cached_planet_built_mc.get(planet, 0.0))
+
 ## Manufacturing "work" one batch of a recipe demands per unit rate — its material
 ## throughput (sum of inputs except the energy/science it also draws from global pools),
 ## or an explicit "work" override.  Floored at 1 so every recipe consumes some capacity.
 func _recipe_work(recipe: Dictionary) -> float:
-	if recipe.has("work"):
-		return maxf(1.0, float(recipe["work"]))
-	var w: float = 0.0
-	var inputs: Dictionary = recipe.get("inputs", {})
-	for key: String in inputs:
-		if key == "energy" or key == "science":
-			continue
-		w += float(inputs[key])
-	return maxf(1.0, w)
+	return RecipeData.work(recipe)
 
 ## Industrial automation multiplier (≥ 1): raises manufacturing capacity and lowers the
 ## labour each unit of capacity needs.  Sourced from the industry research lane, so
@@ -2050,7 +2355,17 @@ func _mc_staffing() -> float:
 	var total_raw: float = 0.0
 	for p: String in _cached_planet_built_mc:
 		total_raw += BASE_MC + float(_cached_planet_built_mc[p])
-	var labor_need: float = total_raw * LABOR_PER_CAP / maxf(_automation_factor(), 0.001)
+	var labor_need: float = total_raw * LABOR_PER_CAP
+	# Fields and pens need hands as much as a factory floor does — and before mechanisation they
+	# needed most of them — but at their own rate per work-unit (see FARM_LABOR_PER_CAP).
+	var farm_raw: float = 0.0
+	for p: String in _cached_planet_built_farm:
+		farm_raw += float(_cached_planet_built_farm[p])
+	for p: String in _cached_planet_built_ranch:
+		farm_raw += float(_cached_planet_built_ranch[p])
+	labor_need += farm_raw * FARM_LABOR_PER_CAP
+	# Automation lowers the hands every unit of capacity needs, on the land as on the floor.
+	labor_need /= maxf(_automation_factor(), 0.001)
 	if labor_need <= 0.0:
 		return 1.0
 	return clampf(float(stats.get("current_population", 0)) / labor_need, 0.0, 1.0)
@@ -2072,12 +2387,6 @@ func _on_automation_changed(rules: Array) -> void:
 
 ## Toggle autonomous von Neumann colonisation.  Turning it ON kicks off seeding on the next tick;
 ## turning it OFF stops new seeds but can't recall a swarm already replicating in the void.
-func _on_vn_colonization_changed(enabled: bool) -> void:
-	_vn_enabled = enabled
-	if enabled and not _vn_unlocked():
-		_announce("Von Neumann colonisation locked",
-			"Requires Relativistic Navigation and Self-Replicating Industry before probes can be built.",
-			"vn_locked_%d" % year)
 
 func _process_automation() -> void:
 	if _automation_rules.is_empty():
@@ -2282,6 +2591,39 @@ func _deduct_stockpile(key: String, amount: float, planet: String) -> void:
 	inv[key] = had - removed
 	_mirror_matter(-removed)
 
+## Apply the Inventory tab's standing storage limits: discard whatever is over the line on
+## every world that has one.  Runs after extraction and manufacturing have both deposited, so
+## a limit holds regardless of which of them delivered the surplus.
+func _enforce_keep_limits() -> void:
+	for planet: String in keep_limits:
+		var limits: Dictionary = keep_limits[planet]
+		if limits.is_empty():
+			continue
+		var inv: Dictionary = _planet_inv(planet)
+		for compound: String in limits:
+			var lim: float = float(limits[compound])
+			if lim < 0.0:
+				continue                      # no limit set for this one
+			var held: float = float(inv.get(compound, 0.0))
+			if held > lim:
+				_deduct_stockpile(compound, held - lim, planet)
+
+## The player set (or cleared) a standing storage limit in the Inventory tab.  A negative limit
+## clears the order; the excess is discarded immediately rather than waiting for the next tick.
+func _on_inventory_keep(compound: String, limit: float) -> void:
+	var limits: Dictionary = keep_limits.get(current_planet, {})
+	if limit < 0.0:
+		limits.erase(compound)
+	else:
+		limits[compound] = limit
+	if limits.is_empty():
+		keep_limits.erase(current_planet)
+	else:
+		keep_limits[current_planet] = limits
+	_enforce_keep_limits()
+	if _inventory_page:
+		_inventory_page.set_inventory(current_planet, get_planet_data(current_planet))
+
 ## Player confirmed a dump in the Inventory tab: discard `amount` grams of a compound from the
 ## currently-viewed body (clamped to what's actually held, since stock can tick down between the
 ## dialog opening and the confirm).  Mining refills over time.
@@ -2333,11 +2675,19 @@ func _establish_colony_base(planet_name: String) -> void:
 		planet_buildings[planet_name] = []
 	for _i in range(3):
 		planet_buildings[planet_name].append("Mine")
-	for _i in range(2):
-		planet_buildings[planet_name].append("Biomass Burner")   # local power for life support
+	# Power for life support — and overwhelmingly for FOOD.  A world with no sky grows
+	# everything under lamps, and photosynthesis is inefficient enough that lighting a million
+	# people's diet is most of what a colony's grid does at all (see Algae Culture).  Two burners used to
+	# be enough because food was free; it no longer is, so the founders bring reactors.
+	for _i in range(24):
+		planet_buildings[planet_name].append("Nuclear Plant")
 	# Through _add_stockpile so the delivered supplies register in the Matter aggregate.
 	_add_stockpile("Concrete", 50_000.0 * Units.MASS_SCALE, planet_name)
 	_add_stockpile("Steel",    20_000.0 * Units.MASS_SCALE, planet_name)
+	# Founders arrive with a decade of rations.  Nothing grows on an airless world until a
+	# Hydroponics Bay is standing, so this buffer is the whole margin a colony gets to build
+	# one — let it run out and the settlement starves before it is self-sufficient.
+	_add_stockpile("Algae", COLONY_SEED_FOOD, planet_name)
 	world_pop[planet_name] = maxf(float(world_pop.get(planet_name, 0.0)), COLONY_SEED_POP)  # founders
 	_mark_prod_dirty()
 
@@ -2377,17 +2727,16 @@ func _accumulate_compounds(delta_days: float) -> void:
 			_extract_layer(planet_name, comp.get("atmosphere", {}),
 				atmo_rate * minerals_mult * delta_days, true)
 
-## Split `mass` grams across one composition layer by mass fraction and deposit the result in the
-## world's inventory.  `mirror` also adds that mass to the Matter aggregate — set it only for
-## sources the production pipeline doesn't already account for.
-func _extract_layer(planet_name: String, layer: Dictionary, mass: float, mirror: bool) -> void:
-	if layer.is_empty() or mass <= 0.0:
-		return
-	var inv: Dictionary = _planet_inv(planet_name)
+## How one layer's yield divides between compounds: compound -> share of the total, summing
+## to 1.  With a focus set the operation is working named deposits rather than scooping average
+## ground, so the split follows the player's allocation instead of crustal abundance -- which is
+## what makes a rare-but-concentrated resource like coal extractable at industrial rates.
+##
+## This is THE definition of the split.  get_planet_data's per-compound readout used to carry
+## its own copy that divided by crustal mass fraction and never learned about the allocation,
+## so a world mining no coal at all still reported coal arriving at its abundance rate.
+func _extraction_split(planet_name: String, layer: Dictionary) -> Dictionary:
 	var focus: Dictionary = extraction_focus.get(planet_name, {})
-	# With a focus set, the operation is working named deposits rather than scooping average
-	# ground: the split follows the player's allocation instead of crustal abundance.  That is
-	# what makes a rare-but-concentrated resource like coal extractable at industrial rates.
 	var weights: Dictionary = {}
 	var total: float = 0.0
 	for compound: String in layer:
@@ -2399,19 +2748,39 @@ func _extract_layer(planet_name: String, layer: Dictionary, mass: float, mirror:
 	# An allocation that targets nothing present here falls back to abundance, so a misconfigured
 	# world still mines something rather than silently producing nothing.
 	if total <= 0.0:
+		weights.clear()
 		for compound: String in layer:
 			weights[compound] = float(layer[compound])
 			total += float(layer[compound])
 	if total <= 0.0:
-		return
+		return {}
 	for compound: String in weights:
-		inv[compound] = float(inv.get(compound, 0.0)) + float(weights[compound]) / total * mass
+		weights[compound] = float(weights[compound]) / total
+	return weights
+
+## Split `mass` grams across one composition layer and deposit the result in the world's
+## inventory.  `mirror` also adds that mass to the Matter aggregate -- set it only for sources
+## the production pipeline doesn't already account for.
+func _extract_layer(planet_name: String, layer: Dictionary, mass: float, mirror: bool) -> void:
+	if layer.is_empty() or mass <= 0.0:
+		return
+	var inv: Dictionary = _planet_inv(planet_name)
+	var split: Dictionary = _extraction_split(planet_name, layer)
+	if split.is_empty():
+		return
+	for compound: String in split:
+		inv[compound] = float(inv.get(compound, 0.0)) + float(split[compound]) * mass
 	if mirror:
 		_mirror_matter(mass)
 
 ## Per-world extraction allocation: planet → { compound → weight }.  Empty (the default) means
 ## the operation takes whatever the ground gives, split by crustal abundance.
 var extraction_focus: Dictionary = {}
+
+## Standing storage limits set in the Inventory tab: planet → { compound → grams }.  Anything
+## above the limit is discarded as it arrives, so a mine pointed at ore you only need a little
+## of stops quietly filling the hold.  A missing entry (or a negative one) means no limit.
+var keep_limits: Dictionary = {}
 
 ## The extraction picture for one world, for the Extraction panel: every crust compound with its
 ## natural abundance, the player's current allocation, and the resulting yield.
@@ -2420,10 +2789,10 @@ func extraction_data(planet_name: String) -> Dictionary:
 	var total_crust: float = 0.0
 	for c in crust:
 		total_crust += float(crust[c])
-	var mine_rate: float = 0.0
-	for b_name: String in planet_buildings.get(planet_name, []):
-		mine_rate += float((_bdef_cache.get(b_name, {}) as Dictionary).get("production", {}).get("minerals", 0.0))
-	mine_rate *= (1.0 + ResearchTree.get_boost("matter_production")) * _policy_minerals_mult()
+	# Live throughput from the production cache, NOT a fresh sum over the roster: that private
+	# copy counted every standing mine whether or not it was switched on, so idling half the
+	# fleet left this page still advertising full output.
+	var mine_rate: float = _planet_mine_rate(planet_name)
 	var focus: Dictionary = extraction_focus.get(planet_name, {})
 	var rows: Array = []
 	for compound: String in crust:
@@ -2547,7 +2916,10 @@ func _dirty_power_fraction() -> float:
 			var f: float = clampf(float(pfac.get(b_name, 1.0)), 0.0, 1.0)
 			total += float((_cached_planet_plants[p_name][b_name] as Dictionary)["energy"]) * f
 			dirty += float((st["e_fuel_dirty"] as Dictionary).get(b_name, 0.0)) * f
-	total += _swarm_power()   # the swarm is clean
+	# Only the swarm power that actually landed counts -- what the link could not carry was
+	# never generated, so it belongs in neither side of the ratio.
+	var offered: float = _link_offered
+	total += _swarm_power() * (_link_delivered / offered if offered > 0.0 else 1.0)
 	return dirty / total if total > 0.0 else 0.0
 
 # Returns compute rate (population + buildings, boosted by tech and policy).
@@ -2574,15 +2946,33 @@ func get_planet_data(planet_name: String) -> Dictionary:
 		"compute":    0.0,
 	}
 
+	# Larder: what this world holds to eat, what it eats per day, and how long that lasts.
+	var inv_f: Dictionary = _planet_inv(planet_name)
+	var stored_food: float = 0.0
+	for fk: String in FOOD_TYPES:
+		stored_food += maxf(0.0, float(inv_f.get(fk, 0.0)))
+	var eat_rate: float = float(world_pop.get(planet_name, 0.0)) * FOOD_PER_CAPITA
+	d["keep_limits"] = (keep_limits.get(planet_name, {}) as Dictionary).duplicate()
+	d["food_stored"] = stored_food
+	d["food_demand"] = eat_rate
+	d["food_days"]   = (stored_food / eat_rate) if eat_rate > 0.0 else -1.0
+	d["famine"]      = float(_famine.get(planet_name, 0.0))
+
 	var built: Array = planet_buildings.get(planet_name, [])
 	var counts: Dictionary = {}
 	var mine_output_rate: float = 0.0
 	for b_name in built:
-		var bdef := _find_building_def(b_name)
-		d["energy"]  = d["energy"]  + bdef.get("production", {}).get("energy", 0.0)
-		d["compute"] = d["compute"] + bdef.get("production", {}).get("compute", 0.0)
-		mine_output_rate += float((bdef.get("production", {}) as Dictionary).get("minerals", 0.0))
 		counts[b_name] = counts.get(b_name, 0) + 1
+	# Live output, not nameplate: these come from the production cache, which already counts
+	# only the switched-on copies, and from the fuel factors, which say how much of the
+	# fuel-burning fleet is actually fed.  Summing the roster here instead meant the readouts
+	# sat still while the grid browned out underneath them.
+	if _prod_dirty:
+		_recompute_production_cache()
+	var pst: Dictionary = _cached_planet_stats.get(planet_name, {})
+	d["energy"]  = _planet_power(planet_name)
+	d["compute"] = float(pst.get("compute", 0.0)) * (1.0 + ResearchTree.get_boost("research_speed")) * _policy_compute_mult()
+	mine_output_rate = _planet_mine_rate(planet_name)
 
 	# A planet's compute is dominated by its people: every individual contributes
 	# the best unlocked evolution node's FLOP/s (buildings add on top).  Without
@@ -2627,12 +3017,16 @@ func get_planet_data(planet_name: String) -> Dictionary:
 	var crust_comp: Dictionary = (_body_composition(planet_name) as Dictionary).get("crust", {})
 	var mined: Dictionary = {}
 	if mine_output_rate > 0.0 and not crust_comp.is_empty():
-		var total_crust := 0.0
-		for compound in crust_comp:
-			total_crust += float(crust_comp[compound])
-		if total_crust > 0.0:
-			for compound in crust_comp:
-				mined[compound] = float(crust_comp[compound]) / total_crust * mine_output_rate
+		# The SAME split the mining itself uses, so a deposit the player has allocated away
+		# from reads as zero here instead of going on reporting its crustal share.
+		var split: Dictionary = _extraction_split(planet_name, crust_comp)
+		for compound: String in split:
+			mined[compound] = float(split[compound]) * mine_output_rate
+		# A crust compound allocated nothing still belongs in the list, at zero — dropping it
+		# would make the row vanish the moment the player turned it off.
+		for compound: String in crust_comp:
+			if not mined.has(compound):
+				mined[compound] = 0.0
 
 	# Also surface any compounds currently in this planet's inventory that were
 	# produced by manufacturing recipes (not mined), so the panel shows them.
@@ -2731,6 +3125,12 @@ func _get_catalog_for_display() -> Array:
 		entry["active"] = clampi(int((active_buildings.get(current_planet, {}) as Dictionary)
 			.get(b["name"], cnt)), 0, cnt)
 		entry["upkeep"] = float(b.get("_upkeep", 0.0))
+		# Share of this type's inputs actually being met on this world (see _consume_fuel).  A
+		# building with no consumption block never appears in the map and is always running, so
+		# the default is 1.0.  The panel turns this into the green/red split on the Active bar:
+		# switched ON is a permission, RUNNING is what the supply chain allows.
+		entry["supply"] = clampf(float((_fuel_factor.get(current_planet, {}) as Dictionary)
+			.get(b["name"], 1.0)), 0.0, 1.0)
 		entry["in_progress"] = _queued_count(current_planet, b["name"])
 		# Current stockpile (on this planet) of each cost resource so the panel can
 		# dim the ones the player can't yet afford here.
@@ -2775,6 +3175,7 @@ func select_planet(planet_name: String) -> void:
 	build_panel.set_planet(planet_name, _get_catalog_for_display())
 	if _population_page:
 		_population_page.set_stats(_population_stats(current_planet))
+		_push_evolution_population()
 	if _inventory_page:
 		_inventory_page.set_inventory(planet_name, get_planet_data(planet_name))
 	if _extraction_page:
@@ -3136,22 +3537,31 @@ func _on_launch_requested(params: Dictionary) -> void:
 		var room: int = _swarm_max() - solar_satellites_deployed
 		if room <= 0:
 			return                                    # swarm already full
-		var avail: int = int(_get_stockpile(mission_def.get("payload", ""), origin_name))
+		# A deployable unit costs real tonnage, not one gram — see MissionData.PAYLOAD_MASS_PER_UNIT.
+		var unit_mass: float = MissionData.PAYLOAD_MASS_PER_UNIT
+		var avail: int = int(_get_stockpile(mission_def.get("payload", ""), origin_name) / unit_mass)
 		sat_payload = mini(int(mission_def.get("payload_per_launch", 0)), mini(avail, room))
 		if sat_payload <= 0:
 			return                                    # no satellites stockpiled to loft
 
-	# Propellant is the ENTIRE cost of a launch, drawn from the origin world's inventory.  The
-	# quantity was derived from the trajectory's energy requirement (LaunchPlanner.propellant_mass),
-	# so a harder transfer or a worse window is paid for in fuel and nothing else.
+	# A launch spends two things, both from the origin world's inventory: the PROPELLANT, whose
+	# quantity comes from the trajectory's energy requirement (LaunchPlanner.propellant_mass), and
+	# the VEHICLES themselves, which are expended — nothing is recovered from orbit.  A harder
+	# transfer or a worse window costs more fuel; a heavier mission costs more airframes.
 	var fuel_id: String = str(params.get("fuel_id", ""))
 	var fuel_amount: float = float(params.get("fuel_amount", 0.0))
 	if fuel_id == "" or _get_stockpile(fuel_id, origin_name) < fuel_amount:
 		return
+	var rocket_mass: float = float(int(params.get("rockets", 0))) * MissionData.ROCKET_UNIT_MASS_G
+	if _get_stockpile("Rocket", origin_name) < rocket_mass:
+		return
 	if fuel_amount > 0.0:
 		_deduct_stockpile(fuel_id, fuel_amount, origin_name)
+	if rocket_mass > 0.0:
+		_deduct_stockpile("Rocket", rocket_mass, origin_name)
 	if sat_payload > 0:
-		_deduct_stockpile(mission_def.get("payload", ""), float(sat_payload), origin_name)
+		_deduct_stockpile(mission_def.get("payload", ""),
+			float(sat_payload) * MissionData.PAYLOAD_MASS_PER_UNIT, origin_name)
 
 	var start_offset: int = params.get("start_offset", 0)
 	# The panel already folded the policy duration multiplier into params.duration,
@@ -3179,10 +3589,6 @@ func _on_launch_requested(params: Dictionary) -> void:
 	_next_launch_id += 1
 	active_launches.append(launch)
 	launch_panel.refresh_launches(_compute_launch_display_data())
-
-	# Sending a Survey probe unlocks that body's planet-bar button.
-	if m_name == "Survey":
-		_mark_surveyed(target_name)
 
 	# Spawn a craft for every launch, including local orbit insertions where the
 	# target is the origin planet itself (it just settles straight into orbit).
@@ -3217,12 +3623,13 @@ func _planet_launch_mods(planet_name: String) -> Dictionary:
 			dur_mult = minf(dur_mult, float(bdef["launch_duration_mult"]))
 	return {"cost": cost_mult, "duration": dur_mult}
 
-## Per-planet Solar Satellite stock, so the LaunchPanel can size/gate a Solar
-## Deployment's payload by the chosen origin.
+## Per-planet Solar Satellite stock in GRAMS, so the LaunchPanel can size/gate a Solar
+## Deployment's payload by the chosen origin.  Left as a float: a swarm-scale stockpile runs
+## past 2^53 grams, where an int cast would start quietly rounding.
 func _build_satellite_stock() -> Dictionary:
 	var out: Dictionary = {}
 	for p: String in compound_inventory:
-		out[p] = int(float((compound_inventory[p] as Dictionary).get("SolarSatellite", 0.0)))
+		out[p] = float((compound_inventory[p] as Dictionary).get("SolarSatellite", 0.0))
 	return out
 
 ## Per-planet stock of the rockets + fuels a launch can draw on, so the LaunchPanel
@@ -3297,6 +3704,11 @@ func _star_distance_ly(star_name: String) -> float:
 func _on_colonize_requested(star_name: String, gamma_max: float, accel: float) -> void:
 	if star_name == "" or colonized_stars.has(star_name):
 		return
+	if _star_known_occupied(star_name):
+		_announce("Target already inhabited",
+			"%s holds a civilisation. A colony fleet is not sent to a system that is already someone's home." % star_name,
+			"occupied_colonize_%s" % star_name)
+		return
 	if not ResearchTree.is_unlocked("relativistic_navigation"):
 		return   # interstellar flight is gated on Relativistic Navigation research
 	for m in interstellar_missions:
@@ -3345,6 +3757,40 @@ func _check_interstellar_arrivals() -> void:
 				_reveal_alignment(target)   # first contact: the system's alignment is now known
 				var tpos: Vector3 = _star_pos(target)
 				var vn: bool = bool(m.get("vn", false))
+				var vmission: String = str(m.get("mission", "colonize"))
+				var vdoctrine: String = str(m.get("doctrine", contact_doctrine))
+				if vn:
+					_vn_orders[target] = {"mission": vmission, "doctrine": vdoctrine}
+
+				# A probe sent to LOOK or to LISTEN does its work whether or not anyone lives
+				# there — in fact that is precisely when it is worth having sent.
+				if vn and vmission == "recon":
+					_infra_probed[target] = true
+					if _star_occupied(target):
+						_detected_aliens[target] = true
+						_reveal_alignment(target)
+					_announce("Survey complete — %s" % target,
+						"The probe resolves %s and passes the report home, then builds copies that leave for the next unsurveyed stars." % target,
+						"vn_recon_%s_%d" % [target, year])
+					newly_vn.append(target)
+					continue
+				if vn and vmission == "comms":
+					comm_relays[target] = true
+					_infra_probed[target] = true
+					_announce("Relay online — %s" % target,
+						"A communication relay begins operating at %s. The network now listens from somewhere that is not here." % target,
+						"vn_relay_%s_%d" % [target, year])
+					newly_vn.append(target)
+					continue
+
+				# A COLONISING expedition arrives and finds the system already lived in.  Nothing
+				# is settled: what it achieves is first contact, which is why sending recon ahead
+				# of a colony fleet is worth the wait.
+				if _star_occupied(target):
+					_announce("First contact at %s" % target,
+						"The expedition arrives to find %s already inhabited. No colony is founded; the system's civilisation is now known to us." % target,
+						"occupied_arrival_%s" % target)
+					continue
 				if tpos.length() > DETAILED_RADIUS_LY:
 					# Far colony — folded into the statistical region; no individual world, and no
 					# individual replication (the region spreads statistically from here on).
@@ -3366,7 +3812,8 @@ func _check_interstellar_arrivals() -> void:
 			still.append(m)
 	interstellar_missions = still
 	for t in newly_vn:
-		_vn_replicate(str(t))   # spawn the next generation of probes from each new colony
+		# Orders are copied along with the machine — that is what makes it von Neumann.
+		_vn_replicate(str(t), _vn_orders_for(str(t)))
 	_vn_check_milestone()
 	refresh_star_map()
 
@@ -3398,7 +3845,8 @@ func _vn_unlocked() -> bool:
 ## already colonised/en-route, the in-flight cap allows it, and the energy is affordable.
 ## Returns true on launch.  The energy cost is a light fraction of a colony ship's — expansion is
 ## still throttled by the shared energy pool, so a broke civilisation stops spreading.
-func _vn_launch(target_star: String, from_pos: Vector3) -> bool:
+func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
+		from_star: String = "") -> bool:
 	if not _vn_unlocked() or target_star == "" or colonized_stars.has(target_star):
 		return false
 	if _vn_inflight() >= VN_MAX_INFLIGHT:
@@ -3408,13 +3856,19 @@ func _vn_launch(target_star: String, from_pos: Vector3) -> bool:
 			return false   # already en route
 	var dist: float = maxf(from_pos.distance_to(_star_pos(target_star)), 0.01)
 	var plan: Dictionary = StarMapPanel.plan_flight(dist, VN_GAMMA, VN_ACCEL)
-	var cost: float = float(plan["energy"]) * VN_MASS_FRAC
+	var mission: String = str(orders.get("mission", "colonize"))
+	var cost: float = float(plan["energy"]) * DoctrineData.mission_mass_frac(mission)
 	if float(ResearchTree.resources.get("energy", 0.0)) < cost:
 		return false
 	ResearchTree.resources["energy"] = maxf(0.0,
 		float(ResearchTree.resources.get("energy", 0.0)) - cost)
 	interstellar_missions.append({
 		"target": target_star, "vn": true,
+		# Where it actually departed from.  A replicated probe leaves the colony that built it,
+		# which is halfway across the map from Sol — without this the star map drew every
+		# generation of the swarm as if it had come from home.
+		"origin": from_star,
+		"mission": mission, "doctrine": str(orders.get("doctrine", contact_doctrine)),
 		"start_year": float(year), "end_year": float(year) + float(plan["years"]),
 		"speed_c": float(plan["peak_beta"]), "gamma": float(plan["peak_gamma"]),
 		"accel_time_frac": float(plan.get("accel_time_frac", 0.5)),
@@ -3424,15 +3878,24 @@ func _vn_launch(target_star: String, from_pos: Vector3) -> bool:
 
 ## A colony founded by a probe sends the next generation to the nearest uncolonised stars it can
 ## resolve (no tight distance cap — the galaxy is sparse, so a probe hops as far as it must).
-func _vn_replicate(from_star: String) -> void:
+func _vn_replicate(from_star: String, orders: Dictionary = {}) -> void:
 	if colonized_stars.size() >= VN_MAX_COLONIES:
 		return
+	var mission: String = str(orders.get("mission", "colonize"))
 	var origin: Vector3 = _star_pos(from_star)
-	for tgt in _nearest_uncolonised(origin, VN_REPLICATE_COUNT, INF):
-		_vn_launch(str(tgt), origin)
+	# A surveyor or a relay may target an inhabited system; only a coloniser may not.
+	var claims: bool = DoctrineData.mission_claims(mission)
+	for tgt in _nearest_uncolonised(origin, VN_REPLICATE_COUNT, INF, not claims):
+		_vn_launch(str(tgt), origin, orders, from_star)
+
+## The orders a lineage at `star` is operating under, defaulting to colonisation for probes
+## launched before orders existed (older saves).
+func _vn_orders_for(star: String) -> Dictionary:
+	return _vn_orders.get(star, {"mission": "colonize", "doctrine": contact_doctrine})
 
 ## The nearest uncolonised, not-en-route stars within `max_ly` of `origin` (up to `max_n`).
-func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float) -> Array:
+func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
+		allow_inhabited: bool = false) -> Array:
 	var cand: Array = []   # [dist, name]
 	var enroute: Dictionary = {}
 	for m in interstellar_missions:
@@ -3440,6 +3903,11 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float) -> Array:
 	for s: Dictionary in StarMapPanel.all_stars():
 		var nm: String = str(s["name"])
 		if colonized_stars.has(nm) or enroute.has(nm):
+			continue
+		# A replicating swarm surveys before it commits, so a COLONISING lineage never wastes a
+		# probe on a system that is already someone's home — and never starts a war on its own
+		# initiative.  A surveyor or relay lineage is welcome to look.
+		if _star_occupied(nm) and not allow_inhabited:
 			continue
 		var spos: Vector3 = s["pos"]
 		# A far star whose region is already colonised is left to statistical diffusion — a probe
@@ -3455,23 +3923,6 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float) -> Array:
 		out.append(str(cand[i][1]))
 	return out
 
-## Hands-free seeding: while the directive is on and nothing is spreading, launch a fresh probe
-## toward the nearest uncolonised star from Sol (or the frontier).  Replication then self-sustains.
-func _process_vn_colonization() -> void:
-	if game_over or not _vn_enabled or not _vn_unlocked():
-		return
-	if colonized_stars.size() >= VN_MAX_COLONIES:
-		return
-	if _vn_inflight() > 0:
-		return   # a swarm is already spreading — let it run
-	# Seed from Sol.  (Replication carries it onward from each colony's own neighbourhood.)
-	for tgt in _nearest_uncolonised(Vector3.ZERO, 1, INF):
-		if _vn_launch(str(tgt), Vector3.ZERO):
-			# Fixed id → announced only the first time a swarm is seeded, not on every re-seed.
-			_announce("Von Neumann probe launched",
-				"A self-replicating colony probe departs Sol. It will spread from star to star on arrival.",
-				"vn_first_launch")
-		break
 
 # ── Statistical galaxy regions (frontier aggregation) ────────────────────────────
 ## Tile id ("q,r") of the hexagonal prism containing a Sol-relative position: a flat-top hex
@@ -3717,7 +4168,12 @@ func refresh_star_map() -> void:
 		# visibly slows as it nears the target rather than crawling at a constant rate.
 		var p: float = StarMapPanel.flight_progress(
 			tf, float(m.get("accel_time_frac", 0.5)), float(m.get("accel_dist_frac", 0.5)))
-		disp.append({"target": str(m.get("target", "")), "progress": p})
+		# Tell the map what it is looking at: a colony ship is a one-way voyage, a von Neumann
+		# probe is a front that keeps going, and the mission decides its colour.
+		disp.append({"target": str(m.get("target", "")), "progress": p,
+			"origin": str(m.get("origin", "")),
+			"kind": "vn" if bool(m.get("vn", false)) else "colony",
+			"mission": str(m.get("mission", "colonize"))})
 	# Recon probes ride the same accel→coast→decel dashed line as colony ships.
 	for m in probe_missions:
 		var psy: float = float(m.get("start_year", year))
@@ -3753,6 +4209,7 @@ func refresh_star_map() -> void:
 	sidebar.star_map.set_alien_intel(_alien_intel())
 	sidebar.star_map.set_weapon_caps(_has_orbital_laser(), _has_berserkers(), _has_player_missiles())
 	sidebar.star_map.set_arsenal(int(_player_item_count("Missile")), int(_player_item_count("Berserker")))
+	sidebar.star_map.set_vn_stock(int(_player_item_count("VNProbe")))
 	sidebar.star_map.set_year(float(year))
 	# Reveal procedural stars only within the player's observation reach: a naked-eye baseline,
 	# extended by telescope power (once Radio Astronomy is researched) and by the colony frontier
@@ -3781,6 +4238,16 @@ func _displayed_factions() -> Dictionary:
 
 ## Reveal a system's true alignment (called on first contact — a colony ship arriving).
 ## Contact also counts as a detection, so a system you reach is always shown.
+## Somebody already lives there.  A system with a civilisation in it is not a site to settle —
+## it is a neighbour — so no colony ship or probe may claim it.
+func _star_occupied(star_name: String) -> bool:
+	return star_factions.has(star_name)
+
+## Occupied AND the player knows it.  Only this blocks a launch: you cannot decline to settle a
+## system whose inhabitants you have never seen, which is exactly why recon exists.
+func _star_known_occupied(star_name: String) -> bool:
+	return _star_occupied(star_name) and _detected_aliens.has(star_name)
+
 func _reveal_alignment(star_name: String) -> void:
 	if star_factions.has(star_name):
 		_known_alignments[star_name] = true
@@ -3800,11 +4267,15 @@ func _seed_star_factions() -> void:
 	for s in StarMapPanel.all_stars():
 		names.append(str(s["name"]))
 	names.shuffle()
+	# How crowded the sky is, and how much of it is armed — chosen on the setup screen.
+	var nb: Dictionary = GameSession.choice("neighbours")
+	var total: int = int(nb.get("total", 6))
+	var hostile: int = int(nb.get("hostile", 3))
 	for i in range(names.size()):
-		if i >= 6:
+		if i >= total:
 			break
 		var nm: String = names[i]
-		star_factions[nm] = "aggressive" if i < 3 else "peaceful"
+		star_factions[nm] = "aggressive" if i < hostile else "peaceful"
 		# Founded in the past, so its signal is already crossing to us — some may be
 		# detectable early with good optics, others still en route.
 		_alien_since[nm] = float(year) - _star_distance_ly(nm) - randf_range(0.0, 800.0)
@@ -3822,7 +4293,10 @@ func _telescope_power() -> float:
 		return 0.0
 	if _prod_dirty:
 		_recompute_production_cache()
-	return (TELESCOPE_BASE_POWER + _cached_detection) * (1.0 + ResearchTree.get_boost("detection"))
+	# Each relay is an aperture somewhere that is not here.  A network of them resolves faint
+	# signatures no telescope at home would, which is the whole reason to build one.
+	var relay_gain: float = 1.0 + RELAY_DETECT_GAIN * float(comm_relays.size())
+	return (TELESCOPE_BASE_POWER + _cached_detection) * (1.0 + ResearchTree.get_boost("detection")) * relay_gain
 
 ## Deterministic alien infrastructure at a given OBSERVATION year: pass (year − distance) to
 ## get the light-delayed state the player can actually see.  {dyson: 0..1, telescopes, lasers}.
@@ -4028,7 +4502,9 @@ func _launch_alien_attacks(dyears: float) -> void:
 	# The launch rate is capped so late-game spread (dozens of hostile systems) doesn't
 	# multiply into a barrage; and the batch can never overshoot the in-flight ceiling.
 	var attackers: float = minf(float(hostiles.size()), RKKV_ATTACKER_CAP)
-	var expected: float = attackers * ALIEN_AGGRESSION_RATE * dyears
+	# Doctrine is posture, and posture is visible: a civilisation that shoots first is one worth
+	# shooting first, while one that has never answered an attack is a cheap target to keep.
+	var expected: float = attackers * ALIEN_AGGRESSION_RATE * dyears * DoctrineData.provocation(contact_doctrine) * setup_hostility
 	if deterred:
 		expected *= _deterrence_mult(deter_strength)   # bigger arsenal → harder throttle (to a floor)
 	var count: int = int(expected)
@@ -4098,6 +4574,11 @@ func _check_incoming_attacks() -> void:
 		if float(year) < float(a.get("end_year", INF)):
 			still.append(a)
 			continue
+		# Remember who fired.  Every doctrine except Appeasement owes this system an answer,
+		# and Grim Trigger never stops owing it.
+		var atk_src: String = str(a.get("source", ""))
+		if atk_src != "" and DoctrineData.retaliation(contact_doctrine) > 0:
+			_grudges[atk_src] = int(_grudges.get(atk_src, 0)) + 1
 		var tgt: String = str(a.get("target", "earth"))
 		if tgt == "earth":
 			earth_hit = true                          # the home world specifically
@@ -4294,6 +4775,98 @@ func _on_missile_requested(star_name: String, gamma_max: float, accel: float, co
 ## Send a lightweight recon probe to a star.  It travels (relativistically) and, on arrival,
 ## resolves that system's full current infrastructure and alignment — the only way to see past
 ## the telescope/light-delay fog before you commit a colony ship.
+## Carry out the standing doctrine: answer what is owed, and — under Pre-emption — open on
+## hostiles merely for having been found.  Retaliation spends real crafted missiles, so a
+## doctrine you cannot supply is a doctrine you do not actually have.
+## The player committed to a new standing rule.  Switching to a doctrine that never answers
+## clears what was owed — you cannot hold a grudge you have renounced acting on.
+func _on_doctrine_changed(id: String) -> void:
+	contact_doctrine = id
+	if DoctrineData.retaliation(contact_doctrine) <= 0:
+		_grudges.clear()
+
+func _apply_doctrine() -> void:
+	if game_over:
+		return
+	var salvo: int = DoctrineData.retaliation(contact_doctrine)
+	if salvo <= 0:
+		_grudges.clear()                    # Appeasement: nothing is owed, nothing remembered
+		return
+	# Answer outstanding attacks.
+	for src: String in _grudges.keys():
+		var owed: int = int(_grudges[src])
+		if owed <= 0:
+			_grudges.erase(src)
+			continue
+		if _player_item_count("Missile") < 1.0:
+			return                          # empty magazine — the debt stands
+		_on_missile_requested(src, VN_GAMMA, VN_ACCEL, salvo)
+		# A forgiving doctrine settles the account; Grim Trigger keeps the debt open for ever,
+		# so it answers this system again every time it can afford to.
+		if DoctrineData.forgives(contact_doctrine):
+			_grudges[src] = owed - 1
+			if int(_grudges[src]) <= 0:
+				_grudges.erase(src)
+	# Pre-emption: fire on anything detected and hostile, whether or not it has done anything.
+	if not DoctrineData.strikes_first(contact_doctrine):
+		return
+	for star: String in _detected_aliens:
+		if str(star_factions.get(star, "peaceful")) != "aggressive":
+			continue
+		if _player_item_count("Missile") < 1.0:
+			return
+		if _grudges.has(star):
+			continue                        # already being answered above
+		_on_missile_requested(star, VN_GAMMA, VN_ACCEL, 1)
+
+## Seed a star with a crafted von Neumann Probe.  This replaces the old automation toggle: the
+## fleet is no longer a switch you flip but an object you build, launch, and then cannot recall
+## — on arrival it colonises and assembles fresh probes that leave on their own.
+func _on_vn_probe_requested(star_name: String, gamma_max: float, accel: float,
+		mission: String = DoctrineData.DEFAULT_MISSION,
+		doctrine: String = DoctrineData.DEFAULT_ID) -> void:
+	if game_over or star_name == "" or colonized_stars.has(star_name):
+		return
+	# Only a mission that CLAIMS the system is refused.  A surveyor or a relay threatens nobody,
+	# and putting one in a neighbour's sky is how you learn anything about them at all.
+	if _star_known_occupied(star_name) and DoctrineData.mission_claims(mission):
+		_announce("Target already inhabited",
+			"%s holds a civilisation. Seeding a colonisation probe into an inhabited system is not settlement — it is invasion, and this one is not sent." % star_name,
+			"occupied_seed_%s" % star_name)
+		return
+	if _player_item_count("VNProbe") < 1.0:
+		return
+	for m in interstellar_missions:
+		if str(m.get("target", "")) == star_name:
+			return                      # already en route
+	var dist: float = _star_distance_ly(star_name)
+	if dist <= 0.0:
+		return
+	var plan: Dictionary = StarMapPanel.plan_flight(dist, gamma_max, accel)
+	var cost: float = float(plan["energy"]) * DoctrineData.mission_mass_frac(mission)
+	if float(ResearchTree.resources.get("energy", 0.0)) < cost:
+		return
+	if not _consume_player_item("VNProbe", 1.0):
+		return
+	ResearchTree.resources["energy"] = maxf(0.0,
+		float(ResearchTree.resources.get("energy", 0.0)) - cost)
+	var years: float = float(plan["years"])
+	interstellar_missions.append({
+		"target": star_name, "vn": true,
+		# Orders travel with the probe — and into every probe it builds.
+		"mission": mission, "doctrine": doctrine,
+		"start_year": float(year), "end_year": float(year) + years,
+		"accel_time_frac": float(plan.get("accel_time_frac", 0.5)),
+		"accel_dist_frac": float(plan.get("accel_dist_frac", 0.5)),
+		"speed_c": float(plan.get("speed_c", 0.1)),
+	})
+	var mi: Dictionary = DoctrineData.get_mission(mission)
+	_announce("von Neumann probe away",
+		"A self-replicating seed departs for %s under %s orders. %s" % [
+			star_name, str(mi["name"]).to_lower(), str(mi["desc"])],
+		"vn_launch_%s_%d" % [star_name, year])
+	refresh_star_map()
+
 func _on_probe_requested(star_name: String, gamma_max: float, accel: float) -> void:
 	if game_over or star_name == "" or not _has_player_missiles():
 		return
@@ -4502,9 +5075,16 @@ func save_game(path: String = "") -> void:
 		"people_ever_lived":  _people_ever_lived,
 		"production_jobs":    production_panel.get_jobs(),
 		"automation_rules":   _automation_rules,
-		"planet_buildings":   planet_buildings,
+		"planet_buildings":   _buildings_to_counts(),
 		"build_queue":        build_queue,
+		"contact_doctrine":   contact_doctrine,
+		"setup_hostility":    setup_hostility,
+		"setup_climate":      setup_climate,
+		"comm_relays":        comm_relays,
+		"vn_orders":          _vn_orders,
+		"grudges":            _grudges,
 		"extraction_focus":   extraction_focus,
+		"keep_limits":        keep_limits,
 		"active_buildings":   active_buildings,
 		"entropy_exported":   entropy_exported,
 		"resources":          ResearchTree.resources,
@@ -4517,7 +5097,6 @@ func save_game(path: String = "") -> void:
 		"engulfed_planets":   _engulfed_planets,
 		"interstellar_missions": interstellar_missions,
 		"colony_year":           _colony_year,
-		"vn_enabled":            _vn_enabled,
 		"vn_milestone_idx":      _vn_milestone_idx,
 		"regions":               _regions,
 		"region_last_year":      _region_last_year,
@@ -4538,7 +5117,6 @@ func save_game(path: String = "") -> void:
 		"split_thresholds":   _split_thresholds,
 		"colony_parent":      _colony_parent,
 		"variant_parent":     _variant_parent,
-		"surveyed_planets":   surveyed_planets,
 		"policies":           policies,
 		"stats_history":      statistics_page.get_save_data(),
 		"compound_inventory": compound_inventory,
@@ -4593,7 +5171,7 @@ func load_game(path: String = "") -> void:
 	_people_ever_lived = float(data.get("people_ever_lived", PEOPLE_EVER_LIVED_1945))
 
 	if data.has("planet_buildings") and data["planet_buildings"] is Dictionary:
-		planet_buildings = data["planet_buildings"]
+		planet_buildings = _buildings_from_counts(data["planet_buildings"])
 		# Migrate renamed buildings so older saves keep their structures.
 		const _RENAMES := {
 			"Compute Core":  "Data Center",
@@ -4626,6 +5204,33 @@ func load_game(path: String = "") -> void:
 
 	build_queue = data["build_queue"] if (data.has("build_queue") and data["build_queue"] is Dictionary) else {}
 	extraction_focus = data["extraction_focus"] if (data.has("extraction_focus") and data["extraction_focus"] is Dictionary) else {}
+	# Standing storage limits.  Values are re-floated because JSON restores them as untyped
+	# numbers, and _enforce_keep_limits compares them against gram floats every tick.
+	setup_hostility = float(data.get("setup_hostility", 1.0))
+	setup_climate = float(data.get("setup_climate", 1.0))
+	contact_doctrine = str(data.get("contact_doctrine", DoctrineData.DEFAULT_ID))
+	comm_relays = {}
+	if data.has("comm_relays") and data["comm_relays"] is Dictionary:
+		for k: String in data["comm_relays"]:
+			comm_relays[k] = true
+	_vn_orders = {}
+	if data.has("vn_orders") and data["vn_orders"] is Dictionary:
+		for k: String in data["vn_orders"]:
+			_vn_orders[k] = (data["vn_orders"][k] as Dictionary).duplicate()
+	_grudges = {}
+	if data.has("grudges") and data["grudges"] is Dictionary:
+		for k: String in data["grudges"]:
+			_grudges[k] = int(data["grudges"][k])
+	if sidebar and sidebar.automation_panel:
+		sidebar.automation_panel.set_doctrine(contact_doctrine)
+	keep_limits = {}
+	if data.has("keep_limits") and data["keep_limits"] is Dictionary:
+		for planet: String in data["keep_limits"]:
+			var lim: Dictionary = {}
+			for compound: String in data["keep_limits"][planet]:
+				lim[compound] = float(data["keep_limits"][planet][compound])
+			if not lim.is_empty():
+				keep_limits[planet] = lim
 	active_buildings = data["active_buildings"] if (data.has("active_buildings") and data["active_buildings"] is Dictionary) else {}
 	entropy_exported = float(data.get("entropy_exported", 0.0))
 	_heat_alerted = false
@@ -4696,10 +5301,7 @@ func load_game(path: String = "") -> void:
 				"colonizable": float(rec.get("colonizable", 0.0)),
 			}
 	_region_last_year = float(data.get("region_last_year", float(year)))
-	_vn_enabled = bool(data.get("vn_enabled", false))
 	_vn_milestone_idx = int(data.get("vn_milestone_idx", 0))
-	if sidebar and sidebar.automation_panel:
-		sidebar.automation_panel.set_vn_enabled(_vn_enabled)
 	interstellar_attacks = []
 	if data.has("interstellar_attacks") and data["interstellar_attacks"] is Array:
 		for a in data["interstellar_attacks"]:
@@ -4782,20 +5384,6 @@ func load_game(path: String = "") -> void:
 			_split_thresholds[planet_name] = int(randf_range(500_000.0, 1_000_000.0))
 
 	# Restore which bodies have been surveyed (planet-bar unlocks).
-	if data.has("surveyed_planets") and data["surveyed_planets"] is Array:
-		surveyed_planets = []
-		for entry in data["surveyed_planets"]:
-			surveyed_planets.append(str(entry))
-	else:
-		# Older save: infer from any Survey missions already launched.
-		surveyed_planets = ["earth"]
-		for launch: Dictionary in active_launches:
-			if launch.get("mission", "") == "Survey":
-				var t: String = str(launch.get("target", ""))
-				if t != "" and not surveyed_planets.has(t):
-					surveyed_planets.append(t)
-	if not surveyed_planets.has("earth"):
-		surveyed_planets.append("earth")
 
 	policies = PoliticsData.default_state()
 	if data.has("policies") and data["policies"] is Dictionary:
@@ -4919,7 +5507,51 @@ func _population_capacity() -> float:
 ## falling smoothly toward 0 as CO₂ builds (no random roll — a deterministic ceiling).
 func _climate_capacity_factor() -> float:
 	var co2: float = float(atmospheric_co2.get("earth", 0.0))
-	return maxf(0.05, 1.0 / (1.0 + co2 / CO2_K_HALF))
+	# setup_climate widens or narrows the CO2 a biosphere absorbs before its ceiling falls.
+	return maxf(0.05, 1.0 / (1.0 + co2 / (CO2_K_HALF * setup_climate)))
+
+## Everyone eats.  A world draws from its own larder in proportion to what it holds, so no
+## single foodstuff is exhausted while others sit full.  What it cannot cover is hunger, and
+## hunger kills: the unfed fraction dies off at STARVATION_RATE, which is slow enough to be
+## a crisis the player can still answer and fast enough that ignoring it ends the run.
+func _consume_food(delta_days: float) -> void:
+	if delta_days <= 0.0:
+		return
+	for world: String in world_pop.keys():
+		var pop: float = float(world_pop.get(world, 0.0))
+		if pop <= 0.0:
+			_famine.erase(world)
+			continue
+		# Interstellar colonies are modelled as self-sufficient (see _world_capacity): they
+		# have no roster and no inventory here, so they grow their own and are not fed from
+		# a stockpile.  Skipping them is what keeps them alive, not an oversight.
+		if colonized_stars.has(world):
+			_famine.erase(world)
+			continue
+		var need: float = pop * FOOD_PER_CAPITA * delta_days
+		if need <= 0.0:
+			continue
+		var inv: Dictionary = _planet_inv(world)
+		var have: float = 0.0
+		for fk: String in FOOD_TYPES:
+			have += maxf(0.0, float(inv.get(fk, 0.0)))
+		var eaten: float = minf(have, need)
+		# Draw proportionally across whatever is in store.
+		if eaten > 0.0 and have > 0.0:
+			var share: float = eaten / have
+			for fk: String in FOOD_TYPES:
+				var held: float = maxf(0.0, float(inv.get(fk, 0.0)))
+				if held > 0.0:
+					_deduct_stockpile(fk, held * share, world)
+		var unfed: float = clampf(1.0 - eaten / need, 0.0, 1.0)
+		if unfed <= 0.0:
+			_famine.erase(world)
+			continue
+		_famine[world] = unfed
+		# Exponential decay of the hungry fraction — exact at any timescale, like growth.
+		var deaths: float = pop * (1.0 - exp(-STARVATION_RATE * unfed * delta_days / 365.25))
+		world_pop[world] = floorf(maxf(0.0, pop - deaths))
+	stats["current_population"] = _total_population()
 
 ## Advance population one logistic step over `delta_days` game-days toward the
 ## resource-driven capacity.  Uses the closed-form logistic solution, which is
@@ -4948,7 +5580,10 @@ func _update_population(delta_days: float) -> void:
 				world_pop[world] = 0.0
 				continue
 		var new_pop: float = k / (1.0 + (k / pop - 1.0) * decay) if k > 0.0 else 0.0
-		world_pop[world] = floorf(maxf(0.0, new_pop))
+		# Capacity is a CEILING, not merely something growth tends towards: a world that is
+		# over its cap (because the cap fell — climate, a lost grid) sheds people down to it
+		# rather than sitting above it.
+		world_pop[world] = floorf(clampf(new_pop, 0.0, k))
 	# Mirror the total into stats for everywhere that reads a single global headcount.
 	stats["current_population"] = _total_population()
 	# No people left anywhere → extinction.  Humanity also survives in the statistical galaxy
@@ -4972,6 +5607,10 @@ func _refresh_stats() -> void:
 	stats["ai_autonomy"]      = PoliticsData.ai_autonomy(policies)
 	stats["existential_risk"] = PoliticsData.existential_risk(policies)
 	stats["radiator_capacity"] = _cached_radiator_cap
+	stats["grid_ratio"]        = _grid_ratio
+	stats["link_capacity"]     = _link_capacity()
+	stats["link_offered"]      = _link_offered
+	stats["link_delivered"]    = _link_delivered
 	stats["waste_heat"]        = _thermal_ratio * _cached_radiator_cap   # raw power draw (W)
 	stats["thermal_ratio"]     = _thermal_ratio
 	stats["entropy_exported"]  = entropy_exported
