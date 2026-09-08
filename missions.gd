@@ -18,6 +18,11 @@ class_name MissionData
 ## which made the largest structure a civilisation can build cheaper than a rivet.
 const PAYLOAD_MASS_PER_UNIT: float = 1.0e13
 
+## Grams of cargo one rocket can lift.  A Supply Run sized purely by its empty vehicle could
+## carry a planet in the hold for free; this makes the manifest cost rockets in proportion to
+## what is actually in it.
+const CARGO_PER_ROCKET_G: float = 2.0e8
+
 const ROCKET_UNIT_MASS_G: float = 5.0e8
 
 ## Energy a launch campaign expends per gram of vehicle put on a trajectory.  Low Earth orbit
@@ -36,7 +41,10 @@ const MISSION_TYPES := [
 	# Instrument-laden science probe.
 	{"name": "Research Probe",  "rockets": 2,  "fuel": 16},
 	# Cargo resupply to an established colony.
-	{"name": "Supply Run",      "rockets": 4,  "fuel": 50},
+	# Supply Run — the only mission that moves MATTER between worlds.  The player picks what
+	# goes in the hold and how much of each; the rockets and fuel below are the empty vehicle,
+	# and the cargo's own mass is charged on top (see Game._on_launch_requested).
+	{"name": "Supply Run",      "rockets": 4,  "fuel": 50, "cargo": true},
 	# Carrier that ferries one collector array to the Sun and slots it into the swarm.  Only
 	# valid with the Sun as target, and one array per launch, so the swarm is built out a piece
 	# at a time — 1 409 launches for a complete ring.

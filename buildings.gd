@@ -44,7 +44,7 @@ const LEVEL_RESEARCH: Array = ["", "precision_manufacturing", "autonomous_factor
 ## burns proportionally more fuel, so tiers don't quietly become free energy.
 const LEVEL_OUTPUT_KEYS: Array = ["production", "storage", "consumption"]
 ## Bare numeric keys scaled the same way.
-const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacity",
+const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacity", "habitat",
 	"atmo_rate", "radiator_capacity", "detection", "shelter",
 	"beam_send", "beam_recv"]
 
@@ -281,7 +281,9 @@ const BUILDINGS := [
 		"co2_per_energy": 32.0},
 
 	# ── Always available ──────────────────────────────────────────────────────
-	# Matter Depot — steel silos + concrete bunkers.  Raises the matter cap only.
+	# Matter Depot — steel silos + concrete bunkers.  Raises the matter cap only.  Ground only:
+	# silos and bunkers need ground to stand on, and solar orbit has the Orbital Vault for the
+	# same job.
 	{"name": "Matter Depot",
 		"category": "storage",
 		"allowed_types": ["rocky"],
@@ -450,11 +452,30 @@ const BUILDINGS := [
 		"production": {"compute": 20.0}},
 
 	# Colony Dome — titanium pressure hull + life support + ISRU systems.
+	# Orbital Habitat — a spun cylinder holding its own air, gravity and farmland.  It needs
+	# nothing from the body it circles, which is exactly the point: it can be built anywhere,
+	# and it is the only habitation that works in solar orbit where there is no ground at all.
+	{"name": "Orbital Habitat",
+		"category": "habitation",
+		"allowed_types": ["rocky", "gas_giant", "star"],
+		"cost": {"Steel": 900_000, "Al": 600_000, "Glass": 200_000, "Plastic": 120_000,
+			"Superconductor": 40_000, "energy": 700_000},
+		"production": {},
+		"habitat": 2.0e7,
+		"farm_capacity": 400.0,
+		"consumption": {"energy": 3.0e8}},
+
+	# Colony Dome — pressurised habitation on the surface, with room to spread that an orbital
+	# cylinder does not have.  On any world but Earth this is the ONLY thing anyone can live in:
+	# nothing off Earth has a biosphere, so a colony's population is exactly what has been built
+	# for it and not one person more (see Game._artificial_capacity).
 	{"name": "Colony Dome",
 		"category": "habitation",
 		"allowed_types": ["rocky"],
 		"cost": {"Ti": 18_000, "Glass": 15_000, "Steel": 12_000, "energy": 80_000},
-		"production": {}},
+		"production": {},
+		"habitat": 5.0e7,
+		"consumption": {"energy": 4.0e8}},
 
 	# Bunker — a continent-spanning network of deep hardened shelters, stocked and sealed.
 	# "shelter" is how many people ride out a catastrophe inside: when a nuclear exchange or an
@@ -517,7 +538,7 @@ const BUILDINGS := [
 	# swarm's tens of terawatts arrive.  Steel structure, ceramic-coated emitter surface.
 	{"name": "Thermal Radiator",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Steel": 1_200_000, "Ceramic": 400_000, "Cu": 100_000, "energy": 200_000},
 		"production": {},
 		"radiator_capacity": 4.0e12},   # +4 TW of heat-shedding capacity
@@ -601,7 +622,7 @@ const BUILDINGS := [
 	# aperture this size hold a beam together across astronomical distances.
 	{"name": "Microwave Uplink",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Steel": 600_000, "Cu": 800_000, "Metamaterial": 40_000, "Microchip": 150_000, "energy": 500_000},
 		"production": {},
 		"beam_send": 5.0e12},
@@ -611,7 +632,7 @@ const BUILDINGS := [
 	# throughput, at the price of putting it up there.
 	{"name": "Orbital Rectenna",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Al": 500_000, "Cu": 400_000, "Ceramic": 300_000, "Microchip": 200_000, "energy": 800_000},
 		"production": {},
 		"beam_recv": 2.0e13},
@@ -621,7 +642,7 @@ const BUILDINGS := [
 	# without dissipating it as the waste heat that limits every terrestrial design.
 	{"name": "Power Relay Satellite",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Al": 600_000, "Superconductor": 250_000, "Metamaterial": 60_000, "Microchip": 200_000, "energy": 1_000_000},
 		"production": {},
 		"beam_send": 2.5e13},
@@ -637,7 +658,7 @@ const BUILDINGS := [
 	# waste heat where there is no atmosphere to carry it and no night to wait for.
 	{"name": "Orbital Radiator Array",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Steel": 900_000, "Ceramic": 400_000, "Graphene": 120_000,
 			"Superconductor": 60_000, "energy": 900_000},
 		"production": {},
@@ -647,7 +668,7 @@ const BUILDINGS := [
 	# between a rectenna farm and an aperture that can catch a fraction of a star.
 	{"name": "Orbital Power Grid",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Al": 800_000, "Superconductor": 500_000, "Metamaterial": 90_000,
 			"Microchip": 300_000, "energy": 1_200_000},
 		"production": {},
@@ -670,7 +691,7 @@ const BUILDINGS := [
 	# every joule you use has to leave again as heat or you cook.
 	{"name": "Radiator Swarm",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Graphene": 12_000_000, "CarbonNanotube": 8_000_000, "Aerogel": 5_000_000,
 			"Steel": 20_000_000, "energy": 40_000_000},
 		"production": {},
@@ -680,7 +701,7 @@ const BUILDINGS := [
 	# measured in kilometres cannot land a fraction of a percent of a star.
 	{"name": "Stellar Rectenna Grid",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Metamaterial": 10_000_000, "Superconductor": 9_000_000,
 			"CarbonNanotube": 6_000_000, "Al": 18_000_000, "energy": 50_000_000},
 		"production": {},
@@ -690,7 +711,7 @@ const BUILDINGS := [
 	# collectors and everywhere the power is actually spent.
 	{"name": "Swarm Relay Network",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Metamaterial": 12_000_000, "Superconductor": 11_000_000,
 			"QuantumProcessor": 900_000, "Al": 15_000_000, "energy": 60_000_000},
 		"production": {},
@@ -701,7 +722,7 @@ const BUILDINGS := [
 	# moments a civilisation needs all of it at once.
 	{"name": "Orbital Ring Store",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Superconductor": 15_000_000, "SelfHealingComposite": 7_000_000,
 			"CarbonNanotube": 5_000_000, "Steel": 25_000_000, "energy": 45_000_000},
 		"production": {},
@@ -725,7 +746,7 @@ const BUILDINGS := [
 	# Orbital Vault — sealed aluminium vault domes; 10× the Matter Depot (matter only).
 	{"name": "Orbital Vault",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Steel": 100_000, "Al": 50_000, "energy": 100_000},
 		"production": {},
 		"storage": {"minerals": 10_000_000.0}},
@@ -733,7 +754,7 @@ const BUILDINGS := [
 	# Orbital Battery — orbital battery farm; 10× the Battery Bank (energy only).
 	{"name": "Orbital Battery",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Steel": 80_000, "Al": 40_000, "Battery": 30_000, "energy": 100_000},
 		"production": {},
 		"storage": {"energy": 10_000_000.0}},
@@ -743,7 +764,7 @@ const BUILDINGS := [
 	# superconducting research and built from costly superconductor.
 	{"name": "Superconducting Storage Ring",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "star"],
 		"cost": {"Superconductor": 40_000, "Steel": 60_000, "energy": 150_000},
 		"production": {},
 		"storage": {"energy": 50_000_000.0}},

@@ -56,9 +56,15 @@ var _info_rows: Dictionary = {}           # label key → value Label
 var _info_title: Label = null
 
 ## Rows shown for the selected region, in order.
+## Rows shown for the selected tile, in order.  A key missing from here has no Label, so
+## _set_row silently drops it — add the row here as well as writing to it.
 const INFO_ROWS: Array = [
 	"Distance from Sol", "Distance from centre", "Stellar density",
-	"Stars", "Colonisable systems", "Settled systems", "Population", "Capacity",
+	"Stars", "Colonisable systems", "Settled systems",
+	# What the statistical aggregate above does not cover.
+	"Simulated colonies", "Open clusters", "Cluster territory", "Home territory",
+	"Inbound craft",
+	"Population", "Capacity",
 ]
 
 
@@ -351,7 +357,37 @@ func _refresh_info() -> void:
 	_set_row("Colonisable systems", Units.format_si(float(d.get("colonizable", 0.0)), ""))
 	_set_row("Settled systems", "%s  (%.0f%%)" % [
 		Units.format_si(float(d.get("colonized", 0.0)), ""), frac * 100.0])
-	_set_row("Population",          Units.format_si(float(d.get("population", 0.0)), ""))
+	# Everything in this tile that the region aggregate does not itself cover.
+	var det: int = int(d.get("detailed_colonies", 0))
+	_set_row("Simulated colonies", "%d" % det if det > 0 else "—")
+	var cls: int = int(d.get("clusters", 0))
+	if cls > 0:
+		_set_row("Open clusters", "%d  (%.0f%% settled)" % [
+			cls, float(d.get("cluster_frac", 0.0)) * 100.0])
+	else:
+		_set_row("Open clusters", "—")
+	# Clusters partition their tile by 3D Voronoi cell, so "territory" is the share of the tile
+	# that has an owner rather than a count of objects in it.
+	var cvol: float = float(d.get("cluster_volume", 0.0))
+	var tvol: float = float(d.get("tile_volume", 0.0))
+	if cvol > 0.0 and tvol > 0.0:
+		_set_row("Cluster territory", "%s ly³  (%.0f%% of tile)" % [
+			Units.format_si(cvol, ""), 100.0 * cvol / tvol])
+	else:
+		_set_row("Cluster territory", "—")
+	# The home cell: Sol's own share, and the stars the density model says stand in it.
+	var hvol: float = float(d.get("home_volume", 0.0))
+	if hvol > 0.0:
+		_set_row("Home territory", "%s ly³  ·  %s suns" % [
+			Units.format_si(hvol, ""), Units.format_si(float(d.get("home_stars", 0.0)), "")])
+	else:
+		_set_row("Home territory", "—")
+	var inb: int = int(d.get("inbound", 0))
+	_set_row("Inbound craft", "%d" % inb if inb > 0 else "—")
+	# Population counts the statistical region PLUS the worlds simulated individually inside it,
+	# so the number matches what the tile actually holds rather than only its aggregate part.
+	var pop: float = float(d.get("population", 0.0)) + float(d.get("detailed_population", 0.0))
+	_set_row("Population",          Units.format_si(pop, ""))
 	_set_row("Capacity",            Units.format_si(float(d.get("capacity", 0.0)), ""))
 	_info.visible = true
 

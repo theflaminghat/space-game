@@ -15,6 +15,8 @@ const ROT_SENS:  float = 0.01
 const ZOOM_STEP: float = 1.15
 const ZOOM_MIN:  float = 0.15
 const ZOOM_MAX:  float = 500.0
+## Territory wireframes are hidden until the player's tile spans at least this many pixels.
+const TERRITORY_MIN_PX: float = 48.0
 
 var _yaw:   float = 0.6
 var _pitch: float = 0.85
@@ -25,6 +27,23 @@ var _font: Font
 var _show_stars: bool = true      # render the full star catalogue (toggleable)
 var _show_field: bool = true      # render the cosmetic field backdrop (toggleable)
 var _show_regions: bool = true    # render the statistical colonisation regions (toggleable)
+var _show_clusters: bool = true   # render the colonisable open-cluster shell (toggleable)
+var _show_territory: bool = true  # render each cluster's Voronoi territory (toggleable)
+## Height of the plane the territory is cut at, in light-years above the tile's mid-plane.  The
+## cells are solids and drawing all hundred and forty at once is a thicket; one slice through
+## them is an ordinary Voronoi map.  Sliding it is also the only way to SEE that the partition is
+## three-dimensional — cells swell, pinch out and vanish as the plane passes their extent.
+var _territory_z: float = 0.0
+var _clusters_btn: Button = null
+var _territory_btn: Button = null
+var _territory_slider: HSlider = null
+## Cluster name → 0..1 settled, pushed from Game so the ring fill matches the star map.
+var _cluster_frac: Dictionary = {}
+
+## Per-cluster colonisation fractions (cluster name → 0..1).
+func set_cluster_progress(frac: Dictionary) -> void:
+	_cluster_frac = frac
+	queue_redraw()
 var _stars_btn: Button = null
 var _field_btn: Button = null
 var _regions_btn: Button = null
@@ -87,6 +106,67 @@ func _ready() -> void:
 		_regions_btn.text = "Regions: on" if on else "Regions: off"
 		queue_redraw())
 	add_child(_regions_btn)
+
+	# Toggle for the colonisable open-cluster shell.
+	_clusters_btn = Button.new()
+	_clusters_btn.toggle_mode = true
+	_clusters_btn.button_pressed = true
+	_clusters_btn.text = "Clusters: on"
+	_clusters_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_clusters_btn.offset_left = -118.0
+	_clusters_btn.offset_right = -12.0
+	_clusters_btn.offset_top = 94.0
+	_clusters_btn.offset_bottom = 118.0
+	_clusters_btn.toggled.connect(func(on: bool) -> void:
+		_show_clusters = on
+		_clusters_btn.text = "Clusters: on" if on else "Clusters: off"
+		queue_redraw())
+	add_child(_clusters_btn)
+
+	# Toggle for the Voronoi territories the clusters partition their tile into, and a slider that
+	# moves the plane they are cut at.  The button carries the height, so the slider needs no
+	# label of its own in a 106-pixel column.
+	_territory_btn = Button.new()
+	_territory_btn.toggle_mode = true
+	_territory_btn.button_pressed = true
+	_territory_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_territory_btn.offset_left = -118.0
+	_territory_btn.offset_right = -12.0
+	_territory_btn.offset_top = 122.0
+	_territory_btn.offset_bottom = 146.0
+	_territory_btn.toggled.connect(func(on: bool) -> void:
+		_show_territory = on
+		_update_territory_label()
+		queue_redraw())
+	add_child(_territory_btn)
+
+	_territory_slider = HSlider.new()
+	_territory_slider.min_value = -StarMapPanel.tile_half_height_ly()
+	_territory_slider.max_value = StarMapPanel.tile_half_height_ly()
+	_territory_slider.step = 25.0
+	_territory_slider.value = _territory_z
+	_territory_slider.tooltip_text = "Height of the slice through the tile (ly)"
+	_territory_slider.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_territory_slider.offset_left = -118.0
+	_territory_slider.offset_right = -12.0
+	_territory_slider.offset_top = 150.0
+	_territory_slider.offset_bottom = 172.0
+	_territory_slider.value_changed.connect(func(v: float) -> void:
+		_territory_z = v
+		_update_territory_label()
+		queue_redraw())
+	add_child(_territory_slider)
+	_update_territory_label()
+
+## Keep the territory button reading as the slider's own label, so the slice height is legible
+## without spending another row on a caption.
+func _update_territory_label() -> void:
+	if _territory_btn == null:
+		return
+	if not _show_territory:
+		_territory_btn.text = "Territory: off"
+	else:
+		_territory_btn.text = "Slice: %+d ly" % int(round(_territory_z))
 
 # ── View maths (linear — the whole point of this panel) ─────────────────────────
 
@@ -194,6 +274,73 @@ func _draw() -> void:
 			var sc: Color = st["color"]
 			draw_rect(Rect2(stp - Vector2(1.6, 1.6) * 0.5, Vector2(1.6, 1.6)), Color(sc.r, sc.g, sc.b, 0.95))
 
+	# Open clusters — the colonisable shell just past the individual-star horizon.  Drawn as
+	# rings rather than points because a cluster is hundreds to thousands of stars, and filled
+	# in proportion to how much of it has been settled, so the outward campaign is legible in
+	# true scale alongside everything else.
+	if _show_clusters:
+		# Territory first, so the cluster rings sit on top of it.  Each cluster owns the part of
+		# its tile nearer to it than to any other seed — a convex 3D cell — and what is drawn is
+		# one PLANE through that partition, at the height the slider is set to.  A slice is an
+		# ordinary Voronoi map, which is readable; all hundred and forty solids at once is not.
+		# Sliding the plane is also the only way to see that the partition has depth: cells swell,
+		# pinch out and disappear as the height passes their extent, and the count in the readout
+		# moves with it.
+		#
+		# Skipped entirely until the tile is worth more than a few dozen pixels: at galaxy zoom the
+		# whole partition collapses onto Sol and reads as a smudge.
+		var tile_px: float = 2.0 * StarMapPanel.HEX_SIZE * s
+		if _show_territory and tile_px > TERRITORY_MIN_PX:
+			var cl_all: Array = StarMapPanel.star_clusters()
+			for cell: Dictionary in StarMapPanel.cluster_slice(_territory_z):
+				var ci: int = int(cell["index"])
+				if ci < 0 or ci >= cl_all.size():
+					continue
+				var cl: Dictionary = cl_all[ci]
+				var home_cell: bool = bool(cl.get("is_home", false))
+				var tc: Color = Color(1.0, 0.90, 0.62) if home_cell else (cl["color"] as Color)
+				# A settled cluster takes the same green its ring does, so the campaign's reach
+				# reads off the territory map and not just off the dots.
+				var taken: float = clampf(float(_cluster_frac.get(str(cl["name"]), 0.0)), 0.0, 1.0)
+				if taken > 0.0:
+					tc = tc.lerp(Color(0.40, 0.95, 0.55), 0.35 + 0.65 * taken)
+				var ring: PackedVector3Array = cell["poly"]
+				var scr := PackedVector2Array()
+				for wp: Vector3 in ring:
+					scr.append(_project(wp, b, center, s))
+				if scr.size() < 3:
+					continue
+				var fill_a: float = 0.20 if home_cell else 0.10
+				var edge_a: float = 0.75 if home_cell else 0.45
+				draw_colored_polygon(scr, Color(tc.r, tc.g, tc.b, fill_a))
+				var loop := scr.duplicate()
+				loop.append(scr[0])
+				draw_polyline(loop, Color(tc.r, tc.g, tc.b, edge_a), 1.0)
+				# The cell's full volume, once its footprint is wide enough to carry the text —
+				# the territory is the solid, and this face of it is only a section.
+				var vol: float = float(cl.get("volume", 0.0))
+				var foot: float = sqrt(maxf(float(cell["area"]), 0.0)) * s
+				if vol > 0.0 and foot > 46.0:
+					var lp := _project(cl["pos"] as Vector3, b, center, s)
+					draw_string(_font, lp + Vector2(6.0, -6.0), "%s ly³" % Units.format_si(vol, ""),
+						HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(tc.r, tc.g, tc.b, 0.85))
+		for cl: Dictionary in StarMapPanel.star_clusters():
+			if bool(cl.get("is_home", false)):
+				continue      # the home seed sits on Sol; its ring would just cover the Sun
+			var cp := _project(cl["pos"], b, center, s)
+			if cp.x < -6.0 or cp.y < -6.0 or cp.x > size.x + 6.0 or cp.y > size.y + 6.0:
+				continue
+			var cc: Color = cl["color"]
+			# Radius carries the star count, so a rich cluster reads as a bigger object.
+			var frac_stars: float = clampf(
+				(float(cl["stars"]) - 250.0) / 5750.0, 0.0, 1.0)
+			var rad: float = lerpf(2.0, 5.0, frac_stars)
+			var settled: float = clampf(float(_cluster_frac.get(str(cl["name"]), 0.0)), 0.0, 1.0)
+			if settled > 0.0:
+				# Filled wedge = the share taken, drawn from 12 o'clock so partial progress reads.
+				draw_circle(cp, rad, Color(0.35, 0.90, 0.55, 0.30 + 0.55 * settled))
+			draw_arc(cp, rad, 0.0, TAU, 18, Color(cc.r, cc.g, cc.b, 0.85), 1.0, true)
+
 	# Named clusters/nebulae — tiny at galaxy scale, but positioned correctly.
 	for m: Dictionary in source.galaxy_landmarks():
 		var msp := _project(m["pos"], b, center, s)
@@ -222,13 +369,32 @@ func _draw() -> void:
 			Units.format_si(view_ly, ""), Units.format_si(1.0 / maxf(s, 1e-9), ""), _zoom],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.62, 0.72, 0.88))
 	var star_txt: String = "%d stars in zone" % StarMapPanel.all_stars().size() if _show_stars else "stars off"
+	var settled_cl: int = 0
+	var total_cl: int = 0
+	for cl: Dictionary in StarMapPanel.star_clusters():
+		if bool(cl.get("is_home", false)):
+			continue          # counted as territory, not as a target
+		total_cl += 1
+		if float(_cluster_frac.get(str(cl["name"]), 0.0)) > 0.0:
+			settled_cl += 1
+	var cluster_txt: String = "%d clusters, %d touched" % [
+		total_cl, settled_cl] if _show_clusters else "clusters off"
+	if _show_clusters and _show_territory:
+		# The cells tile the prism exactly, so the volume is always the whole region; the count is
+		# how many of them the current slice actually passes through.
+		cluster_txt += ", %s ly³ in %d cells (%d cut at %+d ly)  ·  seed %d" % [
+			Units.format_si(StarMapPanel.tile_volume_ly3(), ""),
+			StarMapPanel.star_clusters().size(),
+			StarMapPanel.cluster_slice(_territory_z).size(), int(round(_territory_z)),
+			StarMapPanel.galaxy_seed()]
 	var field_txt: String = "field %d" % source.galaxy_field().size() if _show_field else "field off"
 	var region_txt: String = "regions off"
 	if _show_regions:
 		var g := get_tree().current_scene
 		region_txt = "%d colonised regions" % (g.galaxy_regions_data().size() if g and g.has_method("galaxy_regions_data") else 0)
 	draw_string(_font, Vector2(14, 60),
-		"%s  ·  %s  ·  %s  ·  click a region · drag rotate · scroll zoom" % [field_txt, star_txt, region_txt],
+		"%s  ·  %s  ·  %s  ·  %s  ·  click a region · drag rotate · scroll zoom" % [
+			field_txt, star_txt, cluster_txt, region_txt],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.55, 0.62, 0.75))
 
 	# Selected-region info sidebar (only while a region is picked and regions are shown).

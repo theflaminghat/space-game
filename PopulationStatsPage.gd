@@ -16,6 +16,8 @@ func _gui_input(event: InputEvent) -> void:
 const ROWS: Array = [
 	"Current population",
 	"Carrying capacity",
+	"  natural",
+	"  built",
 	"Growth rate",
 	"Life expectancy",
 	"Happiness",
@@ -64,6 +66,10 @@ func set_stats(data: Dictionary) -> void:
 	var inhabited: bool = bool(data.get("inhabited", true))
 	_set_row("Current population", _fmt_pop(float(data.get("population", 0.0))))
 	_set_row("Carrying capacity", _fmt_pop(float(data.get("capacity", 0.0))))
+	# Split out what the world supports on its own from what has been built for it — off Earth
+	# the first number is zero, and seeing that is the point.
+	_set_row("  natural",    _fmt_pop(float(data.get("natural_capacity", 0.0))))
+	_set_row("  built",      _fmt_pop(float(data.get("artificial_capacity", 0.0))))
 	# Growth / life expectancy / happiness are species-wide — only meaningful where people live.
 	if not inhabited:
 		for k: String in ["Growth rate", "Life expectancy", "Happiness"]:

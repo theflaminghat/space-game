@@ -81,6 +81,7 @@ const NAMES: Dictionary = {
 	"SolarPanel":    "Solar Panel",
 	"SolarSatellite":"Solar Satellite",
 	"Microchip":     "Microchip",
+	"Robot":      "Industrial Robot",
 	"Battery":       "Battery",
 	"Superconductor":"Superconductor",
 	"Propellant":    "Rocket Propellant",
@@ -160,6 +161,7 @@ const CATEGORIES: Dictionary = {
 	"Chicken": "food",
 	"Algae": "food",
 	"VNProbe": "manufactured",
+	"Robot": "manufactured",
 }
 
 const CATEGORY_ORDER: Array[String] = ["food", "raw", "refined", "components", "manufactured"]

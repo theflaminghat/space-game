@@ -15,8 +15,7 @@ var _info_title: Label = null
 var _info_sub:   Label = null
 var _info_body:  Label = null
 var _selected_id: String = "homo_sapiens"
-var _pop_worlds:  Dictionary = {}
-var _pop_species: Dictionary = {}
+var _rates: Dictionary = {}
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -103,11 +102,11 @@ func _build_info_panel() -> void:
 	_info_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(_info_body)
 
-## Push live population data from Game.gd.  `worlds` maps a world name to its
-## _population_stats() dict plus food figures; `species` carries the civilisation-wide totals.
-func set_population_data(worlds: Dictionary, species: Dictionary) -> void:
-	_pop_worlds = worlds
-	_pop_species = species
+## Push the per-capita rates from Game: what a person eats, and what a person can staff.  These
+## are civilisation-wide constants rather than per-world figures, which is why this replaced the
+## population push — a lineage's intake and output do not depend on how many of them there are.
+func set_lineage_rates(rates: Dictionary) -> void:
+	_rates = rates
 	_refresh_info()
 
 ## True once `planet` has diverged into its own lineage node.
@@ -153,71 +152,34 @@ func _on_node_selected(node_id: String) -> void:
 	_selected_id = node_id
 	_refresh_info()
 
-## Fill the readout for whatever lineage is selected: one world's own people when a planetary
-## variant is picked, and the whole species when the baseline root is.
+## Fill the readout for the selected lineage.
 func _refresh_info() -> void:
 	if _info_title == null:
 		return
 	var node: Dictionary = tree.tree_data.get(_selected_id, {})
-	var planet: String = str(node.get("planet", ""))
 	_info_title.text = str(node.get("name", "Homo sapiens"))
 	_info_sub.text = str(node.get("subtitle", ""))
-	_info_body.text = _species_lines() if planet == "" else _world_lines(planet)
+	_info_body.text = _rate_lines(node)
 
-## Civilisation-wide figures for the baseline root — every lineage descends from it, so its
-## readout is the whole species rather than any one world.
-func _species_lines() -> String:
-	var d: Dictionary = _pop_species
-	if d.is_empty():
-		return "No population data yet."
+## What one member of this lineage takes in and puts out.  A node on this tree is a KIND of
+## human, not a headcount — the tree already shows how many worlds there are, and the population
+## tab shows how many people — so what belongs here is the thing that makes a lineage a lineage:
+## what it needs to live, and what it gives back.
+func _rate_lines(node: Dictionary) -> String:
+	if _rates.is_empty():
+		return "No data yet."
 	var lines: Array = []
-	lines.append("%s people across %d inhabited world%s" % [
-		_fmt_pop(float(d.get("population", 0.0))), int(d.get("worlds", 0)),
-		"" if int(d.get("worlds", 0)) == 1 else "s"])
-	var gal: float = float(d.get("galaxy_population", 0.0)) - float(d.get("population", 0.0))
-	if gal > 1.0:
-		lines.append("%s more in the settled galaxy beyond individual simulation" % _fmt_pop(gal))
-	lines.append("Life expectancy %d yr   ·   %s have ever lived" % [
-		int(round(float(d.get("life_expectancy", 0.0)))),
-		_fmt_pop(float(d.get("ever_lived", 0.0)))])
-	var lineages: int = tree.tree_data.size()
-	lines.append("%d lineage%s in the tree — every one of them descends from this node" % [
-		lineages, "" if lineages == 1 else "s"])
-	return "
-".join(lines)
-
-## One world's own people: how many, against what ceiling, and whether they are fed.
-func _world_lines(planet: String) -> String:
-	var d: Dictionary = _pop_worlds.get(planet, {})
-	if d.is_empty() or not bool(d.get("inhabited", false)):
-		return "No population on this world — the lineage that lived here is gone."
-	var pop: float = float(d.get("population", 0.0))
-	var cap: float = float(d.get("capacity", 0.0))
-	var lines: Array = []
-	lines.append("%s people   ·   %s of a %s ceiling" % [
-		_fmt_pop(pop), ("%.0f%%" % (pop / cap * 100.0)) if cap > 0.0 else "—", _fmt_pop(cap)])
-	lines.append("Growth %+.2f%%/yr   ·   life expectancy %d yr   ·   happiness %d%%" % [
-		float(d.get("growth", 0.0)), int(round(float(d.get("life_expectancy", 0.0)))),
-		int(round(float(d.get("happiness", 0.0))))])
-	# Food is the constraint that actually ends a lineage, so it is stated plainly.
-	var fam: float = float(d.get("famine", 0.0))
-	if fam > 0.0:
-		lines.append("FAMINE — %d%% of them are going unfed" % int(round(fam * 100.0)))
-	else:
-		var days: float = float(d.get("food_days", -1.0))
-		if days >= 0.0:
-			lines.append("Fed: %s in store, %s at the current rate" % [
-				Units.format_si(float(d.get("food_stored", 0.0)), "g"),
-				("%.0f days" % days) if days < 720.0 else ("%.1f years" % (days / 365.25))])
-	return "
-".join(lines)
-
-## Population in the units people actually think in.
-func _fmt_pop(v: float) -> String:
-	if v >= 1.0e9:
-		return "%.2f billion" % (v / 1.0e9)
-	if v >= 1.0e6:
-		return "%.1f million" % (v / 1.0e6)
-	if v >= 1.0e3:
-		return "%.0f thousand" % (v / 1.0e3)
-	return "%d" % int(v)
+	lines.append("INTAKE   per person per day")
+	lines.append("    %s of food" % Units.format_si(float(_rates.get("food_per_capita", 0.0)), "g"))
+	lines.append("")
+	lines.append("OUTPUT   per person")
+	# Compute is a property of the lineage itself, carried on its own node.
+	lines.append("    %s of thought" % Units.format_si(float(node.get("compute", 0.0)), "FLOP/s"))
+	# Labour is how much built capacity one pair of hands can staff; automation multiplies it.
+	var labour: float = float(_rates.get("work_per_capita", 0.0))
+	var auto: float = float(_rates.get("automation", 1.0))
+	lines.append("    %s of work per day" % Units.format_si(labour * auto, ""))
+	if auto > 1.001:
+		lines.append("        %s unaided, x%.1f from automation" % [
+			Units.format_si(labour, ""), auto])
+	return "\n".join(lines)

@@ -12,6 +12,9 @@ var _storage_minerals_label: Label = null
 var _storage_energy_label:   Label = null
 ## Manufacturing Capacity readout ("used / capacity"), added to stats_grid in _ready.
 var _mc_label: Label = null
+var _capacity_label:       Label = null
+var _capacity_natural_label: Label = null
+var _capacity_built_label:   Label = null
 var _construction_key: Label = null
 var _construction_label: Label = null
 
@@ -54,6 +57,25 @@ func _ready() -> void:
 	# Hide the scene-defined Tree; we replace it with a scrollable row list.
 	composition_tree.hide()
 	var tree_idx: int = composition_tree.get_index()
+
+	# ── Carrying capacity row ─────────────────────────────────────────────────
+	# How many people this world can hold, split into what it supports on its OWN and what has
+	# been built for it.  Off Earth the first figure is zero — a colony's ceiling is exactly
+	# the domes and habitats standing on it — and that is the fact worth showing here.
+	var _cap_key := Label.new()
+	_cap_key.text = "Capacity"
+	_cap_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stats_grid.add_child(_cap_key)
+	_capacity_label = Label.new()
+	_capacity_label.text = "-"
+	_capacity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	stats_grid.add_child(_capacity_label)
+
+	# The two halves get a row each rather than sharing one as "natural / built".  They are
+	# separate quantities that move for different reasons — one with the climate, one with what
+	# you build — and a slash between them reads as a ratio, which it is not.
+	_capacity_natural_label = _sub_row("  natural")
+	_capacity_built_label   = _sub_row("  built")
 
 	# ── Manufacturing capacity row ────────────────────────────────────────────
 	# How much the world can run in the recipe panel at once (used / capacity, in
@@ -120,6 +142,21 @@ func _ready() -> void:
 
 ## Format a whole-number population with thousands separators, e.g. 2300000000
 ## → "2,300,000,000".  Populations are always integers (a count of people).
+## A dimmed key/value pair under the row above it — used for the halves of a total, where the
+## indent and the colour say "this is part of the number above" without repeating its name.
+func _sub_row(key: String) -> Label:
+	var k := Label.new()
+	k.text = key
+	k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	k.modulate = Color(0.65, 0.70, 0.80)
+	stats_grid.add_child(k)
+	var v := Label.new()
+	v.text = "-"
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	v.modulate = Color(0.65, 0.70, 0.80)
+	stats_grid.add_child(v)
+	return v
+
 func _fmt_population(n: int) -> String:
 	var s: String = str(maxi(0, n))
 	var out: String = ""
@@ -162,6 +199,18 @@ func set_planet_info(data: Dictionary) -> void:
 	else:
 		energy_label.modulate = Color(1, 1, 1)
 	population_label.text = _fmt_population(int(data.get("population", 0)))
+	# Carrying capacity, and where it comes from.
+	if _capacity_label:
+		var nat: float = float(data.get("natural_capacity", 0.0))
+		var art: float = float(data.get("artificial_capacity", 0.0))
+		var cap: float = nat + art
+		_capacity_label.text = _fmt_population(int(cap)) if cap > 0.0 else "Uninhabitable"
+		_capacity_natural_label.text = _fmt_population(int(nat))
+		_capacity_built_label.text   = _fmt_population(int(art))
+		# Amber once the world is close to full: the ceiling is about to become the constraint.
+		var pop_now: float = float(data.get("population", 0))
+		var near_full: bool = cap > 0.0 and pop_now > cap * 0.9
+		_capacity_label.modulate = Color(0.95, 0.65, 0.30) if near_full else Color(0.85, 0.90, 0.70)
 	# Food: how long the larder lasts at the current rate, and who is going hungry.  A world
 	# eating into its stores reads as a countdown; one that has run out reads as a death rate.
 	var fam: float = float(data.get("famine", 0.0))

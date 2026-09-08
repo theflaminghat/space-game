@@ -28,6 +28,8 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Automated Mine":  "industrial_robotics",
 	"Data Center":     "microprocessors",
 	"Colony Dome":     "space_habitation_systems",
+	# A spun cylinder needs the same habitation engineering as a surface dome.
+	"Orbital Habitat": "space_habitation_systems",
 	"Fusion Reactor":  "fusion_engineering",
 	"AI Research Hub": "machine_learning_systems",
 	"Orbital Laser":   "space_power_infrastructure",

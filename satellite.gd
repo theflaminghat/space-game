@@ -35,6 +35,9 @@ var orbit_center: Node3D = null
 ## For arrival_mode == "swarm": the fixed swarm-slot world position the craft flies to,
 ## then removes itself (the deployed collector takes its place).
 var swarm_target_pos: Vector3 = Vector3.ZERO
+## Reserved slot index, so the craft can home on the slot's LIVE position as the lane rotates
+## rather than on where it was when the launch was ordered.  -1 falls back to the snapshot.
+var swarm_slot_index: int = -1
 var _is_swarm:  bool    = false
 var _start_pos: Vector3 = Vector3.ZERO   # departure position, captured at launch
 
@@ -180,11 +183,57 @@ func _process_transfer(delta_days: float) -> void:
 			_state       = State.ORBIT
 			_orbit_angle = _orbit_entry_angle
 
-## Straight, eased glide from the departure point to the reserved swarm slot.  The slot
-## holds a fixed world position while unrevealed, so the craft lands exactly where the
-## deployed collector will appear.
+## Heliocentric transfer down to a swarm slot.
+##
+## This used to be a straight lerp from the departure planet to the slot.  A swarm lane sits
+## inside Mercury's orbit, so that chord passes THROUGH THE SUN whenever the slot is on the far
+## side — and it arrived moving radially, straight across the lane it was supposed to join.
+##
+## It now flies the same kind of arc a real transfer does: an ellipse whose apoapsis is the
+## departure radius and whose PERIAPSIS IS THE LANE ITSELF.  Radius falls monotonically from one
+## to the other, so the path can never pass inside the destination lane — and therefore never
+## through the Sun.  Arriving at periapsis means arriving with velocity purely along-track,
+## which is the condition for entering the lane rather than crossing it.
 func _swarm_point(p: float) -> Vector3:
-	return _start_pos.lerp(swarm_target_pos, smoothstep(0.0, 1.0, p))
+	# Track the LIVE slot: the lane keeps rotating during the flight, so homing on a snapshot
+	# would arrive where the slot used to be and jump on hand-off to the collector.
+	var slot: Vector3 = _live_swarm_slot()
+	var srel: Vector3 = slot - _sun_pos
+	var r2: float = maxf(srel.length(), 0.01)
+	var a2: float = atan2(srel.x, srel.z)
+	var r1: float = maxf(_depart_radius, r2)   # the swarm is always inside a launch site
+
+	# Ellipse from apoapsis (r1) to periapsis (r2).  theta runs pi -> 2pi, so r decreases
+	# monotonically and bottoms out exactly at the lane.
+	var a: float = (r1 + r2) * 0.5
+	var e: float = (r1 - r2) / maxf(r1 + r2, 1.0e-4)
+	var theta: float = PI + p * PI
+	var r: float = a * (1.0 - e * e) / (1.0 + e * cos(theta))
+
+	# Unwrap the prograde sweep so a rotating lane does not snap the path by +-TAU.
+	var raw: float = _prograde_sweep(_depart_angle, a2)
+	if not _sweep_init:
+		_sweep      = raw
+		_sweep_init = true
+	else:
+		while raw - _sweep >  PI: raw -= TAU
+		while raw - _sweep < -PI: raw += TAU
+		_sweep = raw
+
+	var ang: float = _depart_angle + _sweep * p
+	# Out-of-plane: lanes are inclined, so lift the craft onto the slot's plane over the
+	# flight instead of dropping onto it at the end.
+	var plane_y: float = srel.y * smoothstep(0.0, 1.0, p)
+	return _sun_pos + Vector3(sin(ang) * r, plane_y, cos(ang) * r)
+
+## Current world position of the reserved slot, falling back to the snapshot taken at launch
+## if the swarm renderer is not reachable (loading, or a save restored mid-flight).
+func _live_swarm_slot() -> Vector3:
+	if swarm_slot_index >= 0 and orbit_center != null:
+		var planets: Node = orbit_center.get_parent()
+		if planets != null and planets.has_method("swarm_slot_world_pos"):
+			return planets.swarm_slot_world_pos(swarm_slot_index)
+	return swarm_target_pos
 
 ## Hohmann half-ellipse whose far end is recomputed every frame from the target's
 ## current radius & angle, so the craft homes onto the moving planet.

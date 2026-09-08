@@ -41,7 +41,7 @@ func _build_ui() -> void:
 	add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(520, 0)
+	panel.custom_minimum_size = Vector2(560, 380)
 	center.add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -59,17 +59,24 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 26)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
-	vbox.add_child(_sep())
+
+	# ── Categories ────────────────────────────────────────────────────────────
+	# One tab per category rather than one long stack.  The headers were already grouping these
+	# settings; making the grouping navigable means a category can grow without pushing the
+	# others off the bottom, and the panel keeps a fixed size whatever is added to it.
+	var tabs := TabContainer.new()
+	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(tabs)
 
 	# ── Display ───────────────────────────────────────────────────────────────
-	_section(vbox, "Display")
-	_fullscreen_btn = _check_row(vbox, "Fullscreen")
+	var disp := _tab(tabs, "Display")
+	_fullscreen_btn = _check_row(disp, "Fullscreen")
 	_fullscreen_btn.toggled.connect(_on_fullscreen_toggled)
-	_vsync_btn = _check_row(vbox, "V-Sync")
+	_vsync_btn = _check_row(disp, "V-Sync")
 	_vsync_btn.toggled.connect(_on_vsync_toggled)
 
 	var aa_row := HBoxContainer.new()
-	vbox.add_child(aa_row)
+	disp.add_child(aa_row)
 	var aa_lbl := Label.new()
 	aa_lbl.text = "Anti-Aliasing"
 	aa_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -86,13 +93,11 @@ func _build_ui() -> void:
 	_aa_option.item_selected.connect(_on_aa_changed)
 	aa_row.add_child(_aa_option)
 
-	vbox.add_child(_sep())
-
 	# ── Audio ─────────────────────────────────────────────────────────────────
-	_section(vbox, "Audio")
+	var audio := _tab(tabs, "Audio")
 
 	var vol_row := HBoxContainer.new()
-	vbox.add_child(vol_row)
+	audio.add_child(vol_row)
 	var vol_lbl := Label.new()
 	vol_lbl.text = "Master Volume"
 	vol_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -110,14 +115,13 @@ func _build_ui() -> void:
 	_volume_slider.value = 1.0
 	_volume_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_volume_slider.value_changed.connect(_on_volume_changed)
-	vbox.add_child(_volume_slider)
-	vbox.add_child(_sep())
+	audio.add_child(_volume_slider)
 
 	# ── Gameplay ──────────────────────────────────────────────────────────────
-	_section(vbox, "Gameplay")
+	var play := _tab(tabs, "Gameplay")
 
 	var speed_row := HBoxContainer.new()
-	vbox.add_child(speed_row)
+	play.add_child(speed_row)
 	var speed_lbl := Label.new()
 	speed_lbl.text = "Default Game Speed"
 	speed_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -130,8 +134,13 @@ func _build_ui() -> void:
 	_speed_option.custom_minimum_size = Vector2(150, 0)
 	speed_row.add_child(_speed_option)
 
+	# ── Saving ────────────────────────────────────────────────────────────────
+	# Its own category rather than a line under Gameplay: how often the game writes to disk is
+	# not a rule of play, and it is the setting a player most often comes here to change.
+	var saving := _tab(tabs, "Saving")
+
 	var autosave_row := HBoxContainer.new()
-	vbox.add_child(autosave_row)
+	saving.add_child(autosave_row)
 	var autosave_lbl := Label.new()
 	autosave_lbl.text = "Auto-save Interval"
 	autosave_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -144,9 +153,9 @@ func _build_ui() -> void:
 	_autosave_option.selected = 0
 	_autosave_option.custom_minimum_size = Vector2(150, 0)
 	autosave_row.add_child(_autosave_option)
-	vbox.add_child(_sep())
 
 	# ── Close button ──────────────────────────────────────────────────────────
+	vbox.add_child(_sep())
 	var close_btn := Button.new()
 	close_btn.text = "Apply & Close"
 	close_btn.add_theme_font_size_override("font_size", 16)
@@ -157,12 +166,19 @@ func _build_ui() -> void:
 
 # ── Builder helpers ───────────────────────────────────────────────────────────
 
-func _section(parent: VBoxContainer, text: String) -> void:
-	var lbl := Label.new()
-	lbl.text = text
-	lbl.add_theme_font_size_override("font_size", 14)
-	lbl.add_theme_color_override("font_color", Color(0.45, 0.75, 1.0))
-	parent.add_child(lbl)
+## One category page: a padded, top-aligned column added to the tab bar under `title`.
+## Replaces the old _section() header, which only drew a coloured label into a shared column.
+func _tab(tabs: TabContainer, title: String) -> VBoxContainer:
+	var page := MarginContainer.new()
+	page.name = title
+	for side in ["left", "right", "top", "bottom"]:
+		page.add_theme_constant_override("margin_" + side, 12)
+	tabs.add_child(page)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN   # rows sit at the top, not centred
+	page.add_child(col)
+	return col
 
 func _check_row(parent: VBoxContainer, label_text: String) -> CheckButton:
 	var row := HBoxContainer.new()

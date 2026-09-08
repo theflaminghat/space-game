@@ -37,12 +37,39 @@ const MOON_COUNTS := {
 ## the planet (distinct radius = separate lane) and its own placeholder-textured mesh, so a
 ## planet's orbital build-out is visible the way the Dyson swarm is around the Sun.  One
 ## instance orbits per building of that type the player has raised there.
+## Every orbital structure gets a lane, a stand-in shape and the shared placeholder texture, so
+## anything the player puts in orbit is actually visible there — around a planet or around the
+## Sun.  Lanes are spaced 0.25 apart in planet radii; colour groups them by what they do
+## (amber = heat, blue = power link, grey = storage, green = people).
+##
+## "ground" marks the two that are NOT orbital on a world with a surface: a radiator field and a
+## superconducting storage ring both stand on the ground of a rocky planet.  They still get a
+## lane around a gas giant, where there is no ground to stand on and everything built is hanging
+## in vacuum by definition.  The Matter Depot used to be here as a third; it is ground-only now,
+## so it has no lane at all — silos and bunkers are not orbital infrastructure anywhere.
 const INFRA_LANES := [
-	{"type": "Orbital Laser",    "radius": 0.95, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
-	{"type": "Space Telescope",  "radius": 1.20, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
-	{"type": "Thermal Radiator", "radius": 1.45, "color": Color(0.95, 0.75, 0.40), "mesh": "flat"},
-	{"type": "Orbital Vault",    "radius": 1.70, "color": Color(0.72, 0.74, 0.80), "mesh": "box"},
-	{"type": "Orbital Battery",  "radius": 1.95, "color": Color(0.50, 0.95, 0.62), "mesh": "box"},
+	{"type": "Orbital Laser",         "radius": 0.95, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
+	{"type": "Space Telescope",       "radius": 1.20, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
+	{"type": "Thermal Radiator",      "radius": 1.45, "color": Color(0.95, 0.75, 0.40), "mesh": "flat",
+		"ground": true},
+	{"type": "Orbital Vault",         "radius": 1.70, "color": Color(0.72, 0.74, 0.80), "mesh": "box"},
+	{"type": "Orbital Battery",       "radius": 1.95, "color": Color(0.50, 0.95, 0.62), "mesh": "box"},
+	# Power link: receiving and transmitting apertures.
+	{"type": "Microwave Uplink",      "radius": 2.20, "color": Color(0.55, 0.80, 0.95), "mesh": "dish"},
+	{"type": "Orbital Rectenna",      "radius": 2.45, "color": Color(0.45, 0.75, 1.00), "mesh": "dish"},
+	{"type": "Power Relay Satellite", "radius": 2.70, "color": Color(0.70, 0.70, 1.00), "mesh": "dish"},
+	{"type": "Orbital Power Grid",    "radius": 2.95, "color": Color(0.60, 0.72, 1.00), "mesh": "flat"},
+	{"type": "Stellar Rectenna Grid", "radius": 3.20, "color": Color(0.40, 0.68, 1.00), "mesh": "flat"},
+	{"type": "Swarm Relay Network",   "radius": 3.45, "color": Color(0.78, 0.68, 1.00), "mesh": "dish"},
+	# Heat: the other half of any large power economy.
+	{"type": "Orbital Radiator Array","radius": 3.70, "color": Color(1.00, 0.70, 0.35), "mesh": "flat"},
+	{"type": "Radiator Swarm",        "radius": 3.95, "color": Color(1.00, 0.62, 0.30), "mesh": "flat"},
+	# Storage.
+	{"type": "Superconducting Storage Ring", "radius": 4.20, "color": Color(0.62, 0.90, 0.80),
+		"mesh": "ring", "ground": true},
+	{"type": "Orbital Ring Store",    "radius": 4.45, "color": Color(0.55, 0.85, 0.78), "mesh": "ring"},
+	# People.
+	{"type": "Orbital Habitat",       "radius": 4.70, "color": Color(0.70, 0.95, 0.65), "mesh": "ring"},
 ]
 const INFRA_MAX_PER_LANE: int = 64   # cap per lane (MultiMesh instance budget)
 
@@ -52,6 +79,8 @@ static var _placeholder_tex: ImageTexture = null
 ## Per-lane runtime state: [{ mm, type, radius, phase, motion, incl }].
 var _infra: Array = []
 var _infra_poll: float = 0.0
+## Set once the star has had its orbital lanes created (it skips the planet build-out above).
+var _star_infra_built: bool = false
 
 ## Per-gas-giant ring appearance.  Radii are multiples of the planet's own
 ## radius; tilt matches each body's real axial tilt (Uranus rings are nearly
@@ -504,6 +533,12 @@ func _process(delta: float) -> void:
 		_create_moons()
 		_create_infra_lanes()
 		_sync_visibility()
+	# Orbital lanes are built for the STAR too, on its own flag: the Sun has no orbit line,
+	# no blur torus and no moons, but solar orbit is a build site like any other and what is
+	# put there has to be visible.
+	elif not _star_infra_built and type == Type.STAR:
+		_star_infra_built = true
+		_create_infra_lanes()
 
 	# Orbital infrastructure: refresh counts + orbit them every frame (even while paused, so
 	# newly-built structures appear immediately).  Cheap — small counts, polled on a throttle.
@@ -685,6 +720,18 @@ func _infra_mesh(kind: String) -> Mesh:
 			var f := BoxMesh.new(); f.size = Vector3(0.34, 0.03, 0.24); return f
 		"rod":
 			var r := BoxMesh.new(); r.size = Vector3(0.10, 0.10, 0.30); return r
+		"dish":
+			# A shallow cone reads as an aperture pointed somewhere.
+			var d := CylinderMesh.new()
+			d.top_radius = 0.18; d.bottom_radius = 0.02; d.height = 0.10
+			d.radial_segments = 10; d.rings = 1
+			return d
+		"ring":
+			# A spun torus: habitats and storage rings both look like what they are.
+			var t := TorusMesh.new()
+			t.inner_radius = 0.10; t.outer_radius = 0.17
+			t.rings = 12; t.ring_segments = 6
+			return t
 		_:
 			var b := BoxMesh.new(); b.size = Vector3(0.18, 0.16, 0.18); return b
 
@@ -705,11 +752,15 @@ func _infra_material(color: Color) -> StandardMaterial3D:
 ## local scaled frame like the moons).  Each lane starts empty; _update_infra reveals one
 ## instance per built structure of that type.
 func _create_infra_lanes() -> void:
-	if type == Type.STAR:
-		return   # the Sun's orbital build-out is the Dyson swarm (see init_planets.gd)
+	# The Sun gets lanes like any other body.  Its collectors are the Dyson swarm (drawn in
+	# init_planets.gd), but everything servicing them — receivers, relays, radiators, stores and
+	# the habitats crewing them — is ordinary orbital infrastructure and is drawn here.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(str(name) + "_infra")
 	for spec: Dictionary in INFRA_LANES:
+		# Ground infrastructure gets no lane on a body it can actually stand on.
+		if bool(spec.get("ground", false)) and type == Type.ROCKY:
+			continue
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.mesh = _infra_mesh(str(spec["mesh"]))

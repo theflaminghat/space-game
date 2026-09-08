@@ -3,17 +3,52 @@ extends PanelContainer
 signal launch_requested(params: Dictionary)
 
 # Valid launch *origins* — you can only depart from a planet.
-const PLANETS := [
-	"Mercury", "Venus", "Earth", "Mars",
-	"Jupiter", "Saturn", "Uranus", "Neptune",
-]
+## Launch endpoints.  These START as the planets and are REPLACED by Game via set_bodies()
+## with the full list — planets plus every buildable moon — because a moon's display name and
+## its body id are different strings ("Luna" vs "earth_moon_0"), and every lookup here needs
+## the id.  The two arrays stay index-aligned with the dropdowns.
+var PLANETS: Array = ["Mercury", "Venus", "Earth", "Mars",
+	"Jupiter", "Saturn", "Uranus", "Neptune"]
+var _origin_ids: Array = ["mercury", "venus", "earth", "mars",
+	"jupiter", "saturn", "uranus", "neptune"]
 
 # Valid launch *targets* — the planets plus the Sun.  The Sun accepts orbit
 # missions only (you cannot land on or colonise it).
-const TARGETS := [
-	"Mercury", "Venus", "Earth", "Mars",
-	"Jupiter", "Saturn", "Uranus", "Neptune", "Sun",
-]
+var TARGETS: Array = ["Mercury", "Venus", "Earth", "Mars",
+	"Jupiter", "Saturn", "Uranus", "Neptune", "Sun"]
+var _target_ids: Array = ["mercury", "venus", "earth", "mars",
+	"jupiter", "saturn", "uranus", "neptune", "sun"]
+
+## Body id for a dropdown index — never derive one by lowercasing a display name.
+func _origin_id(i: int) -> String:
+	return str(_origin_ids[i]) if i >= 0 and i < _origin_ids.size() else ""
+
+func _target_id(i: int) -> String:
+	return str(_target_ids[i]) if i >= 0 and i < _target_ids.size() else ""
+
+## Replace the endpoint lists with the bodies Game says are reachable.  Each entry is
+## [display name, body id]; the current selections are preserved by id where possible.
+func set_bodies(origins: Array, targets: Array) -> void:
+	var keep_o: String = _origin_id(origin_option.selected) if origin_option else ""
+	var keep_t: String = _target_id(planet_option.selected) if planet_option else ""
+	PLANETS = []
+	_origin_ids = []
+	for e: Array in origins:
+		PLANETS.append(str(e[0]))
+		_origin_ids.append(str(e[1]))
+	TARGETS = []
+	_target_ids = []
+	for e: Array in targets:
+		TARGETS.append(str(e[0]))
+		_target_ids.append(str(e[1]))
+	_populate_origin()
+	_populate_planets()
+	if keep_o != "" and _origin_ids.has(keep_o):
+		origin_option.selected = _origin_ids.find(keep_o)
+	if keep_t != "" and _target_ids.has(keep_t):
+		planet_option.selected = _target_ids.find(keep_t)
+	_update_arrival_options()
+	_update_cost()
 
 @onready var origin_option:   OptionButton  = $MarginContainer/VBoxContainer/FormGrid/OriginOption
 @onready var planet_option:   OptionButton  = $MarginContainer/VBoxContainer/FormGrid/PlanetOption
@@ -81,6 +116,7 @@ func _ready() -> void:
 
 	# Inject the CalendarPicker between the form grid and the Launch button.
 	var vbox: VBoxContainer = $MarginContainer/VBoxContainer
+	_build_cargo_ui(vbox)   # manifest editor, shown only for cargo missions
 	var date_section := VBoxContainer.new()
 	date_section.add_theme_constant_override("separation", 2)
 
@@ -129,10 +165,12 @@ func _ready() -> void:
 	_populate_planets()
 	_populate_missions()
 	_populate_arrival()
-	origin_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
+	origin_option.item_selected.connect(func(_i):
+		_manifest.clear()          # a hold loaded at one world cannot fly from another
+		_update_duration(); _refresh_cargo(); _update_cost())
 	planet_option.item_selected.connect(func(_i):
 		_update_arrival_options(); _update_duration(); _update_cost())
-	mission_option.item_selected.connect(func(_i): _update_cost())
+	mission_option.item_selected.connect(func(_i): _refresh_cargo(); _update_cost())
 	arrival_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
 	launch_button.pressed.connect(_on_launch_pressed)
 	_update_arrival_options()
@@ -177,7 +215,7 @@ func _origin_sat_stock() -> int:
 	if o < 0 or o >= PLANETS.size():
 		return 0
 	# _sat_stock is in grams; a deployable unit costs MissionData.PAYLOAD_MASS_PER_UNIT of them.
-	return int(float(_sat_stock.get(PLANETS[o].to_lower(), 0)) / MissionData.PAYLOAD_MASS_PER_UNIT)
+	return int(float(_sat_stock.get(_origin_id(o), 0)) / MissionData.PAYLOAD_MASS_PER_UNIT)
 
 ## Number of satellites the selected Solar Deployment would actually carry.
 func _payload_batch(mission_idx: int) -> int:
@@ -201,7 +239,161 @@ func _origin_mods() -> Dictionary:
 	var o_idx := origin_option.selected
 	if o_idx < 0:
 		return {"cost": 1.0, "duration": 1.0}
-	return _launch_mods.get(PLANETS[o_idx].to_lower(), {"cost": 1.0, "duration": 1.0})
+	return _launch_mods.get(_origin_id(o_idx), {"cost": 1.0, "duration": 1.0})
+
+## ── Cargo manifest (Supply Run) ───────────────────────────────────────────────
+## What is in the hold: compound → grams.  Only a mission flagged "cargo" in MissionData shows
+## the editor, and the hold is charged and delivered by Game — this is purely the picker.
+var _manifest: Dictionary = {}
+var _cargo_box:   VBoxContainer = null
+var _cargo_pick:  OptionButton  = null
+var _cargo_amt:   LineEdit      = null
+var _cargo_list:  VBoxContainer = null
+var _cargo_total: Label         = null
+
+## True when the selected mission carries freight.
+func _mission_has_cargo() -> bool:
+	var i := mission_option.selected
+	if i < 0 or i >= MissionData.MISSION_TYPES.size():
+		return false
+	return bool((MissionData.MISSION_TYPES[i] as Dictionary).get("cargo", false))
+
+## Build the manifest editor once, appended under the form.
+func _build_cargo_ui(parent: Control) -> void:
+	_cargo_box = VBoxContainer.new()
+	_cargo_box.add_theme_constant_override("separation", 4)
+	parent.add_child(_cargo_box)
+
+	var title := Label.new()
+	title.text = "Cargo manifest"
+	title.add_theme_font_size_override("font_size", 12)
+	_cargo_box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_cargo_pick = OptionButton.new()
+	_cargo_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_cargo_pick)
+	_cargo_amt = LineEdit.new()
+	_cargo_amt.placeholder_text = "grams"
+	_cargo_amt.custom_minimum_size = Vector2(110, 0)
+	row.add_child(_cargo_amt)
+	var add := Button.new()
+	add.text = "Add"
+	add.pressed.connect(_on_cargo_add)
+	row.add_child(add)
+	_cargo_box.add_child(row)
+
+	_cargo_list = VBoxContainer.new()
+	_cargo_list.add_theme_constant_override("separation", 2)
+	_cargo_box.add_child(_cargo_list)
+
+	_cargo_total = Label.new()
+	_cargo_total.add_theme_font_size_override("font_size", 10)
+	_cargo_total.modulate = Color(0.70, 0.80, 0.95)
+	_cargo_box.add_child(_cargo_total)
+	_refresh_cargo()
+
+## Repopulate the compound dropdown from what the ORIGIN actually holds — you cannot ship what
+## is not there, and offering the whole periodic table would bury the few things that are.
+func _refresh_cargo_choices() -> void:
+	if _cargo_pick == null:
+		return
+	var held: Dictionary = _launch_stock.get(_origin_id(origin_option.selected), {})
+	var keep: String = _cargo_pick.get_item_text(_cargo_pick.selected) if _cargo_pick.selected >= 0 else ""
+	_cargo_pick.clear()
+	var names: Array = held.keys()
+	names.sort()
+	for k: String in names:
+		if float(held[k]) > 0.0:
+			_cargo_pick.add_item(k)
+	for i in range(_cargo_pick.item_count):
+		if _cargo_pick.get_item_text(i) == keep:
+			_cargo_pick.selected = i
+			break
+
+## Parse a mass typed into the manifest field.  Returns -1 on anything unparseable.
+##
+## The unit here is GRAMS, so a trailing lowercase "g" is the unit and is simply dropped, while
+## an uppercase "G" is the SI prefix giga — "500g" is five hundred grams and "4G" is four
+## billion.  ProductionPanel's own parser reads both as giga, which is right for a field
+## denominated in product per day and wrong for one denominated in grams, so this is separate
+## rather than shared.
+static func _parse_mass(text: String) -> float:
+	var t: String = text.strip_edges().replace(",", "").replace(" ", "")
+	if t == "":
+		return -1.0
+	if t.length() > 1 and t.ends_with("g"):
+		t = t.substr(0, t.length() - 1)     # the unit, not a prefix
+	var mult: float = 1.0
+	if t.length() > 1:
+		match t.substr(t.length() - 1, 1):
+			"k": mult = 1.0e3
+			"M": mult = 1.0e6
+			"G": mult = 1.0e9
+			"T": mult = 1.0e12
+			"P": mult = 1.0e15
+			"E": mult = 1.0e18
+		if mult != 1.0:
+			t = t.substr(0, t.length() - 1)
+	if not t.is_valid_float():
+		return -1.0
+	return t.to_float() * mult
+
+func _on_cargo_add() -> void:
+	if _cargo_pick == null or _cargo_pick.selected < 0:
+		return
+	var res: String = _cargo_pick.get_item_text(_cargo_pick.selected)
+	var amt: float = _parse_mass(_cargo_amt.text)
+	if amt <= 0.0:
+		return
+	# Never manifest more than the origin is holding.
+	var held: float = float((_launch_stock.get(_origin_id(origin_option.selected), {}) as Dictionary).get(res, 0.0))
+	amt = minf(amt, held)
+	if amt <= 0.0:
+		return
+	_manifest[res] = float(_manifest.get(res, 0.0)) + amt
+	_cargo_amt.text = ""
+	_refresh_cargo()
+	_update_cost()
+
+func _on_cargo_remove(res: String) -> void:
+	_manifest.erase(res)
+	_refresh_cargo()
+	_update_cost()
+
+## Redraw the manifest rows and the running total.
+func _refresh_cargo() -> void:
+	if _cargo_box == null:
+		return
+	var show: bool = _mission_has_cargo()
+	_cargo_box.visible = show
+	if not show:
+		return
+	_refresh_cargo_choices()
+	for c in _cargo_list.get_children():
+		c.queue_free()
+	var total: float = 0.0
+	for res: String in _manifest:
+		total += float(_manifest[res])
+		var r := HBoxContainer.new()
+		r.add_theme_constant_override("separation", 6)
+		var l := Label.new()
+		l.text = "%s  %s" % [Units.format_si(float(_manifest[res]), "g"), res]
+		l.add_theme_font_size_override("font_size", 11)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		r.add_child(l)
+		var x := Button.new()
+		x.text = "✕"
+		x.flat = true
+		x.custom_minimum_size = Vector2(24, 0)
+		x.pressed.connect(_on_cargo_remove.bind(res))
+		r.add_child(x)
+		_cargo_list.add_child(r)
+	# The hold costs rockets in proportion to its mass, so say how many before it is ordered.
+	var extra: int = int(ceil(total / MissionData.CARGO_PER_ROCKET_G))
+	_cargo_total.text = "Hold %s  ·  +%d vehicle%s to lift it" % [
+		Units.format_si(total, "g"), extra, "" if extra == 1 else "s"]
 
 func _populate_origin() -> void:
 	origin_option.clear()
@@ -450,7 +642,7 @@ func _origin_stock(key: String) -> int:
 	var o := origin_option.selected
 	if o < 0 or o >= PLANETS.size():
 		return 0
-	return int((_launch_stock.get(PLANETS[o].to_lower(), {}) as Dictionary).get(key, 0))
+	return int((_launch_stock.get(_origin_id(o), {}) as Dictionary).get(key, 0))
 
 ## Push the per-origin rocket + fuel stock (from Game.gd) for the cost readout / gate.
 func set_launch_stock(stock: Dictionary) -> void:
@@ -487,8 +679,10 @@ func _on_launch_pressed() -> void:
 		start_offset = _calendar.get_offset_days(_cur_year, _cur_month, _cur_day)
 	launch_requested.emit({
 		"mission":      MissionData.MISSION_TYPES[m_idx]["name"],
-		"origin":       origin_name.to_lower(),
-		"target":       target_name.to_lower(),
+		# Ids, not lowercased display names — a moon's id is nothing like its name.
+		"origin":       _origin_id(o_idx),
+		"target":       _target_id(p_idx),
+		"cargo":        _manifest.duplicate(),
 		"start_offset": start_offset,
 		"duration":     duration,
 		"rockets":      rockets,
@@ -496,6 +690,8 @@ func _on_launch_pressed() -> void:
 		"fuel_amount":  fuel_amt,
 		"arrival":      "land" if arrival_option.selected == 1 else "orbit",
 	})
+	_manifest.clear()          # the hold has flown; the next order starts empty
+	_refresh_cargo()
 
 # ── Launch list ──────────────────────────────────────────────────────────────
 

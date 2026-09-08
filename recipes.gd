@@ -414,6 +414,21 @@ const RECIPES: Array = [
 		"inputs":  {"Al": 8.0, "Steel": 4.0, "Microchip": 1.0, "energy": 800.0},
 		"outputs": {"Rocket": 1.0},
 	},
+
+	# Industrial Robot — an actuated frame with enough onboard processing to work unsupervised.
+	# It does not appear in any bill of materials: what it consumes is the LABOUR SHORTAGE.
+	# A civilisation's manufacturing is capped by how much of its built capacity its people can
+	# actually staff (see Game._mc_staffing), and every robot is another pair of hands that does
+	# not need feeding, sleeping or housing — which is the only way industry keeps growing once
+	# population stops.
+	{
+		"name":        "Robot Assembly",
+		"category":    "electronics",
+		"description": "Assemble an actuated industrial frame — servos, structure and onboard processing — able to work a shift without a person in it.",
+		"requires":    "industrial_robotics",
+		"inputs":  {"Steel": 6.0, "Al": 3.0, "Microchip": 0.8, "Cu": 1.2, "energy": 1_400.0},
+		"outputs": {"Robot": 1.0},
+	},
 	# Solar collector satellite: a free-flying photovoltaic collector on an aluminium
 	# bus with microchip avionics.  Launched to the Sun (Solar Deployment mission) to
 	# occupy a slot in the Dyson swarm — the more you build and loft, the larger the

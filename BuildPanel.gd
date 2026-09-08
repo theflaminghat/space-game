@@ -597,6 +597,8 @@ func _format_effects(building: Dictionary) -> String:
 	if building.has("atmo_rate") and float(building["atmo_rate"]) > 0.0:
 		parts.append("Condenses %s/day from the atmosphere"
 			% Units.format_si(float(building["atmo_rate"]), "g"))
+	if building.has("habitat") and float(building["habitat"]) > 0.0:
+		parts.append("Houses %s people" % Units.format_si(float(building["habitat"]), ""))
 	if building.has("shelter") and float(building["shelter"]) > 0.0:
 		parts.append("Shelters %s through nuclear war and impacts"
 			% Units.format_si(float(building["shelter"]), ""))

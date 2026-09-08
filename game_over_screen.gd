@@ -304,14 +304,14 @@ func _on_epilogue_continue() -> void:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 func _build_stats_text(stats: Dictionary, people_ever_lived: float) -> String:
-	var pop:   int   = int(stats.get("current_population", 0))
-	var cols:  int   = int(stats.get("colony_count", 0))
 	var total: float = people_ever_lived   # cumulative humans ever born
 	var entropy: float = float(stats.get("entropy_exported", 0.0))
-	# One stat per line, stacked vertically.  Entropy exported is reported plainly beside
-	# the human totals — a number, no comment (see VOICE.md).
-	return "Final population: %s\nColonies: %d\nTotal humans who ever lived: ~%s\nEntropy exported: %s J/K" % [
-		_fmt_pop(pop), cols, _fmt_pop_large(total), _fmt_sci(entropy)
+	# Final population and colony count are deliberately absent.  At the end they are both zero,
+	# or near enough that stating them adds nothing — what the run amounted to is how many people
+	# got to exist and how much order it moved, not the size of the last moment.
+	# One stat per line; entropy is reported plainly, a number with no comment (see VOICE.md).
+	return "Total humans who ever lived: ~%s\nEntropy exported: %s J/K" % [
+		_fmt_pop_large(total), _fmt_sci(entropy)
 	]
 
 ## Scientific-notation string (GDScript's % has no %e, so build it from %f/%d).
@@ -341,12 +341,6 @@ func _fmt_year(y: int) -> String:
 		return "%dK" % int(float(y) / 1_000.0)
 	return str(y)
 
-func _fmt_pop(p: int) -> String:
-	if p >= 1_000_000_000:
-		return "%.2fB" % (float(p) / 1_000_000_000.0)
-	if p >= 1_000_000:
-		return "%.1fM" % (float(p) / 1_000_000.0)
-	return str(p)
 
 func _on_restart_pressed() -> void:
 	if _music_player: _music_player.stop()
