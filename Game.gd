@@ -323,7 +323,14 @@ var _vn_milestone_idx: int = 0
 ## card the first time it works closes the loop; the rest stay quiet.
 const VN_MILESTONES: Array = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000]
 const VN_MAX_INFLIGHT:   int   = 12          # cap probes in flight (bounds work + growth rate)
-const VN_MAX_COLONIES:   int   = 200         # stop replicating past this many colonies (sim cost)
+## There is no cap on colonies.  Every star a probe reaches inside the detailed radius becomes a
+## world the simulation runs individually, however many that ends up being — the frontier is the
+## point of the game and it does not stop because a counter said so.
+##
+## What made a cap necessary was a quadratic: every world asked "is this star ours?" by scanning
+## an Array of every world, so the population step grew with the square of the roster.  Answered
+## from a set (see _col_star_set) the cost is linear and small, and the step runs once a frame
+## rather than once a simulated year.
 const VN_REPLICATE_COUNT: int  = 2           # probes launched per successful arrival
 ## How many established lineages are revisited per year by _vn_resume.  Small: the in-flight cap
 ## is the real throttle, and this only decides how quickly a stalled frontier notices it can move
@@ -406,6 +413,14 @@ const TELESCOPE_BASE_POWER: float = 1.0    # naked-eye/base astronomy every civi
 ## light-travel time as warning and gut whatever they hit — the pressure that makes spreading
 ## across many systems worthwhile.  incoming_attacks: [{source, target, start_year, end_year}].
 var incoming_attacks: Array = []
+## Membership mirror of colonized_stars.  The list is the record — it is what saves, what the map
+## iterates, what the player sees a count of — but "is this star ours?" is asked once per
+## inhabited world per simulated year, and answering it by scanning an Array made the whole
+## population step quadratic in the number of colonies.  Every mutation of the list updates this
+## in the same breath; see _colonize_star / _uncolonize_star.
+var _col_star_set: Dictionary = {}
+## Cached PoliticsData.pop_capacity_mult(policies); negative means "work it out again".
+var _pop_cap_mult_cache: float = -1.0
 var _rkkv_notice_year: float = -1.0e18        # last year an "inbound" launch notice fired
 var _deterrent_active: bool = false           # are hostiles currently deterred by the player's berserkers?
 ## Standing rule for answering contact — see doctrine.gd.  A doctrine is read from across
@@ -568,8 +583,11 @@ var _pending_event_notifications: Array = []
 ## Major impacts are scheduled (not rolled per frame): each strike sets the game
 ## year of the next, so deep fast-forward can't spam them.  A real-time cooldown
 ## further caps how often one can fire while skipping eons.
-const IMPACT_GAP_MIN: int = 15_000   # min game-years between impacts
-const IMPACT_GAP_MAX: int = 100_000  # max game-years between impacts
+## Game-years between major impacts.  Widened fourfold: at the old spacing a run that reached the
+## far future spent it being flattened every few tens of thousands of years, and a catastrophe
+## that arrives on a schedule stops reading as a catastrophe.
+const IMPACT_GAP_MIN: int = 60_000
+const IMPACT_GAP_MAX: int = 400_000
 const IMPACT_REAL_COOLDOWN_MS: int = 5_000   # never more than one per 5 real seconds
 var _next_impact_year: int = 0
 ## Whatever is inbound and waiting on the player's answer — an asteroid, or a relativistic
@@ -900,6 +918,7 @@ func start_new_game() -> void:
 	_pending_swarm = 0
 	colonized_planets = []
 	colonized_stars = []
+	_col_star_set = {}
 	interstellar_missions = []
 	_colony_year = {}
 	_vn_milestone_idx = 0
@@ -1041,6 +1060,7 @@ func start_new_game() -> void:
 	if sidebar and sidebar.automation_panel:
 		sidebar.automation_panel.load_rules([])
 	policies = PoliticsData.default_state()
+	_pop_cap_mult_cache = -1.0
 	game_over              = false
 	has_left_solar_system  = false
 	_user_speed_mult       = settings_menu.get_default_speed_mult() if settings_menu else 1.0
@@ -1353,18 +1373,25 @@ func _push_evolution_population() -> void:
 ## minus any planet the Sun has swallowed.
 func _inhabited_worlds() -> Array:
 	var out: Array = []
+	var seen: Dictionary = {}
 	if not _engulfed_planets.has("earth"):
 		out.append("earth")
+		seen["earth"] = true
 	for cp in colonized_planets:
 		if not _engulfed_planets.has(str(cp)):
 			out.append(str(cp))
+			seen[str(cp)] = true
 	for cs in colonized_stars:
 		out.append(str(cs))   # interstellar — never engulfed by Sol
+		seen[str(cs)] = true
 	# Anywhere carrying built habitat holds people, whether or not there is a world under it.
-	# This is what lets solar orbit be lived in: the habitat IS the place.
+	# This is what lets solar orbit be lived in: the habitat IS the place.  Checked against a set
+	# rather than by scanning `out`, which grew with the colony count and made even assembling
+	# the list of worlds cost more the more of them there were.
 	for w: String in _cached_planet_hab:
-		if float(_cached_planet_hab[w]) > 0.0 and not out.has(w) and not _engulfed_planets.has(w):
+		if float(_cached_planet_hab[w]) > 0.0 and not seen.has(w) and not _engulfed_planets.has(w):
 			out.append(w)
+			seen[w] = true
 	return out
 
 ## True if `body` is an inhabited world (has a tracked population) and not Sun-destroyed.
@@ -1373,7 +1400,7 @@ func _is_inhabited(body: String) -> bool:
 		return false
 	if float(_cached_planet_hab.get(body, 0.0)) > 0.0:
 		return true      # built habitat is a home regardless of what it orbits
-	return body == "earth" or colonized_planets.has(body) or colonized_stars.has(body)
+	return body == "earth" or colonized_planets.has(body) or _col_star_set.has(body)
 
 ## Sum of all worlds' populations — the global headcount used everywhere `current_population`
 ## is read (compute rate, labour, HUD…).
@@ -1395,7 +1422,7 @@ func _total_population() -> float:
 func _natural_capacity(world: String) -> float:
 	if world == "earth":
 		return EARTH_NATURAL_K * _climate_capacity_factor()
-	if colonized_stars.has(world):
+	if _col_star_set.has(world):
 		return COLONY_HABITAT_K
 	return 0.0
 
@@ -1411,7 +1438,24 @@ func _artificial_capacity(world: String) -> float:
 	return hab
 
 func _world_capacity(world: String) -> float:
-	return (_natural_capacity(world) + _artificial_capacity(world)) * PoliticsData.pop_capacity_mult(policies)
+	# The overwhelming majority of worlds are interstellar colonies with nothing built on them,
+	# and every one of those has exactly the same capacity: a self-sufficient habitat times the
+	# policy multiplier.  It is the same answer the general path below gives — _natural_capacity
+	# returns the habitat constant and _artificial_capacity returns zero for a world with no
+	# entry — but reached with one lookup instead of three function calls, and with the roster
+	# uncapped this runs thousands of times a frame.
+	if _col_star_set.has(world) and not _cached_planet_hab.has(world):
+		return COLONY_HABITAT_K * _pop_cap_mult()
+	return (_natural_capacity(world) + _artificial_capacity(world)) * _pop_cap_mult()
+
+## The policy multiplier on carrying capacity.  It is the same number for every world and changes
+## only when a policy does, but _world_capacity is called once per inhabited world per frame and
+## now that colonies are uncapped that is thousands of times — so it is worked out when the
+## policies change and read from there afterwards.
+func _pop_cap_mult() -> float:
+	if _pop_cap_mult_cache < 0.0:
+		_pop_cap_mult_cache = PoliticsData.pop_capacity_mult(policies)
+	return _pop_cap_mult_cache
 
 ## A single planet's own energy output (W) from its buildings, with tech/policy multipliers.
 ## What a world's mines are ACTUALLY yielding: the production cache already counts only the
@@ -2067,6 +2111,7 @@ func _policy_mission_dur_mult() -> float:
 
 func _on_policy_changed(policy_id: String, value: Variant) -> void:
 	policies[policy_id] = value
+	_pop_cap_mult_cache = -1.0      # capacity multiplier is derived from these
 	_mark_prod_dirty()
 
 # ── Evolution / population divergence ─────────────────────────────────────────
@@ -3859,7 +3904,7 @@ func _star_distance_ly(star_name: String) -> float:
 ## max acceleration.  The real relativistic energy (accel + coast + decel for the ship's
 ## mass over the distance) is computed by StarMapPanel.plan_flight and gated on reserves.
 func _on_colonize_requested(star_name: String, gamma_max: float, accel: float) -> void:
-	if star_name == "" or colonized_stars.has(star_name):
+	if star_name == "" or _col_star_set.has(star_name):
 		return
 	if _star_known_occupied(star_name):
 		_announce("Target already inhabited",
@@ -3913,7 +3958,7 @@ func _check_interstellar_arrivals() -> void:
 	for m in interstellar_missions:
 		if float(year) >= float(m.get("end_year", INF)):
 			var target: String = str(m.get("target", ""))
-			if target != "" and not colonized_stars.has(target):
+			if target != "" and not _col_star_set.has(target):
 				_reveal_alignment(target)   # first contact: the system's alignment is now known
 				var tpos: Vector3 = _star_pos(target)
 				var vn: bool = bool(m.get("vn", false))
@@ -3971,6 +4016,9 @@ func _check_interstellar_arrivals() -> void:
 						"The expedition arrives to find %s already inhabited. No colony is founded; the system's civilisation is now known to us." % target,
 						"occupied_arrival_%s" % target)
 					continue
+				# Only distance decides whether an arrival becomes a world of its own.  Inside the
+				# detailed radius it does, every time; beyond it the galaxy is modelled in
+				# aggregate and the arrival folds into its region.
 				if tpos.length() > DETAILED_RADIUS_LY:
 					# Far colony — folded into the statistical region; no individual world, and no
 					# individual replication (the region spreads statistically from here on).
@@ -3978,7 +4026,7 @@ func _check_interstellar_arrivals() -> void:
 					# progress is summarised by _vn_check_milestone instead.
 					_region_colonize(tpos)
 				else:
-					colonized_stars.append(target)
+					_colonize_star(target)
 					_colony_year[target] = year   # start its infrastructure clock
 					world_pop[target] = maxf(float(world_pop.get(target, 0.0)), COLONY_SEED_POP)
 					if not vn:
@@ -4021,8 +4069,8 @@ func _vn_resume() -> void:
 	_vn_resume_year = float(year)
 	# Nothing to launch into, or nothing left to launch: both resolve themselves in time, so this
 	# just costs a comparison until they do.
-	if _vn_inflight() >= VN_MAX_INFLIGHT or colonized_stars.size() >= VN_MAX_COLONIES:
-		return
+	if _vn_inflight() >= VN_MAX_INFLIGHT:
+		return                         # no room to launch into; the colony cap is _vn_replicate's
 	var seeds: Array = _vn_seeds.keys()
 	for _i in range(mini(VN_RESUME_PER_YEAR, seeds.size())):
 		_vn_resume_idx = (_vn_resume_idx + 1) % seeds.size()
@@ -4060,7 +4108,7 @@ func _vn_unlocked() -> bool:
 ## still throttled by the shared energy pool, so a broke civilisation stops spreading.
 func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
 		from_star: String = "") -> bool:
-	if not _vn_unlocked() or target_star == "" or colonized_stars.has(target_star):
+	if not _vn_unlocked() or target_star == "" or _col_star_set.has(target_star):
 		return false
 	if _vn_inflight() >= VN_MAX_INFLIGHT:
 		return false
@@ -4092,8 +4140,6 @@ func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
 ## A colony founded by a probe sends the next generation to the nearest uncolonised stars it can
 ## resolve (no tight distance cap — the galaxy is sparse, so a probe hops as far as it must).
 func _vn_replicate(from_star: String, orders: Dictionary = {}) -> void:
-	if colonized_stars.size() >= VN_MAX_COLONIES:
-		return
 	var mission: String = str(orders.get("mission", "colonize"))
 	var origin: Vector3 = _star_pos(from_star)
 	# A surveyor or a relay may target an inhabited system; only a coloniser may not.
@@ -4131,8 +4177,9 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
 		if _star_occupied(nm) and not allow_inhabited:
 			continue
 		var spos: Vector3 = s["pos"]
-		# A far star whose region is already colonised is left to statistical diffusion — a probe
-		# only needs to seed each far region ONCE, which keeps individual probes bounded.
+		# A far star folds into a region, and a region only needs seeding ONCE — after that it
+		# spreads on its own, and sending more probes at its neighbours would be sending them
+		# nowhere.  Stars inside the detailed radius are always worth a probe: each is a world.
 		if spos.length() > DETAILED_RADIUS_LY and _region_taken(spos):
 			continue
 		var d: float = origin.distance_to(spos)
@@ -4395,6 +4442,42 @@ func galaxy_region_info(id: String) -> Dictionary:
 		"population": pop,
 		"capacity": colonizable * COLONY_HABITAT_K,
 	}
+
+## How many places humanity holds other than Earth: colony worlds in this system, colony worlds
+## around other stars, star clusters it has a foothold in, and statistical galaxy regions it has
+## settled.  Anything above zero means losing Earth is a catastrophe rather than an ending.
+##
+## Counted as PLACES rather than as a headcount on purpose.  The regions and clusters are modelled
+## in aggregate and their population is a statistical figure that can round to nothing while the
+## holding itself is real; an extinction test that consulted the number instead of the fact would
+## end runs that had genuinely spread across the galaxy.
+func _holdings_beyond_earth() -> int:
+	var n: int = colonized_planets.size() + colonized_stars.size()
+	for c: String in cluster_colonized:
+		if float(cluster_colonized[c]) > 0.0:
+			n += 1
+	for id: String in _regions:
+		var r: Dictionary = _regions[id]
+		if float(r.get("colonized", 0.0)) > 0.0 or float(r.get("pop", 0.0)) > 0.0:
+			n += 1
+	return n
+
+## Add / remove an interstellar colony, keeping the list and its membership mirror together.
+func _colonize_star(star_name: String) -> void:
+	if _col_star_set.has(star_name):
+		return
+	colonized_stars.append(star_name)
+	_col_star_set[star_name] = true
+
+func _uncolonize_star(star_name: String) -> void:
+	colonized_stars.erase(star_name)
+	_col_star_set.erase(star_name)
+
+## Rebuild the mirror from the list — for the two places that replace the list wholesale.
+func _resync_colonized_stars() -> void:
+	_col_star_set = {}
+	for s: String in colonized_stars:
+		_col_star_set[str(s)] = true
 
 ## Total population living in the statistical regions (the far galaxy).
 func _region_population() -> float:
@@ -4793,7 +4876,7 @@ func _spread_aliens(dyears: float) -> void:
 	var targets: Array = []
 	for s: Dictionary in StarMapPanel.all_stars():
 		var nm: String = str(s["name"])
-		if not star_factions.has(nm) and not colonized_stars.has(nm):
+		if not star_factions.has(nm) and not _col_star_set.has(nm):
 			targets.append(nm)
 	if targets.is_empty():
 		return
@@ -4950,8 +5033,8 @@ func _check_incoming_attacks() -> void:
 			colonized_planets.erase(tgt)              # an in-system colony world
 			world_pop.erase(tgt)                      # all life on it killed
 			worlds_lost.append(tgt)
-		elif colonized_stars.has(tgt):
-			colonized_stars.erase(tgt)                # an interstellar colony world
+		elif _col_star_set.has(tgt):
+			_uncolonize_star(tgt)                     # an interstellar colony world
 			world_pop.erase(tgt)
 			worlds_lost.append(tgt)
 		# else: that world was already gone before impact — the mass strikes empty space.
@@ -4960,18 +5043,23 @@ func _check_incoming_attacks() -> void:
 	if not worlds_lost.is_empty():
 		_mark_prod_dirty()   # removed colonies no longer contribute habitat/output
 
-	# An Earth strike destroys all life on Earth.  The species survives only if a colony (in-
-	# system or interstellar) endures; otherwise it's extinction.
+	# An Earth strike destroys all life on Earth.  It ends the RUN only if there was nowhere else
+	# — and "somewhere else" means every kind of holding the species has, not just the two lists
+	# of individually-simulated worlds this used to consult.  A civilisation spread across six
+	# hundred star clusters and a swathe of the galaxy was being declared extinct because the
+	# home planet died, which is the exact opposite of the point of having gone.
 	if earth_hit:
 		world_pop["earth"] = 0.0                       # everyone on Earth is killed
 		_devastate_home()
 		stats["current_population"] = _total_population()
-		if colonized_planets.is_empty() and colonized_stars.is_empty():
+		var elsewhere: int = _holdings_beyond_earth()
+		if elsewhere <= 0:
 			trigger_game_over("Relativistic bombardment",
 				"Earth is struck by a relativistic kinetic impactor and sterilised. Inhabited worlds: 0.")
 		else:
 			_announce("Relativistic impact — Earth",
-				"Earth is struck and sterilised; the species endures on its colonies.",
+				"Earth is struck and sterilised. The species endures in %d settled place%s beyond it." % [
+					elsewhere, "" if elsewhere == 1 else "s"],
 				"rkkv_hit_earth_%d" % year)
 	if not worlds_lost.is_empty():
 		var desc: String = "%s is annihilated by a relativistic impact." % str(worlds_lost[0]).capitalize() \
@@ -5189,7 +5277,7 @@ func _apply_doctrine() -> void:
 func _on_vn_probe_requested(star_name: String, gamma_max: float, accel: float,
 		mission: String = DoctrineData.DEFAULT_MISSION,
 		doctrine: String = DoctrineData.DEFAULT_ID) -> void:
-	if game_over or star_name == "" or colonized_stars.has(star_name):
+	if game_over or star_name == "" or _col_star_set.has(star_name):
 		return
 	# Only a mission that CLAIMS the system is refused.  A surveyor or a relay threatens nobody,
 	# and putting one in a neighbour's sky is how you learn anything about them at all.
@@ -5673,6 +5761,7 @@ func load_game(path: String = "") -> void:
 	if data.has("colonized_stars") and data["colonized_stars"] is Array:
 		for sname in data["colonized_stars"]:
 			colonized_stars.append(str(sname))
+	_resync_colonized_stars()
 	# Per-world populations.  Older saves (no world_pop) fall back to attributing the whole
 	# saved headcount to Earth plus a seed on each colony.
 	world_pop = {}
@@ -5795,9 +5884,11 @@ func load_game(path: String = "") -> void:
 	# Restore which bodies have been surveyed (planet-bar unlocks).
 
 	policies = PoliticsData.default_state()
+	_pop_cap_mult_cache = -1.0
 	if data.has("policies") and data["policies"] is Dictionary:
 		for key: String in data["policies"]:
 			policies[key] = data["policies"][key]
+	_pop_cap_mult_cache = -1.0
 	politics_page.load_policies(policies)
 
 	# Rebuild the evolution tree from the saved lineage map.  variant_parent is an
@@ -5916,7 +6007,7 @@ func _consume_food(delta_days: float) -> void:
 		# Interstellar colonies are modelled as self-sufficient (see _world_capacity): they
 		# have no roster and no inventory here, so they grow their own and are not fed from
 		# a stockpile.  Skipping them is what keeps them alive, not an oversight.
-		if colonized_stars.has(world):
+		if _col_star_set.has(world):
 			_famine.erase(world)
 			continue
 		var need: float = pop * FOOD_PER_CAPITA * delta_days
@@ -5953,16 +6044,29 @@ func _update_population(delta_days: float) -> void:
 		return
 	var r: float = POP_GROWTH_PER_YEAR / 365.25 * PoliticsData.pop_growth_mult(policies)
 	var decay: float = exp(-r * delta_days)
-	var species_alive: float = _total_population() > 1.0   # true if humanity exists anywhere
+	# One headcount, used twice: as the "is anyone left" test here and, after the loop, as the
+	# figure everything else reads.  Summing every world twice a step was a whole extra pass.
+	var species_alive: bool = _total_population() > 1.0
 	# Drop stale entries for worlds that are no longer inhabited (colony destroyed / lost).
+	# An interstellar colony is inhabited by definition and cannot be engulfed by Sol, so it
+	# short-circuits: with the roster uncapped this loop runs over thousands of worlds and the
+	# call into _is_inhabited was most of what it cost.
 	for w: String in world_pop.keys():
+		if _col_star_set.has(w):
+			continue
 		if not _is_inhabited(w):
 			world_pop.erase(w)
 	# Grow each world's population logistically toward its OWN capacity (closed-form, exact at
 	# any timescale).  An empty-but-habitable world is re-settled by migrants — but only while
 	# the species survives somewhere; if nowhere is left, populations stay at zero (extinction).
+	# Same fast path _world_capacity documents, taken here rather than through it: a colony with
+	# nothing built on it has the one capacity every such colony has, and at this scale the two
+	# function calls that would fetch it cost more than the arithmetic they do.
+	var colony_k: float = COLONY_HABITAT_K * _pop_cap_mult()
 	for world: String in _inhabited_worlds():
-		var k: float = _world_capacity(world)
+		var k: float = colony_k
+		if not _col_star_set.has(world) or _cached_planet_hab.has(world):
+			k = _world_capacity(world)
 		var pop: float = float(world_pop.get(world, 0.0))
 		if pop <= 0.0:
 			if k > 1.0 and species_alive:
