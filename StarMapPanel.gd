@@ -27,8 +27,10 @@ signal probe_requested(star_name: String, gamma_max: float, accel: float)
 signal vn_probe_requested(star_name: String, gamma_max: float, accel: float,
 		mission: String, doctrine: String)
 ## Transmit a diplomatic message to a detected alien system.
-## kind ∈ {"contact", "ally", "trade", "war"}.
+## kind ∈ {"contact", "ally", "war"}.
 signal message_requested(star_name: String, kind: String)
+## The Trade button: Game opens the trade panel for this system, where the proposal is composed.
+signal trade_requested(star_name: String)
 
 ## Laser cost is a FLAT base energy (independent of distance) — scaled only by the power
 ## multiplier the player dials in.  Shared with Game for the cost readout.
@@ -435,6 +437,12 @@ static func _generate_future_stars() -> Array:
 ## Advance the catalogue to `y`, admitting every star whose formation year has arrived.  Cheap:
 ## the pool is sorted, so this is a pointer walk that almost always does nothing.
 static func advance_star_formation(y: float) -> void:
+	# The standing population must exist before any newborn is appended to it.  The catalogue
+	# views generate it lazily only while _proc_stars is EMPTY, so if the first star to form
+	# landed in the list first (a far-future save loaded and unpaused before anything asked for
+	# a star) the 6 000 home-cell stars were never generated at all.
+	if _proc_stars.is_empty():
+		_proc_stars = _generate_procedural_stars()
 	if _future.is_empty():
 		_future = _generate_future_stars()
 	_born_year = y
@@ -1561,7 +1569,10 @@ func _build_launch_ui() -> void:
 	diplo.add_theme_constant_override("separation", 6)
 	_contact_btn = _diplo_button("Contact", func(): _emit_message("contact"))
 	_ally_btn    = _diplo_button("Alliance", func(): _emit_message("ally"))
-	_trade_btn   = _diplo_button("Trade", func(): _emit_message("trade"))
+	_trade_btn   = _diplo_button("Trade…", func():
+		var n := selected_star()
+		if n != "":
+			trade_requested.emit(n))
 	_war_btn     = _diplo_button("Declare war", func(): _emit_message("war"))
 	diplo.add_child(_contact_btn)
 	diplo.add_child(_ally_btn)

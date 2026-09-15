@@ -90,6 +90,10 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if not visible:
 		return
+	# A full-screen overlay (the encyclopedia) is on top: its keys aren't ours.
+	for overlay in get_tree().get_nodes_in_group("ui_overlay"):
+		if overlay.visible:
+			return
 	var dir := Vector2.ZERO
 	if Input.is_action_pressed("left"):  dir.x -= 1.0
 	if Input.is_action_pressed("right"): dir.x += 1.0

@@ -77,6 +77,7 @@ func _ready() -> void:
 	ResearchTree.node_state_changed.connect(_on_node_state_changed)
 	ResearchTree.research_completed.connect(_on_research_completed)
 	ResearchTree.queue_changed.connect(_update_queue_labels)
+	ResearchTree.tree_loaded.connect(_on_tree_loaded)
 
 	if ResearchTree.nodes.is_empty():
 		ResearchTree.resources = {
@@ -630,6 +631,20 @@ func _on_node_state_changed(node: ResearchNode) -> void:
 		var tw: Tween = create_tween()
 		tw.tween_property(btn_available, "scale", Vector2(1.05, 1.05), 0.10)
 		tw.tween_property(btn_available, "scale", Vector2.ONE, 0.12)
+
+
+## The tree was rebuilt (a new run started): every node object is new and none of the state
+## changes were signalled one by one, so restyle every button from the fresh nodes.
+func _on_tree_loaded() -> void:
+	for id: String in _node_controls:
+		var node: ResearchNode = ResearchTree.get_research_node(id)
+		if node != null:
+			_style_button(_node_controls[id] as Button, node)
+	if _conn_layer != null and is_instance_valid(_conn_layer):
+		_conn_layer.queue_redraw()
+	_update_queue_labels()
+	if not _selected_id.is_empty():
+		_on_node_pressed(_selected_id)
 
 
 func _on_research_completed(node: ResearchNode) -> void:

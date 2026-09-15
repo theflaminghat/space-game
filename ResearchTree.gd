@@ -25,6 +25,9 @@ signal queue_changed
 ## Emitted when research is paused or resumed by the player.
 signal research_pause_changed(paused: bool)
 
+## Emitted after load_tree() replaces every node, so views can restyle from scratch.
+signal tree_loaded
+
 ## All nodes keyed by their id.
 var nodes: Dictionary = {}  # id -> ResearchNode
 
@@ -44,8 +47,6 @@ var resources: Dictionary = {}
 ## Aggregated active boosts from all unlocked nodes.
 var active_boosts: Dictionary = {}
 
-var initialized: bool = false
-
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -53,14 +54,14 @@ var initialized: bool = false
 
 ## Load (or reload) the tree from an array of ResearchNode objects.
 ## Automatically computes tiers and reverse-populates `unlocks` arrays.
+##
+## Always a full reset.  This is an autoload, so it outlives every run: a guard that skipped the
+## reload once the tree existed carried the previous run's unlocks, queue and boosts into the next.
 func load_tree(node_list: Array) -> void:
-	if initialized:
-		return
-	initialized = true
-
 	nodes.clear()
 	active_research = null
 	research_queue.clear()
+	research_paused = false
 
 	for node in node_list:
 		assert(node is ResearchNode, "load_tree expects ResearchNode instances.")
@@ -93,7 +94,10 @@ func load_tree(node_list: Array) -> void:
 			queue.append(child)
 
 	_refresh_all_availability()
-	initialized = true
+	_recompute_boosts()
+	tree_loaded.emit()
+	queue_changed.emit()
+	research_pause_changed.emit(false)
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +278,10 @@ func tick(delta: float, research_speed: float = 1.0) -> void:
 	var pool: float = float(resources.get("science", 0.0))
 	if pool <= 0.0:
 		return
-	# research_speed makes each point of science count for more, rather than adding time.
-	var effective_speed: float = maxf(0.01, research_speed * (1.0 + get_boost("research_speed")))
+	# research_speed makes each point of science count for more, rather than adding time.  The
+	# "research_speed" boost is NOT applied here: Game already multiplies compute by it, and
+	# science is produced from compute, so applying it again would square the bonus.
+	var effective_speed: float = maxf(0.01, research_speed)
 	var remaining_frac: float = 1.0 - active_research.progress
 	var gained: float = minf(pool * effective_speed / need, remaining_frac)
 	resources["science"] = maxf(0.0, pool - (gained * need) / effective_speed)

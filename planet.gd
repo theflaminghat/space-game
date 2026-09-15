@@ -165,6 +165,7 @@ const PLANET_BLUR_COLORS: Dictionary = {
 	"saturn":  Color(0.86, 0.78, 0.60),
 	"uranus":  Color(0.60, 0.85, 0.90),
 	"neptune": Color(0.36, 0.50, 0.95),
+	"asteroid_belt": Color(0.45, 0.42, 0.38),
 }
 
 const RING_SEGMENTS: int = 96

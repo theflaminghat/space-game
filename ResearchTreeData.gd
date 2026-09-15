@@ -23,6 +23,26 @@ const SCIENCE_COST_SCALE: float = 1.0e27
 ## actually sits at.
 const TIER_COST_GROWTH: float = 1.35
 
+## Lane names for the encyclopedia, keyed by lane × 10 (a node's position.y / LANE_ROW_SPACING × 10).
+## KEEP IN SYNC with the lane constants inside build().
+const LANE_NAMES: Dictionary = {
+	0:  "Computation",
+	5:  "Quantum Hardware",
+	10: "Theory",
+	15: "Forecasting & Astronomy",
+	20: "Energy",
+	25: "Energy Storage & Heat",
+	30: "Materials",
+	35: "Additive Manufacturing",
+	40: "Industry & Automation",
+	50: "Space",
+	55: "Propulsion & Terraforming",
+	60: "Biology & Medicine",
+	70: "Civilisation",
+}
+## Row spacing build() lays lanes out at, so a node's lane can be read back from its position.
+const LANE_ROW_SPACING: float = 100.0
+
 # ── Cost philosophy ─────────────────────────────────────────────────────────
 # Research has ONE currency: science, which tick() pours in over time.  A project therefore
 # takes as long as it takes to think through, and the only way to go faster is to be able to
@@ -47,7 +67,7 @@ static func lane_pos(
 
 static func build() -> Array:
 	const X_SPACING: float = 430.0
-	const Y_SPACING: float = 100.0
+	const Y_SPACING: float = LANE_ROW_SPACING
 
 	# Lane Y positions
 	# 0.0  Computation / information

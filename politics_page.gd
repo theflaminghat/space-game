@@ -236,8 +236,6 @@ func _build_effects_summary(parent: VBoxContainer) -> void:
 		["capacity",   "Carrying capacity"],
 		["life_exp",   "Life expectancy"],
 		["co2",        "CO₂ emissions"],
-		["asteroid",   "Impact interval"],
-		["mission",    "Mission time"],
 		["risk",       "Existential risk"],
 	]
 	for r: Array in rows:
@@ -271,15 +269,12 @@ func _refresh_effects() -> void:
 	_set_effect("pop_growth", PoliticsData.pop_growth_mult(_state),    false)
 	_set_effect("capacity",   PoliticsData.pop_capacity_mult(_state),  false)
 	_set_effect_years("life_exp", PoliticsData.life_expectancy_bonus(_state))
-	# CO₂ and mission time: a multiplier below 1.0 is the beneficial direction.
+	# CO₂: a multiplier below 1.0 is the beneficial direction.
 	_set_effect("co2",        PoliticsData.co2_mult(_state),           true)
-	# Impact interval: a larger multiplier means rarer impacts (good).
-	_set_effect("asteroid",   PoliticsData.asteroid_gap_mult(_state),  false)
-	_set_effect("mission",    PoliticsData.mission_dur_mult(_state),   true)
 	_set_effect_pct("risk",   PoliticsData.existential_risk(_state))
 
 ## Update one effect label's text and colour.  `lower_is_better` flips the
-## green/red sense (used for mission time, where shorter is good).
+## green/red sense (used for CO₂, where less is good).
 func _set_effect(key: String, m: float, lower_is_better: bool) -> void:
 	var lbl: Label = _effect_labels.get(key, null)
 	if lbl == null:

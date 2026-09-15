@@ -207,6 +207,66 @@ const CATEGORY_COLORS: Dictionary = {
 	"defense":     Color(0.95, 0.55, 0.50),
 }
 
+## "allowed_types" names the kinds of body a structure can stand on:
+##   rocky      planets and moons with a surface
+##   gas_giant  built in the envelope or in orbit; no ground
+##   star       solar orbit (opened by Space Power Infrastructure)
+##   belt       the main asteroid belt: microgravity rubble with no air, weather, water cycle or
+##              gravity well.  So nothing that burns fuel in air, farms open ground, runs water
+##              downhill, condenses an atmosphere, climbs a tether, catches a beam through air, or
+##              shelters a population from events that never reach the belt.
+
+## Encyclopedia text, by base name: what the structure is and any behaviour its stats don't show.
+## Numbers live in BUILDINGS (the encyclopedia prints them from there), so none are repeated here.
+const DESCRIPTIONS: Dictionary = {
+	"Biomass Burner": "Power station fired on wood and crop residue. It regrows its own feedstock, so it burns nothing from inventory. The last one on a world cannot be demolished, and an asteroid impact, nuclear exchange or relativistic strike always leaves one standing, so a world's grid never falls to zero.",
+	"Coal Plant": "Pulverised-coal steam station. Burns coal from its world's inventory; when supply falls short, output and CO₂ emissions fall in proportion, and only the plants burning that fuel are affected.",
+	"Natural Gas Burner": "Combined-cycle gas turbine. Emits about half the CO₂ of a coal station per watt generated. Burns natural gas (CH₄) from its world's inventory.",
+	"Oil Plant": "Oil-fired steam station. Burns refined fuel oil, not crude: crude must first pass through Oil Refining. Crude oil is scarce in Earth's crust, so mining alone cannot sustain a large oil fleet.",
+	"Matter Depot": "Steel silos and concrete bunkers. Raises the civilisation-wide matter storage cap. Ground only.",
+	"Battery Bank": "Grid-scale electrochemical storage. Raises the civilisation-wide energy storage cap.",
+	"Flywheel Array": "Rotors spun in vacuum housings, storing energy kinetically. Raises the energy storage cap; can stand on gas giants.",
+	"Pumped Hydro Storage": "Water pumped uphill behind a dam. The only grid-scale energy store of 1945. Needs terrain and gravity, so rocky bodies only.",
+	"Solar Farm": "Utility-scale photovoltaic plant. Burns nothing and emits nothing. Output is proportional to the Sun's current luminosity: it rises as Sol brightens, peaks on the giant branches and falls to almost nothing once only a white dwarf remains.",
+	"Mine": "Surface excavation. Yield is divided across the crust of the body it stands on, following the Extraction tab's allocation if one is set and crustal abundance otherwise. Mines on a moon deliver to their parent planet's inventory. Requires only concrete and no research, so mining can always be expanded.",
+	"Atmospheric Condenser": "Refrigerated intake towers that liquefy and fractionate the air. Yield is divided across the atmosphere of the body it stands on, following the Extraction allocation for any atmospheric compound it names and atmospheric abundance otherwise. The only source of volatiles the crust does not hold, and the only extraction possible on a gas giant. A body with no atmosphere yields nothing.",
+	"Workshop": "Assembly halls and machine tools. Adds factory capacity to its world: the manufacturing work that recipes and construction draw on each day.",
+	"Nuclear Plant": "Pressurised-water reactor. Burns enriched uranium from Uranium Enrichment or Thorium Activation and emits no CO₂. Each reactor counts toward latent weapons capability, which raises the probability of nuclear war while humanity is concentrated on few worlds.",
+	"Research Lab": "Instrumented laboratories. Adds fixed compute on top of the population's own.",
+	"Observatory": "Optical survey telescope. Adds signature-detection power, which sets how quickly alien civilisations are resolved once their light has reached Sol. Detection power is zero until Radio Astronomy is researched.",
+	"Radio Telescope Array": "Radio dishes and a correlator. Adds signature-detection power.",
+	"Space Telescope": "Observatory in orbit, above atmospheric absorption and noise. Adds signature-detection power.",
+	"Automated Mine": "Robotic excavators and conveyors. Yield is divided across the crust exactly as a Mine's is.",
+	"Factory": "Production lines with automated tooling. Adds factory capacity to its world.",
+	"Data Center": "Server racks with liquid cooling. Adds fixed compute.",
+	"Orbital Habitat": "Spun cylinder holding its own air, gravity and farmland. Houses people independently of the body it orbits and adds farm capacity. The only habitation that can be built in solar orbit. Draws power from the energy reserve every day.",
+	"Colony Dome": "Pressurised surface habitation. No world but Earth has a biosphere, so a colony's population ceiling is the habitat built for it; on a colony in the Sol system that ceiling is further scaled by how much power the world's own grid generates. Every colony ship lands with one. Draws power from the energy reserve every day.",
+	"Bunker": "Deep, hardened, stocked shelter network. In an asteroid impact or nuclear exchange on its world, at least this many people survive. Bunkers are the only structures that come through those events standing.",
+	"Fusion Reactor": "Superconducting tokamak plant. Burns helium-3, which cannot be manufactured: it is condensed from gas-giant atmospheres or mined from moon regolith. Emits no CO₂.",
+	"Automated Factory": "Lights-out robotic plant; the densest source of factory capacity.",
+	"Orbital Laser": "Directed-energy array. With one standing on any world, the star map can fire light-speed pulses at other star systems, and inbound asteroids, relativistic missiles and berserker swarms can be destroyed on approach at the cost of one shot from the energy reserve. Laser strikes against human worlds cannot be intercepted.",
+	"AI Research Hub": "Warehouse-scale compute cluster with immersion cooling. Adds fixed compute.",
+	"Thermal Radiator": "Field of high-emissivity panels that sheds waste heat to space. Raises radiating capacity; power drawn beyond radiating capacity is curtailed.",
+	"Farm": "Open fields. Adds farm capacity; the crop is chosen as a recipe in the Production tab. Requires weather, so rocky bodies only.",
+	"Ranch": "Pens, pasture and handling. Adds ranch capacity, which livestock recipes draw on; the animal is chosen as a recipe.",
+	"Hydroponics Bay": "Sealed growing racks under lamps. Farm capacity without soil or sky. Draws power from the energy reserve every day.",
+	"Climate-Controlled Farm": "Pressurised, temperature-regulated field under glass. Close to open-field farm capacity, plus ranch capacity, on worlds with no biosphere. Draws power from the reserve and CO₂ and ammonia from its world's inventory every day.",
+	"Ground Rectenna": "Rectifying antenna farm. Adds receiving capacity to the power-beam network. The figure is delivered power, after atmospheric losses.",
+	"Microwave Uplink": "Phased-array transmitter. Adds sending capacity to the power-beam network.",
+	"Orbital Rectenna": "Receiving aperture in orbit, where no atmosphere scatters the beam. Adds receiving capacity.",
+	"Power Relay Satellite": "Mirror-and-array platform with superconducting busbars. Adds sending capacity.",
+	"Orbital Radiator Array": "Free-flying radiator panels in high orbit, sized for a fusion-scale economy.",
+	"Orbital Power Grid": "Receiving and relaying constellation around one world. Adds both sending and receiving capacity.",
+	"Radiator Swarm": "Radiator films co-orbiting the Dyson swarm, sized to shed a stellar economy's waste heat.",
+	"Stellar Rectenna Grid": "Receiving aperture at planetary-orbit scale, sized to land a Dyson swarm's output.",
+	"Swarm Relay Network": "Phased transmitting apertures strung between the swarm's collectors and the worlds that use the power.",
+	"Orbital Ring Store": "Superconducting loop of orbital diameter, holding current indefinitely. Stellar-scale energy storage.",
+	"Space Elevator": "Carbon-composite tether from the surface to beyond geostationary altitude. Launches departing its world need fewer vehicles and less propellant and arrive sooner. Also generates power.",
+	"Orbital Vault": "Sealed orbital storage domes. Raises the matter storage cap; unlike the Matter Depot, it can be built in solar orbit and on gas giants.",
+	"Orbital Battery": "Orbital battery farm. Raises the energy storage cap.",
+	"Superconducting Storage Ring": "Current circulating in a chilled superconducting loop. Dense energy storage.",
+}
+
 const BUILDINGS := [
 	# ── 1945 fossil power infrastructure (a starting fleet AND buildable) ──────
 	# The 1945 global energy supply is a FLEET of regional power stations rated
@@ -286,7 +346,7 @@ const BUILDINGS := [
 	# same job.
 	{"name": "Matter Depot",
 		"category": "storage",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Steel": 16_000, "Concrete": 8_000, "energy": 15_000},
 		"production": {},
 		"storage": {"minerals": 1_000_000.0}},
@@ -302,7 +362,7 @@ const BUILDINGS := [
 	# Battery Bank — grid-scale electrochemical battery banks.  The baseline store.
 	{"name": "Battery Bank",
 		"category": "storage",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Steel": 10_000, "Cu": 8_000, "energy": 15_000},
 		"production": {},
 		"storage": {"energy": 1_000_000.0}},
@@ -311,7 +371,7 @@ const BUILDINGS := [
 	# works anywhere; modest capacity.
 	{"name": "Flywheel Array",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 30_000, "Cu": 6_000, "energy": 25_000},
 		"production": {},
 		"storage": {"energy": 3_000_000.0}},
@@ -332,7 +392,7 @@ const BUILDINGS := [
 	# multi-GW array) so it stays a genuine investment rather than free power.
 	{"name": "Solar Farm",
 		"category": "power",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"SolarPanel": 80_000, "Steel": 20_000, "energy": 50_000},
 		"production": {"energy": 5.0e10},   # 50 GW (50e9 × 2.0e-6 = 100 000 g)
 		# Output follows the Sun.  A panel is not a generator, it is a collector, so its yield
@@ -349,7 +409,7 @@ const BUILDINGS := [
 	# 132 GW fossil station in roughly two months of game-time with the 6 starting mines.
 	{"name": "Mine",
 		"category": "extraction",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Concrete": 10_000, "energy": 1_500},
 		"production": {"minerals": 8_000.0}},
 
@@ -373,7 +433,7 @@ const BUILDINGS := [
 	# Buildable from the start so a young economy can scale industry before research lands.
 	{"name": "Workshop",
 		"category": "industry",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 8_000, "Concrete": 6_000, "energy": 10_000},
 		"production": {},
 		"mc_capacity": 15_000.0},
@@ -387,7 +447,7 @@ const BUILDINGS := [
 	# BUILDING in real grams/day, like the other fuelled plants.
 	{"name": "Nuclear Plant",
 		"category": "power",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Concrete": 400_000, "Steel": 180_000, "Ceramic": 20_000, "energy": 80_000},
 		"production": {"energy": 3.0e11},   # 300 GW fleet → 1 GW reactor
 		"consumption": {"EnrichedU": 7.5e4}},
@@ -396,7 +456,7 @@ const BUILDINGS := [
 	# Steel frame, glass optics, copper wiring.
 	{"name": "Research Lab",
 		"category": "science",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Concrete": 3_000, "Glass": 3_000, "Cu": 1_500, "energy": 20_000},
 		"production": {"compute": 10.0}},
 
@@ -406,21 +466,21 @@ const BUILDINGS := [
 	# the space telescope (above the atmosphere) and the deep-space array see far more.
 	{"name": "Observatory",
 		"category": "observation",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Concrete": 6_000, "Glass": 4_000, "Cu": 2_000, "energy": 15_000},
 		"production": {},
 		"detection": 4.0},
 	# Radio Telescope Array — dishes + correlator electronics; picks up faint transmissions.
 	{"name": "Radio Telescope Array",
 		"category": "observation",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Steel": 40_000, "Cu": 20_000, "Microchip": 4_000, "energy": 60_000},
 		"production": {},
 		"detection": 16.0},
 	# Space Telescope — an orbiting observatory above the atmosphere's blur and noise.
 	{"name": "Space Telescope",
 		"category": "observation",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 120_000, "Glass": 60_000, "Superconductor": 8_000, "Microchip": 20_000, "energy": 300_000},
 		"production": {},
 		"detection": 60.0},
@@ -430,7 +490,7 @@ const BUILDINGS := [
 	# Steel chassis, control microchips, plastic conveyor components.
 	{"name": "Automated Mine",
 		"category": "extraction",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Steel": 40_000, "Plastic": 4_000, "Microchip": 300, "energy": 25_000},
 		"production": {"minerals": 80_000.0}},   # 10× the basic mine
 
@@ -438,7 +498,7 @@ const BUILDINGS := [
 	# the mainstay of an industrialised world's Manufacturing Capacity.
 	{"name": "Factory",
 		"category": "industry",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 40_000, "Concrete": 30_000, "Microchip": 2_000, "energy": 60_000},
 		"production": {},
 		"mc_capacity": 80_000.0},
@@ -447,7 +507,7 @@ const BUILDINGS := [
 	# Dominated by microchips; steel racks, copper interconnect, plastic housings.
 	{"name": "Data Center",
 		"category": "science",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Microchip": 3_000, "Steel": 3_000, "Cu": 2_000, "Plastic": 1_000, "energy": 50_000},
 		"production": {"compute": 20.0}},
 
@@ -457,7 +517,7 @@ const BUILDINGS := [
 	# and it is the only habitation that works in solar orbit where there is no ground at all.
 	{"name": "Orbital Habitat",
 		"category": "habitation",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 900_000, "Al": 600_000, "Glass": 200_000, "Plastic": 120_000,
 			"Superconductor": 40_000, "energy": 700_000},
 		"production": {},
@@ -471,7 +531,7 @@ const BUILDINGS := [
 	# for it and not one person more (see Game._artificial_capacity).
 	{"name": "Colony Dome",
 		"category": "habitation",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Ti": 18_000, "Glass": 15_000, "Steel": 12_000, "energy": 80_000},
 		"production": {},
 		"habitat": 5.0e7,
@@ -497,7 +557,7 @@ const BUILDINGS := [
 	# the endgame power source, an order of magnitude past any fossil or fission plant.
 	{"name": "Fusion Reactor",
 		"category": "power",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Steel": 2_300_000, "Ceramic": 650_000, "Superconductor": 50_000, "energy": 200_000},
 		"production": {"energy": 1.5e12},   # 1.5 TW fleet -> 1.5 GW plant
 		# D-He3 releases ~3.4e11 J per gram; at ~40 % conversion a 1.5 GW plant burns
@@ -510,7 +570,7 @@ const BUILDINGS := [
 	# (it lifts the labour ceiling that otherwise caps how much industry a population runs).
 	{"name": "Automated Factory",
 		"category": "industry",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 200_000, "Microchip": 30_000, "Plastic": 10_000, "energy": 300_000},
 		"production": {},
 		"mc_capacity": 600_000.0},
@@ -521,14 +581,14 @@ const BUILDINGS := [
 	# back-stresses the home star, ageing Sol toward its death (see Game.fire_orbital_laser).
 	{"name": "Orbital Laser",
 		"category": "defense",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Superconductor": 200_000, "Steel": 300_000, "Microchip": 50_000, "energy": 500_000},
 		"production": {}},
 
 	# AI Research Hub — warehouse-scale GPU cluster + immersion cooling.  80 c/s.
 	{"name": "AI Research Hub",
 		"category": "science",
-		"allowed_types": ["rocky"],
+		"allowed_types": ["rocky", "belt"],
 		"cost": {"Microchip": 20_000, "Steel": 12_000, "Cu": 10_000, "Plastic": 5_000, "energy": 250_000},
 		"production": {"compute": 80.0}},
 
@@ -538,7 +598,7 @@ const BUILDINGS := [
 	# swarm's tens of terawatts arrive.  Steel structure, ceramic-coated emitter surface.
 	{"name": "Thermal Radiator",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 1_200_000, "Ceramic": 400_000, "Cu": 100_000, "energy": 200_000},
 		"production": {},
 		"radiator_capacity": 4.0e12},   # +4 TW of heat-shedding capacity
@@ -575,7 +635,7 @@ const BUILDINGS := [
 	# water it cannot get from weather.  A fraction of open ground's capacity per building.
 	{"name": "Hydroponics Bay",
 		"category": "agriculture",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 12_000, "Glass": 5_000, "Plastic": 4_000, "Microchip": 500, "energy": 15_000},
 		"production": {},
 		"farm_capacity": 600.0,
@@ -590,7 +650,7 @@ const BUILDINGS := [
 	# roof a field with and still hold a Martian night out.
 	{"name": "Climate-Controlled Farm",
 		"category": "agriculture",
-		"allowed_types": ["rocky", "gas_giant"],
+		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 20_000, "Glass": 12_000, "Aerogel": 6_000, "Microchip": 1_500,
 			"Superconductor": 800, "energy": 40_000},
 		"production": {},
@@ -622,7 +682,7 @@ const BUILDINGS := [
 	# aperture this size hold a beam together across astronomical distances.
 	{"name": "Microwave Uplink",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 600_000, "Cu": 800_000, "Metamaterial": 40_000, "Microchip": 150_000, "energy": 500_000},
 		"production": {},
 		"beam_send": 5.0e12},
@@ -632,7 +692,7 @@ const BUILDINGS := [
 	# throughput, at the price of putting it up there.
 	{"name": "Orbital Rectenna",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Al": 500_000, "Cu": 400_000, "Ceramic": 300_000, "Microchip": 200_000, "energy": 800_000},
 		"production": {},
 		"beam_recv": 2.0e13},
@@ -642,7 +702,7 @@ const BUILDINGS := [
 	# without dissipating it as the waste heat that limits every terrestrial design.
 	{"name": "Power Relay Satellite",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Al": 600_000, "Superconductor": 250_000, "Metamaterial": 60_000, "Microchip": 200_000, "energy": 1_000_000},
 		"production": {},
 		"beam_send": 2.5e13},
@@ -658,7 +718,7 @@ const BUILDINGS := [
 	# waste heat where there is no atmosphere to carry it and no night to wait for.
 	{"name": "Orbital Radiator Array",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 900_000, "Ceramic": 400_000, "Graphene": 120_000,
 			"Superconductor": 60_000, "energy": 900_000},
 		"production": {},
@@ -668,7 +728,7 @@ const BUILDINGS := [
 	# between a rectenna farm and an aperture that can catch a fraction of a star.
 	{"name": "Orbital Power Grid",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Al": 800_000, "Superconductor": 500_000, "Metamaterial": 90_000,
 			"Microchip": 300_000, "energy": 1_200_000},
 		"production": {},
@@ -691,7 +751,7 @@ const BUILDINGS := [
 	# every joule you use has to leave again as heat or you cook.
 	{"name": "Radiator Swarm",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Graphene": 12_000_000, "CarbonNanotube": 8_000_000, "Aerogel": 5_000_000,
 			"Steel": 20_000_000, "energy": 40_000_000},
 		"production": {},
@@ -701,7 +761,7 @@ const BUILDINGS := [
 	# measured in kilometres cannot land a fraction of a percent of a star.
 	{"name": "Stellar Rectenna Grid",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Metamaterial": 10_000_000, "Superconductor": 9_000_000,
 			"CarbonNanotube": 6_000_000, "Al": 18_000_000, "energy": 50_000_000},
 		"production": {},
@@ -711,7 +771,7 @@ const BUILDINGS := [
 	# collectors and everywhere the power is actually spent.
 	{"name": "Swarm Relay Network",
 		"category": "support",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Metamaterial": 12_000_000, "Superconductor": 11_000_000,
 			"QuantumProcessor": 900_000, "Al": 15_000_000, "energy": 60_000_000},
 		"production": {},
@@ -722,7 +782,7 @@ const BUILDINGS := [
 	# moments a civilisation needs all of it at once.
 	{"name": "Orbital Ring Store",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Superconductor": 15_000_000, "SelfHealingComposite": 7_000_000,
 			"CarbonNanotube": 5_000_000, "Steel": 25_000_000, "energy": 45_000_000},
 		"production": {},
@@ -746,7 +806,7 @@ const BUILDINGS := [
 	# Orbital Vault — sealed aluminium vault domes; 10× the Matter Depot (matter only).
 	{"name": "Orbital Vault",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 100_000, "Al": 50_000, "energy": 100_000},
 		"production": {},
 		"storage": {"minerals": 10_000_000.0}},
@@ -754,7 +814,7 @@ const BUILDINGS := [
 	# Orbital Battery — orbital battery farm; 10× the Battery Bank (energy only).
 	{"name": "Orbital Battery",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 80_000, "Al": 40_000, "Battery": 30_000, "energy": 100_000},
 		"production": {},
 		"storage": {"energy": 10_000_000.0}},
@@ -764,7 +824,7 @@ const BUILDINGS := [
 	# superconducting research and built from costly superconductor.
 	{"name": "Superconducting Storage Ring",
 		"category": "storage",
-		"allowed_types": ["rocky", "gas_giant", "star"],
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Superconductor": 40_000, "Steel": 60_000, "energy": 150_000},
 		"production": {},
 		"storage": {"energy": 50_000_000.0}},

@@ -61,7 +61,9 @@ static func mission_claims(id: String) -> bool:
 ##                  read from across light-years: a civilisation that shoots first is one worth
 ##                  shooting first.
 ##   retaliate    – salvo size sent back per attack received, in missiles.  0 never answers.
-##   first_strike – open fire on a system merely for being detected and aggressive.
+##   first_strike – open fire on a system merely for being detected.
+##   targets      – who a first strike is aimed at: "hostile" (aggressive systems only) or "all"
+##                  (every detected civilisation except allies).  Only read when first_strike.
 ##   forgives     – whether retaliation stops once the other side does.  A strategy that never
 ##                  forgives is stable but can never de-escalate.
 const DOCTRINES: Array = [
@@ -91,7 +93,14 @@ const DOCTRINES: Array = [
 		"name": "Pre-emption",
 		"desc": "Fire on any hostile system the moment it is detected, before it can decide anything.",
 		"detail": "Removes threats while they are still cheap to remove. It also tells every telescope in range exactly what you are, and they are watching.",
-		"provocation": 1.9, "retaliate": 2, "first_strike": true, "forgives": false,
+		"provocation": 1.9, "retaliate": 2, "first_strike": true, "targets": "hostile", "forgives": false,
+	},
+	{
+		"id": "dark_forest",
+		"name": "Dark Forest",
+		"desc": "Fire on every civilisation the moment it is detected, hostile or peaceful. Only allies are spared. Answer every attack, for ever.",
+		"detail": "Treats any other civilisation as a threat to remove before it can become one. A peaceful neighbour that is struck is at war with you from then on, so it will neither trade nor ally. It is also the most provocative posture there is: every hostile telescope in range sees a civilisation that attacks on sight.",
+		"provocation": 2.5, "retaliate": 2, "first_strike": true, "targets": "all", "forgives": false,
 	},
 ]
 
@@ -113,6 +122,10 @@ static func retaliation(id: String) -> int:
 
 static func strikes_first(id: String) -> bool:
 	return bool(get_doctrine(id).get("first_strike", false))
+
+## Whom a first strike is aimed at: "hostile" or "all".
+static func strike_targets(id: String) -> String:
+	return str(get_doctrine(id).get("targets", "hostile"))
 
 static func forgives(id: String) -> bool:
 	return bool(get_doctrine(id).get("forgives", true))

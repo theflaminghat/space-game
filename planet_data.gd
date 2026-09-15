@@ -93,6 +93,20 @@ extends Node
 # J2000.0 is noon on Jan 1 2000, so add 0.5 day: 20 088.5 days ahead of epoch.
 const DAYS_J2000_TO_GAME_EPOCH: float = -20088.5
 
+## Cosmetic moons (spawned in planet.gd as "<planet>_moon_<n>") are also buildable, rocky
+## bodies.  Display names by node id; unnamed indices fall back to "<Planet> moon N".
+## Shared by Game (endpoints, labels) and LaunchPlanner (which moon orbits which planet).
+const MOON_NAMES: Dictionary = {
+	"earth_moon_0": "Luna",
+	"mars_moon_0": "Phobos",   "mars_moon_1": "Deimos",
+	"jupiter_moon_0": "Io",     "jupiter_moon_1": "Europa",
+	"jupiter_moon_2": "Ganymede","jupiter_moon_3": "Callisto",
+	"saturn_moon_0": "Titan",   "saturn_moon_1": "Rhea",
+	"saturn_moon_2": "Iapetus", "saturn_moon_3": "Dione",
+	"uranus_moon_0": "Titania", "uranus_moon_1": "Oberon", "uranus_moon_2": "Miranda",
+	"neptune_moon_0": "Triton", "neptune_moon_1": "Proteus",
+}
+
 const PLANETS: Dictionary = {
 
 	"mercury": {
@@ -368,6 +382,74 @@ const PLANETS: Dictionary = {
 				"Ar":  4.75e17,  # argon (1.9 % — ⁴⁰Ar from K decay, isotope marker)
 				"O2":  3.25e16,  # oxygen (0.13 % — photolytic)
 				"CO":  1.75e16,  # carbon monoxide (0.07 %)
+			},
+		},
+	},
+
+	# ── Main asteroid belt ────────────────────────────────────────────────────
+	# Not a planet, but played as one (see asteroid_belt.gd): the orbital elements are those of
+	# CERES, the belt's largest body (~39 % of its mass) and the hub its traffic lands at; the
+	# mass and composition are the WHOLE belt's.
+	#
+	# Elements: JPL small-body values, J2000.  The mean longitude is approximate — placed from
+	# Ceres's 2018 perihelion — which is ample for a body drawn on a log-scaled orbit.
+	# Belt mass: 2.39e21 kg (Pitjeva & Pitjev 2018, from planetary ephemerides).
+	"asteroid_belt": {
+		"mass_kg":                  2.39e21,
+		"radius_km":                473.0,          # Ceres
+		"semi_major_axis_au":       2.7675,
+		"eccentricity":             0.0785,
+		"inclination_deg":          10.59,
+		"lan_deg":                  80.33,
+		"long_periapsis_deg":       153.93,
+		"mean_longitude_deg":       159.4,
+		"da_au_per_cy":             0.0,
+		"de_per_cy":                0.0,
+		"di_deg_per_cy":            0.0,
+		"dlan_deg_per_cy":          0.0,
+		"dlong_peri_deg_per_cy":    0.0,
+		"dmL_deg_per_cy":           7819.3,         # 360° per 4.604-year period
+		# A rubble field has no interior worth distinguishing: every body is surface, so the
+		# whole belt is one mineable layer.  The mix is weighted by MASS, not by how many bodies
+		# of each kind there are (DeMeo & Carry 2013):
+		#   ~70 %  carbonaceous — the C-complex, Ceres (39 % of the belt alone), Pallas, Hygiea:
+		#          hydrated clays, magnetite, carbonates, sulfates, ~3.5 % organic carbon and
+		#          ~18 % bound water (CI/CM chondrites), plus Ceres's water ice
+		#   ~25 %  stony — S-types and basaltic Vesta: olivine and pyroxene with 5–20 % free
+		#          iron-nickel metal and ~5 % troilite (ordinary chondrites, HED meteorites)
+		#   ~ 3 %  metallic — M-types such as Psyche: iron-nickel alloy
+		# Silicates are reported as their oxides, as for the planets.  Iron-nickel metal is mined
+		# as metal, not ore.  Carbon is the insoluble organic matter of carbonaceous chondrites,
+		# not coal: there are no seams out here, and turning it into a smelting reductant takes
+		# pyrolysis (see the Organic Carbon Pyrolysis recipe).  Chromium and manganese oxides
+		# (~0.7 % together) are not modelled.  No helium-3 worth the name: regolith on bodies this
+		# small is thin and constantly overturned, and the solar wind is 7× weaker than at the Moon.
+		# Sources: Lodders (2003) CI bulk; Jarosewich (1990) ordinary chondrites; Mason (1971)
+		# irons; Park et al. (2016) and De Sanctis et al. (2016) — Dawn at Ceres; DeMeo & Carry
+		# (2013) belt taxonomy by mass.
+		"composition_g": {
+			"crust": {
+				"SiO2":  7.15e23,  # 29.9 % — olivine, pyroxene, phyllosilicate framework
+				"MgO":   4.42e23,  # 18.5 % — magnesium silicates
+				"H2O":   3.82e23,  # 16.0 % — clay-bound water + Ceres's ice
+				"FeO":   2.39e23,  # 10.0 % — silicate iron + magnetite's ferrous part
+				"Fe":    1.20e23,  #  5.0 % — free iron-nickel metal (S- and M-types)
+				"FeS":   1.20e23,  #  5.0 % — troilite, the meteoritic sulfide
+				"Fe2O3": 9.56e22,  #  4.0 % — magnetite's ferric part
+				"C":     7.17e22,  #  3.0 % — insoluble organic matter and graphite
+				"MgSO4": 4.78e22,  #  2.0 % — epsomite veins of CI chondrites
+				"Al2O3": 4.30e22,  #  1.8 %
+				"CaO":   3.11e22,  #  1.3 %
+				"Ni":    2.39e22,  #  1.0 % — alloyed with the iron
+				"CaCO3": 2.39e22,  #  1.0 % — carbonates (CI chondrites, Ceres)
+				"Na2O":  1.67e22,  #  0.7 %
+				"NH3":   7.17e21,  #  0.3 % — ammoniated clays (Ceres)
+				"P2O5":  5.98e21,  #  0.25 %
+				"TiO2":  1.91e21,  #  0.08 %
+				"K2O":   1.67e21,  #  0.07 %
+				"NaCl":  1.20e21,  #  0.05 % — salt deposits (Ceres)
+				"ThO2":  7.9e16,   # ~33 ppb, chondritic
+				"UO2":   2.2e16,   # ~9 ppb, chondritic
 			},
 		},
 	},

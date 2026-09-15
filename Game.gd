@@ -31,21 +31,14 @@ const FAST_THRESHOLD:  float = 5e-4
 const PLANET_TYPES: Dictionary = {
 	"sun":     "star",
 	"mercury": "rocky",  "venus":   "rocky",    "earth":   "rocky",   "mars":    "rocky",
+	# The main belt: a world of scattered microgravity rubble with no air, weather or ground
+	# to speak of.  Its own body type decides what can be built there (BuildingData).
+	"asteroid_belt": "belt",
 	"jupiter": "gas_giant", "saturn": "gas_giant", "uranus": "gas_giant", "neptune": "gas_giant",
 }
 
 ## Cosmetic moons (spawned in planet.gd as "<planet>_moon_<n>") are also buildable, rocky
-## bodies.  Display names by node id; unnamed indices fall back to "<Planet> moon N".
-const MOON_NAMES: Dictionary = {
-	"earth_moon_0": "Luna",
-	"mars_moon_0": "Phobos",   "mars_moon_1": "Deimos",
-	"jupiter_moon_0": "Io",     "jupiter_moon_1": "Europa",
-	"jupiter_moon_2": "Ganymede","jupiter_moon_3": "Callisto",
-	"saturn_moon_0": "Titan",   "saturn_moon_1": "Rhea",
-	"saturn_moon_2": "Iapetus", "saturn_moon_3": "Dione",
-	"uranus_moon_0": "Titania", "uranus_moon_1": "Oberon", "uranus_moon_2": "Miranda",
-	"neptune_moon_0": "Triton", "neptune_moon_1": "Proteus",
-}
+## bodies.  Their display names live in PlanetData.MOON_NAMES.
 ## Generic anorthositic-regolith crust (grams) so a moon's mines yield the same ores a
 ## rocky planet does.  Shared by every moon (they have no individual PlanetData entry).
 const MOON_COMPOSITION: Dictionary = {
@@ -70,6 +63,8 @@ const PLANETARY_NEBULA_YEAR: int = 8_210_000_000
 ## Orbital semi-major axes (AU) for each planet — used to determine engulfment order.
 const PLANET_ORBIT_AU: Dictionary = {
 	"mercury": 0.387, "venus":   0.723, "earth":   1.000, "mars":    1.524,
+	"asteroid_belt": 2.10,   # the belt's INNER edge: the photosphere takes it from there out
+
 	"jupiter": 5.203, "saturn":  9.537, "uranus": 19.191, "neptune": 30.069,
 }
 ## Physical radius of the present-day Sun in AU.
@@ -91,7 +86,7 @@ const MINERALS_PER_CAPITA: float = 0.5 * Units.MASS_SCALE   # grams/s per sustai
 ## Everything a person eats, by mass.  These are nutritionally interchangeable: a gram of
 ## beef feeds exactly as well as a gram of wheat, and what separates them is what it cost
 ## to grow.  A world eats from whatever it happens to be holding, drawn in proportion.
-const FOOD_TYPES: Array = ["Wheat", "Rice", "Vegetables", "Fish", "Beef", "Algae"]
+const FOOD_TYPES: Array = ["Wheat", "Rice", "Vegetables", "Fish", "Beef", "Pork", "Chicken", "Algae"]
 ## Grams eaten per person per game-day — a real 2 kg daily diet, in the same real grams the
 ## rest of the mass economy uses.  Earth's 2.3 billion therefore eat 4.6e12 g/day, which is
 ## what the starting agriculture is sized to just barely cover.
@@ -506,6 +501,8 @@ var _infra_probed: Dictionary = {}         # star → true: a probe returned ful
 ## years.  outgoing_messages: [{target, kind, start_year, end_year}].  _diplo_status: star →
 ## "contact" | "allied" | "trading" | "war".
 var outgoing_messages: Array = []
+## The trade proposal window (trade_panel.gd), built in _ready.
+var _trade_panel: TradePanel = null
 var _diplo_status: Dictionary = {}
 const MSG_ALLY_ENERGY:  float = 5.0e7      # a trade/alliance overture costs a transmitter burst
 ## Lightweight recon probes to other stars (cheaper than a colony ship); on arrival they
@@ -867,7 +864,12 @@ func _input(event: InputEvent) -> void:
 		SolarSystem.toggle_ui_pause()
 		get_tree().paused = SolarSystem.ui_paused
 
-	if event.is_action_pressed("pause"):
+	# Space pauses — except while a text field has focus, where it is a space.  Handling it here
+	# first swallowed it, so the console and the encyclopedia search could never type one.
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	var typing: bool = focus != null and focus.is_visible_in_tree() \
+		and (focus is LineEdit or focus is TextEdit)
+	if event.is_action_pressed("pause") and not typing:
 		_prepare_snap_year()
 		SolarSystem.toggle_pause()
 		get_viewport().set_input_as_handled()
@@ -898,6 +900,7 @@ func start_new_game() -> void:
 	# Set before anything asks for a star: _seed_star_factions below is the first thing that does.
 	galaxy_seed = randi()
 	StarMapPanel.set_galaxy_seed(galaxy_seed)
+	_star_index_size = -1   # a new seed keeps the catalogue size, so force the name index to rebuild
 	ResearchTree.load_tree(ResearchTreeData.build())
 	ResearchTree.resources = {
 		"science": 0.0,
@@ -1097,6 +1100,16 @@ func _ready() -> void:
 	add_child(console)
 	console.setup(self)
 
+	# Encyclopedia (toggle with O) — every building, item, recipe, research node and command.
+	var wiki := Encyclopedia.new()
+	add_child(wiki)
+	wiki.setup(self)
+
+	# Trade proposal window, opened from the star map's Trade button.
+	_trade_panel = TradePanel.new()
+	add_child(_trade_panel)
+	_trade_panel.setup(self)
+
 	# Endgame music player — keeps playing while the game-over screen is up, so it
 	# must ignore the tree pause that trigger_game_over() sets.
 	if not ResearchTree.research_completed.is_connected(_on_research_completed):
@@ -1110,8 +1123,7 @@ func _ready() -> void:
 	# Give the panel the real endpoint list: planets AND every buildable moon, with the Sun
 	# available as a target only.  Before this, moons could be built on but never flown to.
 	var eps: Array = launch_endpoints()
-	var tgts: Array = eps.duplicate()
-	tgts.append(["Sun", "sun"])
+	var tgts: Array = [["Sun", "sun"]] + eps   # the Sun heads the target list
 	launch_panel.set_bodies(eps, tgts)
 	production_panel.production_changed.connect(_on_production_changed)
 	if sidebar and sidebar.automation_panel:
@@ -1125,6 +1137,7 @@ func _ready() -> void:
 		sidebar.star_map.probe_requested.connect(_on_probe_requested)
 		sidebar.star_map.vn_probe_requested.connect(_on_vn_probe_requested)
 		sidebar.star_map.message_requested.connect(_on_message_requested)
+		sidebar.star_map.trade_requested.connect(func(star: String) -> void: _trade_panel.open(star))
 	politics_page.policy_changed.connect(_on_policy_changed)
 	game_over_screen.restart_requested.connect(_on_restart_requested)
 	settings_menu.closed.connect(_on_settings_closed)
@@ -2105,10 +2118,6 @@ func _policy_minerals_mult() -> float:
 func _policy_energy_mult() -> float:
 	return PoliticsData.energy_mult(policies)
 
-## Returns a duration multiplier to apply to all new missions.
-func _policy_mission_dur_mult() -> float:
-	return PoliticsData.mission_dur_mult(policies)
-
 func _on_policy_changed(policy_id: String, value: Variant) -> void:
 	policies[policy_id] = value
 	_pop_cap_mult_cache = -1.0      # capacity multiplier is derived from these
@@ -2235,17 +2244,30 @@ func _check_extinction_events() -> void:
 				planet_str = ", ".join(engulfed.slice(0, engulfed.size() - 1)) \
 					+ ", and " + engulfed[engulfed.size() - 1]
 			var cause: String
-			var desc: String
+			var event_line: String
 			if year >= PLANETARY_NEBULA_YEAR:
 				cause = "Planetary nebula"
-				desc  = "Sol has ejected its outer envelope. System-wide ultraviolet flux exceeds habitable tolerance. Inhabited worlds: 0. Remnant: white dwarf, cooling."
+				event_line = "Sol has ejected its outer envelope. System-wide ultraviolet flux exceeds habitable tolerance."
 			else:
 				cause = "Solar envelope expansion"
-				desc  = "Sol's photosphere now encloses the orbit of %s. Inhabited worlds outside the photosphere: 0." % planet_str
-			trigger_game_over(cause, desc)
+				event_line = "Sol's photosphere now encloses the orbit of %s." % planet_str
+			# Sol's death ends the run only if the species holds nothing outside the system — every
+			# kind of holding, not just individually-simulated colony worlds.  A civilisation spread
+			# across clusters and galaxy regions outlives its home star.
+			var beyond: int = _holdings_beyond_sol()
+			if beyond > 0:
+				has_left_solar_system = true   # stops this check re-firing
+				_announce(cause,
+					"%s Inhabited worlds in the Sol system: 0. Settled holdings beyond Sol: %d." % [
+						event_line, beyond],
+					"sol_lost_%s_%d" % [cause, year])
+			elif year >= PLANETARY_NEBULA_YEAR:
+				trigger_game_over(cause, event_line + " Inhabited worlds: 0. Remnant: white dwarf, cooling.")
+			else:
+				trigger_game_over(cause, event_line + " Inhabited worlds outside the photosphere: 0.")
 
 ## Planets (and their moons/infrastructure) whose orbit the Sun's photosphere has swallowed.
-const _PLANET_NAMES: Array = ["mercury", "venus", "earth", "mars",
+const _PLANET_NAMES: Array = ["mercury", "venus", "earth", "mars", "asteroid_belt",
 	"jupiter", "saturn", "uranus", "neptune"]
 var _engulfed_planets: Dictionary = {}   # planet name → true once destroyed by the Sun
 
@@ -2269,19 +2291,11 @@ func _destroy_engulfed_planets(sun_au: float) -> void:
 				"%s falls within Sol's photosphere and is consumed." % pname.capitalize(),
 				"engulf_%s_%d" % [pname, year])
 
-## Pause the game and display the extinction screen.
+## Pause the game and display the extinction screen.  Unconditional: callers decide whether the
+## species survives somewhere else (see _check_extinction_events and _check_incoming_attacks),
+## so the developer console's extinction commands always end the run.
 func trigger_game_over(cause: String, description: String) -> void:
 	if game_over:
-		return
-	# Interstellar refuge: as long as at least one other star system is still colonised,
-	# humanity survives the catastrophe instead of going extinct.  Marking the species as
-	# no longer Sol-bound also stops the recurring solar-death check from re-firing.
-	if not colonized_stars.is_empty():
-		has_left_solar_system = true
-		_announce("Catastrophe Survived",
-			"%s would have ended humanity — but the colony at %s endures. The species survives among the stars." % [
-				cause, str(colonized_stars[0]).capitalize()],
-			"survived_%s_%d" % [cause, year])
 		return
 	game_over          = true
 	SolarSystem.paused = true
@@ -2292,15 +2306,18 @@ func trigger_game_over(cause: String, description: String) -> void:
 	game_over_screen.show_game_over(cause, description, year, stats, _people_ever_lived)
 
 ## Called when the player presses "Start New Civilization" on the game-over screen.
+##
+## Reloads the scene rather than resetting in place.  An in-place reset left behind everything
+## start_new_game doesn't know about — planets the Sun had swallowed stayed hidden, the star
+## lookup kept the previous galaxy's positions, panels kept their old state.  A fresh scene has
+## none of that; the autoloads (research tree, star catalogue) are reset by start_new_game.
+## The setup-screen choices in GameSession carry over, so the new run uses the same terms.
 func _on_restart_requested() -> void:
 	SolarSystem.paused = false
-	start_new_game()
-	politics_page.load_policies(policies)
-	_check_population_splits()
-	_refresh_launch_access()   # fresh run: hide Launches again until Early Rocketry
-	_refresh_automation_access()   # fresh run: hide Automation again until Industrial AI
-	_refresh_stats()
-	_update_hud()
+	SolarSystem.ui_paused = false
+	get_tree().paused = false
+	GameSession.should_load_on_start = false
+	get_tree().change_scene_to_file("res://node_3d.tscn")
 
 ## Called in fast mode: bulk-advance the game by years_advanced years per frame.
 func _on_years_advanced_fast(years_advanced: int) -> void:
@@ -2601,7 +2618,7 @@ func _auto_launch(rule: Dictionary, angles: Dictionary) -> void:
 	var accel: float = _fuel_accel(fuel_id)
 	var mods: Dictionary = _planet_launch_mods(origin)
 	var cost_mult: float = float(mods.get("cost", 1.0))
-	var dur_mult: float = float(mods.get("duration", 1.0)) * _policy_mission_dur_mult()
+	var dur_mult: float = float(mods.get("duration", 1.0))
 	var duration: int = LaunchPlanner.duration_days(
 		origin_cap, target_cap, arrival, accel, angles, 0.0, dur_mult)
 	if duration <= 0:
@@ -2688,19 +2705,23 @@ func _is_body_buildable(id: String) -> bool:
 ## Every body a launch may depart from or arrive at: the planets, every buildable moon, and
 ## (as a target only) the Sun.  Returned as [display name, body id] pairs because a moon's two
 ## names differ and the panel needs both.
+##
+## Ordered outward from the Sun, each planet immediately followed by its own moons, so the
+## launch panel can fold the moons under their planet.
 func launch_endpoints() -> Array:
 	var out: Array = []
 	for pn: String in PLANET_TYPES:
 		if pn == "sun":
 			continue
-		out.append([pn.capitalize(), pn])
-	for mid: String in MOON_NAMES:
-		out.append([_body_display_name(mid), mid])
+		out.append([_body_display_name(pn), pn])
+		for mid: String in PlanetData.MOON_NAMES:
+			if mid.begins_with(pn + "_moon_"):
+				out.append([_body_display_name(mid), mid])
 	return out
 
 ## Human-readable name for a planet or moon (capitalised id, or the moon's proper name).
 func _body_display_name(id: String) -> String:
-	return str(MOON_NAMES.get(id, id.capitalize()))
+	return str(PlanetData.MOON_NAMES.get(id, id.capitalize()))
 
 ## Composition (with crust) for ore-mining + the panel; moons use a generic regolith.
 func _body_composition(id: String) -> Dictionary:
@@ -3342,15 +3363,21 @@ func _get_catalog_for_display() -> Array:
 func _building_type_label(allowed_types: Array) -> String:
 	# "star" is solar orbit rather than a kind of planet, so it is named separately instead of
 	# reading as "star planet".
+	# The same goes for the asteroid belt, which is not a kind of planet either.
 	var orbit: bool = allowed_types.has("star")
+	var belt: bool = allowed_types.has("belt")
 	var names: Array = []
 	for t: String in allowed_types:
-		if t != "star":
+		if t != "star" and t != "belt":
 			names.append(str(t).replace("_", " "))
+	var extra: Array = []
+	if belt:
+		extra.append("the asteroid belt")
+	if orbit:
+		extra.append("solar orbit")
 	if names.is_empty():
-		return "solar orbit"
-	var txt: String = " or ".join(names) + " planet"
-	return txt + " or solar orbit" if orbit else txt
+		return " or ".join(extra)
+	return " or ".join([" or ".join(names) + " planet"] + extra)
 
 func select_planet(planet_name: String) -> void:
 	# Any body can be inspected without a probe; only an empty id is rejected.
@@ -3375,6 +3402,13 @@ func select_planet(planet_name: String) -> void:
 	if _planet_tabs:
 		_planet_tabs.show()
 
+## Whether a building can stand on this kind of body (its "allowed_types").  The build panel
+## hides what can't, but automation rules call try_build directly, so the rule is enforced here
+## too — otherwise a standing order could raise a coal plant in the asteroid belt.
+func _fits_body(building: Dictionary, planet_name: String) -> bool:
+	var allowed: Array = building.get("allowed_types", [])
+	return allowed.is_empty() or allowed.has(str(PLANET_TYPES.get(planet_name, "rocky")))   # moons → rocky
+
 ## Attempt to build one `building_name` on `planet_name`.  Returns true on success,
 ## false if it's invalid, research-locked, or unaffordable (the automation executor
 ## relies on the return value to know when to stop topping up a maintained count).
@@ -3384,6 +3418,8 @@ func try_build(planet_name: String, building_name: String) -> bool:
 		return false
 
 	if not _is_body_buildable(planet_name):
+		return false
+	if not _fits_body(building, planet_name):
 		return false
 
 	# A generated tier carries its own gate; the base tier uses the authored table.
@@ -3765,7 +3801,7 @@ func _on_launch_requested(params: Dictionary) -> void:
 			float(sat_payload) * MissionData.PAYLOAD_MASS_PER_UNIT, origin_name)
 
 	var start_offset: int = params.get("start_offset", 0)
-	# The panel already folded the policy duration multiplier into params.duration,
+	# The panel already folded the origin's duration discount into params.duration,
 	# so use it directly — re-applying here would shorten the trip twice and make
 	# the actual arrival disagree with the time shown at launch.
 	var duration: int    = int(params.get("duration", 30))
@@ -3866,7 +3902,6 @@ func refresh_launch_panel() -> void:
 	launch_panel.set_game_date(year, month + 1, day + 1)
 	launch_panel.set_current_planet(current_planet)
 	launch_panel.set_launch_mods(_build_launch_mods_map())
-	launch_panel.set_mission_duration_mult(_policy_mission_dur_mult())
 	launch_panel.refresh_fuels()
 	launch_panel.set_orbital_state(_build_orbital_state())
 	launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, _swarm_max())
@@ -3908,7 +3943,7 @@ func _on_colonize_requested(star_name: String, gamma_max: float, accel: float) -
 		return
 	if _star_known_occupied(star_name):
 		_announce("Target already inhabited",
-			"%s holds a civilisation. A colony fleet is not sent to a system that is already someone's home." % star_name,
+			"%s holds a civilisation. Colony launch not authorised: target system is inhabited." % star_name,
 			"occupied_colonize_%s" % star_name)
 		return
 	if not ResearchTree.is_unlocked("relativistic_navigation"):
@@ -3998,11 +4033,11 @@ func _check_interstellar_arrivals() -> void:
 					_region_colonize(tpos)     # its stars also feed the statistical galaxy
 					if now >= 1.0 and was < 1.0:
 						_announce("%s settled" % target,
-							"The last unclaimed stars of %s are taken. The cluster is wholly ours." % target,
+							"Probe arrival recorded at %s. Settled fraction of the cluster: 100%%." % target,
 							"cluster_done_%s" % target)
 					else:
 						_announce("Foothold in %s" % target,
-							"A probe reaches %s and begins spreading through it — %d%% of the cluster is now settled." % [
+							"Probe arrival recorded at %s. Settled fraction of the cluster: %d%%." % [
 								target, int(round(now * 100.0))],
 							"cluster_%s_%d" % [target, int(now * 100.0)])
 					newly_vn.append(target)
@@ -4452,7 +4487,11 @@ func galaxy_region_info(id: String) -> Dictionary:
 ## holding itself is real; an extinction test that consulted the number instead of the fact would
 ## end runs that had genuinely spread across the galaxy.
 func _holdings_beyond_earth() -> int:
-	var n: int = colonized_planets.size() + colonized_stars.size()
+	return colonized_planets.size() + _holdings_beyond_sol()
+
+## The same count without the in-system colony worlds: what survives the death of Sol itself.
+func _holdings_beyond_sol() -> int:
+	var n: int = colonized_stars.size()
 	for c: String in cluster_colonized:
 		if float(cluster_colonized[c]) > 0.0:
 			n += 1
@@ -4917,11 +4956,13 @@ func _launch_alien_attacks(dyears: float) -> void:
 		_deterrent_active = deterred
 		if deterred:
 			_announce("Deterrence established",
-				"Hostile civilisations have registered your self-replicating berserker arsenal. Wary of mutually assured annihilation, they sharply curtail their attacks.",
+				"Berserker stockpile: %d. Hostile strike rate: %d%% of baseline." % [
+					int(_player_item_count("Berserker")),
+					int(round(_deterrence_mult(deter_strength) * 100.0))],
 				"deterrent_on_%d" % year)
 		else:
 			_announce("Deterrence lapsed",
-				"Your berserker stockpile is exhausted. Hostile civilisations resume attacking at full intensity.",
+				"Berserker stockpile: 0. Hostile strike rate: 100% of baseline.",
 				"deterrent_off_%d" % year)
 	# Hard-cap the number of missiles in flight — this bounds the array, the per-tick
 	# resolution work, and the event/timeline spam even when aliens have overrun the map.
@@ -5259,17 +5300,28 @@ func _apply_doctrine() -> void:
 			_grudges[src] = owed - 1
 			if int(_grudges[src]) <= 0:
 				_grudges.erase(src)
-	# Pre-emption: fire on anything detected and hostile, whether or not it has done anything.
+	# First strike: fire on what has been detected, whether or not it has done anything.
+	# Pre-emption aims only at hostile systems; Dark Forest at every civilisation but allies.
 	if not DoctrineData.strikes_first(contact_doctrine):
 		return
+	var at_all: bool = DoctrineData.strike_targets(contact_doctrine) == "all"
 	for star: String in _detected_aliens:
-		if str(star_factions.get(star, "peaceful")) != "aggressive":
+		if not star_factions.has(star):
+			continue                        # already gone
+		var hostile: bool = str(star_factions[star]) == "aggressive"
+		if not hostile and not at_all:
 			continue
+		if str(_diplo_status.get(star, "")) == "allied":
+			continue                        # an ally is never a first-strike target
+		if _grudges.has(star) or _attack_in_flight(star):
+			continue                        # already being answered, or a strike is on its way
 		if _player_item_count("Missile") < 1.0:
 			return
-		if _grudges.has(star):
-			continue                        # already being answered above
 		_on_missile_requested(star, VN_GAMMA, VN_ACCEL, 1)
+		# Striking a peaceful civilisation is a declaration of war: it will not trade or ally.
+		# Only recorded if the missile actually left (the launch can fail for lack of energy).
+		if not hostile and _attack_in_flight(star):
+			_diplo_status[star] = "war"
 
 ## Seed a star with a crafted von Neumann Probe.  This replaces the old automation toggle: the
 ## fleet is no longer a switch you flip but an object you build, launch, and then cannot recall
@@ -5283,7 +5335,7 @@ func _on_vn_probe_requested(star_name: String, gamma_max: float, accel: float,
 	# and putting one in a neighbour's sky is how you learn anything about them at all.
 	if _star_known_occupied(star_name) and DoctrineData.mission_claims(mission):
 		_announce("Target already inhabited",
-			"%s holds a civilisation. Seeding a colonisation probe into an inhabited system is not settlement — it is invasion, and this one is not sent." % star_name,
+			"%s holds a civilisation. Colonisation probe not launched: target system is inhabited. Recon and relay probes may still be sent." % star_name,
 			"occupied_seed_%s" % star_name)
 		return
 	if _player_item_count("VNProbe") < 1.0:
@@ -5407,7 +5459,10 @@ func _check_message_arrivals() -> void:
 	var still: Array = []
 	for m in outgoing_messages:
 		if float(year) >= float(m.get("end_year", INF)):
-			_resolve_message(str(m.get("target", "")), str(m.get("kind", "contact")))
+			if str(m.get("kind", "")) == "trade" and (m as Dictionary).has("offer"):
+				_resolve_trade(m)
+			else:
+				_resolve_message(str(m.get("target", "")), str(m.get("kind", "contact")))
 		else:
 			still.append(m)
 	outgoing_messages = still
@@ -5435,6 +5490,8 @@ func _resolve_message(star: String, kind: String) -> void:
 				_announce("Reply from %s" % star,
 					"%s rebuffs the overture and turns openly hostile." % star, "reply_%s_%d" % [star, year])
 		"trade":
+			# A fixed-cache trade message, from saves made before trade proposals existed (a
+			# proposal carries an "offer" and is resolved by _resolve_trade instead).
 			if align == "peaceful":
 				if _diplo_status.get(star, "") != "allied":
 					_diplo_status[star] = "trading"
@@ -5450,6 +5507,179 @@ func _resolve_message(star: String, kind: String) -> void:
 			_diplo_status[star] = "war"
 			_announce("Reply from %s" % star,
 				"%s registers your declaration of war." % star, "reply_%s_%d" % [star, year])
+
+# ── Interstellar trade ────────────────────────────────────────────────────────
+# A proposal is composed in the trade panel (trade_panel.gd), valued and judged by TradeData, and
+# travels like any other message: out at light speed, reply back at light speed.  The goods offered
+# are taken into escrow when it is sent, so they cannot be spent while the answer is on its way;
+# acceptance releases the request, refusal returns the offer.
+
+## Worlds a trade can go through: every inhabited world in the Sol system — each keeps its own
+## inventory.  [display name, id] pairs, home first.
+func _trade_worlds() -> Array:
+	var out: Array = []
+	for w in (["earth"] as Array) + colonized_planets:
+		var id: String = str(w)
+		if not _engulfed_planets.has(id):
+			out.append([_body_display_name(id), id])
+	return out
+
+## What can be offered from `world`: every priced good held there, plus the civilisation-wide
+## energy and science reserves.  key → amount.
+func trade_holdings(world: String) -> Dictionary:
+	var vals: Dictionary = TradeData.values(self)
+	var out: Dictionary = {
+		"energy":  float(ResearchTree.resources.get("energy", 0.0)),
+		"science": float(ResearchTree.resources.get("science", 0.0)),
+	}
+	var inv: Dictionary = _planet_inv(world)
+	for k: String in inv:
+		if float(inv[k]) > 0.0 and vals.has(k):
+			out[k] = float(inv[k])
+	return out
+
+## What the trade panel shows about a partner — what this civilisation KNOWS: the alignment only
+## if contact has revealed it, and a supply capacity read from light-delayed intel.
+func trade_context(star: String) -> Dictionary:
+	var intel: Dictionary = _alien_intel().get(star, {})
+	var dist: float = _star_distance_ly(star)
+	var in_transit: bool = false
+	for m in outgoing_messages:
+		if str((m as Dictionary).get("target", "")) == star:
+			in_transit = true
+	return {
+		"star":          star,
+		"dist_ly":       dist,
+		"reply_years":   2.0 * dist,
+		"alignment":     str(intel.get("alignment", "unknown")),
+		"status":        str(_diplo_status.get(star, "")),
+		"capacity":      TradeData.capacity(float(intel.get("dyson", 0.0))),
+		"in_transit":    in_transit,
+		"transmit_cost": MSG_ALLY_ENERGY,
+		"worlds":        _trade_worlds(),
+		"values":        TradeData.values(self),
+	}
+
+## Send a trade proposal.  Returns "" on success, or why it could not be sent.  The panel checks
+## the same things first; this is the authority, so nothing is spent unless every check passes.
+func propose_trade(star: String, world: String, offer: Dictionary, request: Dictionary) -> String:
+	if game_over:
+		return "The run has ended."
+	if not star_factions.has(star) or not _detected_aliens.has(star):
+		return "No known civilisation at %s." % star
+	for m in outgoing_messages:
+		if str((m as Dictionary).get("target", "")) == star:
+			return "A message to %s is already in transit." % star
+	var world_ok: bool = false
+	for w: Array in _trade_worlds():
+		if str(w[1]) == world:
+			world_ok = true
+	if not world_ok:
+		return "%s is not a world that can trade." % _body_display_name(world)
+	if offer.is_empty() and request.is_empty():
+		return "The proposal is empty."
+	var vals: Dictionary = TradeData.values(self)
+	var clean_offer: Dictionary = {}
+	var clean_request: Dictionary = {}
+	for k: String in offer:
+		if float(offer[k]) > 0.0 and vals.has(k):
+			clean_offer[k] = float(offer[k])
+	for k: String in request:
+		if float(request[k]) > 0.0 and vals.has(k):
+			clean_request[k] = float(request[k])
+	# Everything offered must be on hand, and the transmission paid for on top of any energy offered.
+	var have: Dictionary = trade_holdings(world)
+	for k: String in clean_offer:
+		if float(have.get(k, 0.0)) < float(clean_offer[k]):
+			return "Not enough %s: %s offered, %s available." % [TradeData.display_name(k),
+				TradeData.format_amount(k, float(clean_offer[k])), TradeData.format_amount(k, float(have.get(k, 0.0)))]
+	var energy_need: float = MSG_ALLY_ENERGY + float(clean_offer.get("energy", 0.0))
+	if float(ResearchTree.resources.get("energy", 0.0)) < energy_need:
+		return "Not enough energy for the transmission and the energy offered (%s needed)." % Units.format_si(energy_need, "J")
+
+	# Escrow: the offer leaves the stores now, and the transmission is paid.
+	ResearchTree.resources["energy"] = float(ResearchTree.resources.get("energy", 0.0)) - MSG_ALLY_ENERGY
+	for k: String in clean_offer:
+		_deduct_stockpile(k, float(clean_offer[k]), world)
+	var dist: float = _star_distance_ly(star)
+	outgoing_messages.append({
+		"target": star, "kind": "trade", "world": world,
+		"offer": clean_offer, "request": clean_request,
+		"start_year": float(year), "end_year": float(year) + 2.0 * dist,
+	})
+	_announce("Trade proposal sent",
+		"Proposal transmitted to %s (%.1f ly) from %s. Offered: %s. Requested: %s. Reply expected in ~%s." % [
+			star, dist, _body_display_name(world), TradeData.bundle_text(clean_offer),
+			TradeData.bundle_text(clean_request), Units.format_si(2.0 * dist, "yr")],
+		"trade_sent_%s_%d" % [star, year])
+	refresh_star_map()
+	return ""
+
+## A trade proposal's reply has arrived.  The partner judged it when it reached them — by its
+## true alignment, the standing between the two, and what it could supply then — and the answer
+## has spent the same time again crossing back.
+func _resolve_trade(m: Dictionary) -> void:
+	var star: String = str(m.get("target", ""))
+	var offer: Dictionary = m.get("offer", {})
+	var request: Dictionary = m.get("request", {})
+	# Goods land where the proposal came from — or at Earth, if that world has since been lost.
+	var world: String = str(m.get("world", "earth"))
+	var alive: bool = false
+	for w: Array in _trade_worlds():
+		if str(w[1]) == world:
+			alive = true
+	if not alive:
+		world = "earth"
+	var where: String = _body_display_name(world)
+	if not star_factions.has(star):
+		_trade_transfer(offer, world)
+		_announce("No reply from %s" % star,
+			"The proposal to %s went unanswered: no civilisation remains there. Offered goods returned to %s: %s." % [
+				star, where, TradeData.bundle_text(offer)],
+			"trade_none_%s_%d" % [star, year])
+		return
+	_reveal_alignment(star)
+	var vals: Dictionary = TradeData.values(self)
+	var ov: float = TradeData.bundle_value(offer, vals)
+	var rv: float = TradeData.bundle_value(request, vals)
+	var dist: float = _star_distance_ly(star)
+	var judged_at: float = float(m.get("end_year", year)) - dist      # when it reached them
+	var cap: float = TradeData.capacity(float(_alien_infra_at(star, judged_at)["dyson"]))
+	var status: String = str(_diplo_status.get(star, ""))
+	var verdict: Dictionary = TradeData.assess(ov, rv, status, str(star_factions[star]), cap)
+	if bool(verdict["accept"]):
+		_trade_transfer(request, world)
+		if status != "allied":
+			_diplo_status[star] = "trading"
+		var got: String = TradeData.bundle_text(request) if not request.is_empty() else "nothing (a gift)"
+		_announce("Trade accepted — %s" % star,
+			"%s accepts the proposal. Received at %s: %s. Delivered: %s." % [
+				star, where, got, TradeData.bundle_text(offer)],
+			"trade_yes_%s_%d" % [star, year])
+		return
+	_trade_transfer(offer, world)
+	var why: String = ""
+	match str(verdict["reason"]):
+		"hostile":
+			why = "%s refuses to trade." % star
+		"war":
+			why = "%s refuses: the two civilisations are at war." % star
+		"capacity":
+			why = "%s declines: the request (%s) exceeds what it could supply (%s)." % [
+				star, Units.format_si(rv, "J"), Units.format_si(cap, "J")]
+		_:
+			why = "%s declines: offer value %d %% of request value; accepted at %d %% or more." % [
+				star, int(round(float(verdict["ratio"]) * 100.0)), int(round(float(verdict["need"]) * 100.0))]
+	_announce("Trade refused — %s" % star,
+		"%s Offered goods returned to %s: %s." % [why, where, TradeData.bundle_text(offer)],
+		"trade_no_%s_%d" % [star, year])
+
+## Move a bundle into `world`: materials to its inventory, energy and science to the reserves.
+func _trade_transfer(bundle: Dictionary, world: String) -> void:
+	for k: String in bundle:
+		var amt: float = float(bundle[k])
+		if amt > 0.0:
+			_add_stockpile(k, amt, world)
 
 ## Is there already a weapon strike in flight to this star?  (Prevents double-firing.)
 func _attack_in_flight(star_name: String) -> bool:
@@ -5503,7 +5733,7 @@ func _announce(title: String, desc: String, id: String) -> void:
 ## Snapshot of every launchable planet's current orbital angle (radians), so the
 ## LaunchPanel can compute the actual-path (launch-window) energy cost.
 func _build_orbital_state() -> Dictionary:
-	const NAMES := ["mercury", "venus", "earth", "mars",
+	const NAMES := ["mercury", "venus", "earth", "mars", "asteroid_belt",
 		"jupiter", "saturn", "uranus", "neptune"]
 	var out: Dictionary = {}
 	for pname: String in NAMES:
@@ -5614,6 +5844,7 @@ func load_game(path: String = "") -> void:
 	# seeds existed has no key and gets 0, which reproduces exactly the sky it was written in.
 	galaxy_seed = int(data.get("galaxy_seed", 0))
 	StarMapPanel.set_galaxy_seed(galaxy_seed)
+	_star_index_size = -1
 
 	# Dyson-swarm size.  Set the base value first so the Orbital Array migration in
 	# the planet_buildings block below can add to it (older saves have no key → 0).
@@ -5887,7 +6118,9 @@ func load_game(path: String = "") -> void:
 	_pop_cap_mult_cache = -1.0
 	if data.has("policies") and data["policies"] is Dictionary:
 		for key: String in data["policies"]:
-			policies[key] = data["policies"][key]
+			# Only policies that still exist: older saves carry retired ones (the space policies).
+			if policies.has(key):
+				policies[key] = data["policies"][key]
 	_pop_cap_mult_cache = -1.0
 	politics_page.load_policies(policies)
 
@@ -6189,9 +6422,7 @@ func _check_asteroid_impact() -> void:
 		return
 	if Time.get_ticks_msec() < _impact_cooldown_ms:
 		return   # too soon since the last strike (deep fast-forward guard)
-	# Planetary-defence policy widens the interval between impacts.
-	_next_impact_year   = year + int(randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX) \
-		* PoliticsData.asteroid_gap_mult(policies))
+	_next_impact_year   = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
 	_impact_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 	_raise_asteroid_threat()
 
@@ -6215,11 +6446,12 @@ func _surviving_shelters(planet_name: String) -> Array:
 
 ## Survivors of a catastrophe on `planet_name`: whatever the death toll leaves, or everyone the
 ## world's shelters can hold — whichever is larger.  Shelters can't save people who were never
-## there, so capacity is capped at the living population.
+## there, so capacity is capped at the living population — and so is the MIN_POPULATION floor,
+## which must never conjure survivors on a world smaller than it.
 func _sheltered_survivors(planet_name: String, pop: float, kill_frac: float) -> float:
 	var exposed: float = pop * (1.0 - kill_frac)
 	var sheltered: float = minf(_shelter_capacity(planet_name), pop)
-	return floorf(maxf(MIN_POPULATION, maxf(exposed, sheltered)))
+	return floorf(minf(pop, maxf(MIN_POPULATION, maxf(exposed, sheltered))))
 
 ## Whether an arriving projectile can be shot down.  A relativistic missile or a berserker swarm
 ## crosses at some fraction of c, so the defence array has a window on it as it comes in — but a
@@ -6285,8 +6517,17 @@ func _show_strike_dialog(a: Dictionary) -> void:
 ## The answer, if there is one, is the Orbital Laser — the same weapon that shoots at other
 ## stars, aimed at something a few light-minutes away instead.  It costs what a minimum-power
 ## shot costs, so the price comes from the laser's own model rather than a number invented here.
+## Worlds an asteroid impact can strike: Earth and the in-system colonies, except the belt —
+## it IS the asteroids, a scattered field of rubble with no surface for one body to sterilise.
+func _impact_targets() -> Array:
+	var out: Array = []
+	for w in (["earth"] as Array) + colonized_planets:
+		if str(PLANET_TYPES.get(str(w), "rocky")) != "belt":
+			out.append(str(w))
+	return out
+
 func _raise_asteroid_threat() -> void:
-	var inhabited: Array = (["earth"] as Array) + colonized_planets
+	var inhabited: Array = _impact_targets()
 	if inhabited.is_empty():
 		return
 	var target: String = str(inhabited[randi() % inhabited.size()])
@@ -6327,8 +6568,10 @@ func _ensure_threat_dialog() -> void:
 
 func _show_asteroid_dialog(target: String, kill_frac: float) -> void:
 	_ensure_threat_dialog()
-	var pop: float = float(stats.get("current_population", 0))
+	# The struck world's own population — the one _trigger_asteroid_impact will actually reduce.
+	var pop: float = float(world_pop.get(target, 0.0))
 	var survivors: float = _sheltered_survivors(target, pop, kill_frac)
+	var lost: float = maxf(0.0, pop - survivors)
 	var shelter: float = minf(_shelter_capacity(target), pop)
 	var cost: float = StarMapPanel.laser_energy(0.0)
 	var energy: float = float(ResearchTree.resources.get("energy", 0.0))
@@ -6336,8 +6579,8 @@ func _show_asteroid_dialog(target: String, kill_frac: float) -> void:
 		"A mountain-sized body is on an intercept course with %s." % target.capitalize(),
 		"",
 		"Projected loss: %s of %s (%d%%). Surface structures: none expected to survive." % [
-			Units.format_si_verbose(maxf(0.0, pop - survivors), ""),
-			Units.format_si_verbose(pop, ""), int(round(kill_frac * 100.0))],
+			Units.format_si_verbose(lost, ""),
+			Units.format_si_verbose(pop, ""), int(round(lost / maxf(pop, 1.0) * 100.0))],
 	]
 	if shelter > 0.0:
 		lines.append("Shelters on %s can hold %s below ground." % [
@@ -6354,7 +6597,7 @@ func _show_asteroid_dialog(target: String, kill_frac: float) -> void:
 		lines.append("An Orbital Laser stands ready but the grid cannot power the shot: it needs %s and the reserve holds %s." % [
 			Units.format_si(cost, ""), Units.format_si(energy, "")])
 	else:
-		lines.append("Nothing in orbit can reach it. An Orbital Laser could have.")
+		lines.append("Orbital Lasers built: 0. No interception is available.")
 	_threat_body.text = "\n".join(lines)
 	_threat_dialog.title = "Impact warning"
 	_threat_dialog.ok_button_text = "Brace for impact"
@@ -6435,14 +6678,18 @@ func _resume_after_threat() -> void:
 ## `target` and `kill_frac` default to a fresh roll, which is what the dev console wants; the
 ## warning dialog passes the ones the player was actually shown.
 func _trigger_asteroid_impact(target: String = "", kill_frac: float = -1.0) -> void:
-	var inhabited: Array = (["earth"] as Array) + colonized_planets
+	var inhabited: Array = _impact_targets()
 	if target == "" or not inhabited.has(target):
 		target = str(inhabited[randi() % inhabited.size()])
 
-	# Kill a majority of the population, divided across inhabited worlds — colonies
-	# mean each strike claims a smaller share of all humanity.  Anyone the struck world's
-	# bunkers can hold comes back out regardless of the toll.
-	var pop: float = float(stats.get("current_population", 0))
+	# Kill much of the struck WORLD's population.  The toll is still divided across inhabited
+	# worlds, so a species with colonies loses a smaller share of the target too.  Anyone the
+	# struck world's bunkers can hold comes back out regardless of the toll.
+	#
+	# Written to world_pop, which is the population record.  Writing only the stats mirror (as
+	# this used to) was undone on the next frame when _update_population re-summed world_pop,
+	# so impacts reported deaths that never happened.
+	var pop: float = float(world_pop.get(target, 0.0))
 	if kill_frac < 0.0:
 		kill_frac = randf_range(0.50, 0.85) / float(inhabited.size())
 	var shelter: float = minf(_shelter_capacity(target), pop)
@@ -6454,7 +6701,9 @@ func _trigger_asteroid_impact(target: String = "", kill_frac: float = -1.0) -> v
 	# which are built to outlast the surface.  Done after the toll so the shelters still count.
 	planet_buildings[target] = (["Biomass Burner"] as Array) + _surviving_shelters(target)
 	_mark_prod_dirty()
-	stats["current_population"] = survivors
+	if world_pop.has(target):
+		world_pop[target] = survivors
+	stats["current_population"] = _total_population()
 	_refresh_stats()
 
 	var notif: Dictionary = {
@@ -6462,7 +6711,7 @@ func _trigger_asteroid_impact(target: String = "", kill_frac: float = -1.0) -> v
 		"year":     year,
 		"title":    "Asteroid Impact",
 		"desc":     "Impact event recorded on %s. Surface structures: 0 remaining. Population change: −%s (−%d%%).%s" % [
-			target.capitalize(), Units.format_si_verbose(lost, ""), int(round(kill_frac * 100.0)),
+			target.capitalize(), Units.format_si_verbose(lost, ""), int(round(lost / maxf(pop, 1.0) * 100.0)),
 			"" if shelter <= 0.0 else " Shelters held %s below ground." \
 				% Units.format_si_verbose(shelter, "")
 		],
@@ -6508,13 +6757,30 @@ func _check_pandemic() -> void:
 
 ## A synthetic plague kills much of the population — divided across inhabited worlds,
 ## so colonies blunt it.  Survivable by design unless the species is already fragile.
+##
+## It spreads through the Sol system (Earth and the in-system colonies, which trade and travel
+## with one another); interstellar colonies are years of light away and are untouched.  Each
+## affected world loses the same fraction, written to world_pop — the population record — so
+## the loss persists instead of being re-summed away on the next frame.
 func _trigger_pandemic() -> void:
 	var inhabited: int = 1 + colonized_planets.size()
-	var pop: float = float(stats.get("current_population", 0))
+	var affected: Array = []
+	var pop: float = 0.0
+	for w in (["earth"] as Array) + colonized_planets:
+		if world_pop.has(str(w)):
+			affected.append(str(w))
+			pop += float(world_pop[str(w)])
+	if pop <= 0.0:
+		return
 	var kill_frac: float = randf_range(0.70, 0.95) / float(inhabited)
-	var survivors: float = floorf(maxf(MIN_POPULATION, pop * (1.0 - kill_frac)))
-	var lost: float = maxf(0.0, pop - survivors)
-	stats["current_population"] = survivors
+	# Same MIN_POPULATION floor as before, applied to the affected population as a whole.
+	var keep: float = clampf(maxf(1.0 - kill_frac, MIN_POPULATION / pop), 0.0, 1.0)
+	var after: float = 0.0
+	for w: String in affected:
+		world_pop[w] = floorf(float(world_pop[w]) * keep)
+		after += float(world_pop[w])
+	var lost: float = maxf(0.0, pop - after)
+	stats["current_population"] = _total_population()
 	_refresh_stats()
 
 	var notif: Dictionary = {
@@ -6522,7 +6788,7 @@ func _trigger_pandemic() -> void:
 		"year":     year,
 		"title":    "Engineered Pandemic",
 		"desc":     "Engineered-pathogen outbreak recorded. Population change: −%s (−%d%%)." % [
-			Units.format_si_verbose(lost, ""), int(round(kill_frac * 100.0))],
+			Units.format_si_verbose(lost, ""), int(round(lost / pop * 100.0))],
 		"category": "warning",
 	}
 	_pending_event_notifications.append(notif)
@@ -6589,15 +6855,22 @@ func _check_nuclear_war() -> void:
 
 ## A strategic exchange devastates Earth's population and industry.  Off-world colonies
 ## are spared (the conflict is between Earth powers), so spreading out blunts it.
+##
+## The toll lands on Earth's own entry in world_pop — the population record.  Writing only the
+## stats mirror (as this used to) was re-summed away on the next frame, and it also charged
+## the colonies' people to a war they took no part in.
 func _trigger_nuclear_war() -> void:
+	var pop: float = float(world_pop.get("earth", 0.0))
+	if pop <= 0.0:
+		return   # nobody left on Earth to fight it
 	var inhabited: int = 1 + colonized_planets.size()
-	var pop: float = float(stats.get("current_population", 0))
 	var kill_frac: float = randf_range(0.55, 0.90) / float(inhabited)
 	# Whoever Earth's bunkers can hold survives the exchange no matter how bad it gets.
 	var shelter: float = minf(_shelter_capacity("earth"), pop)
 	var survivors: float = _sheltered_survivors("earth", pop, kill_frac)
 	var lost: float = maxf(0.0, pop - survivors)
-	stats["current_population"] = survivors
+	world_pop["earth"] = survivors
+	stats["current_population"] = _total_population()
 
 	# Roughly half of Earth's surface industry is destroyed; one Biomass Burner is left
 	# so power production (and recovery) can't collapse to zero.  Bunkers are hardened
@@ -6619,7 +6892,7 @@ func _trigger_nuclear_war() -> void:
 		"year":     year,
 		"title":    "Nuclear War",
 		"desc":     "Strategic nuclear exchange recorded on Earth. Population change: −%s (−%d%%). Surface industry: heavily degraded.%s" % [
-			Units.format_si_verbose(lost, ""), int(round(kill_frac * 100.0)),
+			Units.format_si_verbose(lost, ""), int(round(lost / pop * 100.0)),
 			"" if shelter <= 0.0 else " Shelters held %s below ground." \
 				% Units.format_si_verbose(shelter, "")],
 		"category": "warning",

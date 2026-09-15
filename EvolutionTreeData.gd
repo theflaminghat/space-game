@@ -27,6 +27,7 @@ const PLANET_EPITHET: Dictionary = {
 	"saturn":  "kronian",
 	"uranus":  "uranian",
 	"neptune": "neptunian",
+	"asteroid_belt": "belter",
 	"moon":    "selenian",
 }
 

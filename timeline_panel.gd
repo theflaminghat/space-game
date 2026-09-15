@@ -68,16 +68,33 @@ func _ready() -> void:
 		spacer.custom_minimum_size = Vector2(8, 0)
 		legend.add_child(spacer)
 
-	# ── Horizontal scroll container ───────────────────────────────────────────
+	# ── The axis, pinned above the cards ─────────────────────────────────────
+	var ruler := TimelineRuler.new()
+	ruler.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root_vbox.add_child(ruler)
+
+	# ── The cards, scrolling down beneath it ──────────────────────────────────
+	# The whole axis (start to heat death) is fitted to the width, so there is nothing to scroll
+	# sideways; vertical scrolling is for a busy moment's cards stacking in rows downward.
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical   = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
 	root_vbox.add_child(scroll)
 
 	_canvas = TimelineCanvas.new()
 	scroll.add_child(_canvas)
+
+	ruler.canvas = _canvas
+	ruler.scroll = scroll
+	_canvas.layout_changed.connect(ruler.queue_redraw)
+	# Refit whenever the panel changes size.  The vertical scrollbar's width is always held back,
+	# so the scale doesn't jump when enough cards stack up for the bar to appear.
+	scroll.resized.connect(func() -> void:
+		var bar: float = scroll.get_v_scroll_bar().get_combined_minimum_size().x
+		_canvas.fit_width(scroll.size.x - bar)
+		ruler.queue_redraw())
 
 # ── Public API ────────────────────────────────────────────────────────────────
 

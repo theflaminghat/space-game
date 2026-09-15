@@ -209,7 +209,8 @@ func _refresh_doctrine_desc(idx: int) -> void:
 	else:
 		parts.append("never answers")
 	if bool(d["first_strike"]):
-		parts.append("fires on sight")
+		parts.append("fires on every civilisation on sight" if str(d.get("targets", "hostile")) == "all"
+			else "fires on hostiles on sight")
 	if not bool(d["forgives"]):
 		parts.append("never forgives")
 	_doctrine_desc.text = "%s

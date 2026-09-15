@@ -1,9 +1,10 @@
 extends Control
 
 ## Screen-space hover/click picker for the 3-D solar view.  Each frame it projects every
-## selectable body (planets, moons, and the Sun) to the screen, finds the one under the
-## cursor, draws a white ring around it, and — on left-click over empty 3-D space —
-## puts the camera pivot on that body.  Screen-space (not physics ray-casting) so it works
+## selectable body (planets, moons, the Sun, and the asteroid belt's hub) to the screen, finds
+## the one under the cursor, draws a white ring around it, and — on left-click over empty 3-D
+## space — puts the camera pivot on that body.  Failing a body, the asteroid belt's whole band
+## is a target too, outlined by its two edges.  Screen-space (not physics ray-casting) so it works
 ## for bodies with no colliders, including the MultiMesh-free cosmetic moons.
 
 ## Smallest clickable screen radius (px) so distant, tiny moons stay easy to hover.
@@ -23,6 +24,9 @@ var _hover_body: Node3D = null
 ## the ring matches the body wherever it sits, instead of a circle that is too small and the
 ## wrong shape near the edges.
 var _hover_poly: PackedVector2Array = PackedVector2Array()
+## When the cursor is over an asteroid belt's band rather than a body, its two projected edges
+## (polylines) — the belt is outlined as the band it is, not as a sphere.
+var _hover_band: Array = []
 
 
 func _ready() -> void:
@@ -45,6 +49,7 @@ func _process(_delta: float) -> void:
 ## Find the selectable body whose screen disc is under the cursor (closest to it on ties).
 func _update_hover() -> void:
 	_hover_body = null
+	_hover_band = []
 	if _planets_root == null:
 		return
 	var cam := get_viewport().get_camera_3d()
@@ -71,6 +76,16 @@ func _update_hover() -> void:
 			best_depth = depth
 			_hover_body = body
 			_hover_poly = poly
+	if _hover_body != null:
+		return
+	# No body under the cursor: is it over an asteroid belt?  The belt is a band, not a sphere,
+	# so it is hit-tested as the annulus it occupies in the orbital plane — anywhere on it
+	# selects it.  Bodies always win, because they are discrete targets drawn in front of it.
+	for child in _planets_root.get_children():
+		if child is AsteroidBelt and (child as AsteroidBelt).band_hit(cam, mouse) < INF:
+			_hover_body = child
+			_hover_band = (child as AsteroidBelt).band_outline(cam)
+			return
 
 
 ## Is the cursor over this body?  Inside the projected outline, or — for a body too small to
@@ -152,7 +167,13 @@ func _selectable_bodies() -> Array:
 
 
 func _draw() -> void:
-	if _hover_body == null or _hover_poly.size() < 3:
+	if _hover_body == null:
+		return
+	if not _hover_band.is_empty():
+		for line: PackedVector2Array in _hover_band:
+			draw_polyline(line, RING_COLOR, RING_WIDTH, true)
+		return
+	if _hover_poly.size() < 3:
 		return
 	var ring: PackedVector2Array = _padded(_hover_poly, RING_PAD_PX)
 	ring.append(ring[0])                      # close the loop

@@ -85,6 +85,10 @@ func _process(delta: float) -> void:
 ## True while one of the sidebar's full-area panels is open, so keyboard input belongs to it
 ## rather than to the camera behind it.
 func _ui_panel_open() -> bool:
+	# Full-screen overlays (the encyclopedia) register themselves in this group.
+	for overlay in get_tree().get_nodes_in_group("ui_overlay"):
+		if overlay.visible:
+			return true
 	var scene := get_tree().current_scene
 	if scene == null:
 		return false

@@ -50,6 +50,12 @@ func set_bodies(origins: Array, targets: Array) -> void:
 	_update_arrival_options()
 	_update_cost()
 
+## Hierarchical pickers shown in place of the two option buttons: the Sun and the planets at the
+## top level, moons folded under their planet.  The option buttons stay, hidden, as the selection
+## every other function here reads (see launch_body_picker.gd).
+var _origin_picker: LaunchBodyPicker = null
+var _target_picker: LaunchBodyPicker = null
+
 @onready var origin_option:   OptionButton  = $MarginContainer/VBoxContainer/FormGrid/OriginOption
 @onready var planet_option:   OptionButton  = $MarginContainer/VBoxContainer/FormGrid/PlanetOption
 @onready var mission_option:  OptionButton  = $MarginContainer/VBoxContainer/FormGrid/MissionOption
@@ -86,10 +92,6 @@ var _launch_mods: Dictionary = {}
 ## Live orbital angle (radians) of each planet, pushed by Game.gd:
 ## { planet_name_lower → orbit_angle }.  Drives the launch-window energy penalty.
 var _planet_angles: Dictionary = {}
-
-## Global mission-duration multiplier from policy (e.g. nuclear propulsion = 0.8),
-## pushed by Game.gd so the displayed transit time matches what actually happens.
-var _mission_dur_mult: float = 1.0
 
 ## Dyson-swarm state pushed by Game.gd, so a Solar Deployment can show its satellite
 ## payload and refuse to fly with nothing to carry (or a full swarm).
@@ -161,6 +163,10 @@ func _ready() -> void:
 	vbox.move_child(fuel_section, date_section.get_index())
 	_populate_fuels()
 
+	# Swap each body option button for a hierarchical picker in the same grid cell.
+	_origin_picker = _replace_with_picker(origin_option)
+	_target_picker = _replace_with_picker(planet_option)
+
 	_populate_origin()
 	_populate_planets()
 	_populate_missions()
@@ -191,15 +197,16 @@ func set_game_date(y: int, m: int, d: int) -> void:
 func set_current_planet(planet_name: String) -> void:
 	if planet_name == "":
 		return
-	var cap := planet_name.capitalize()
-	for i: int in range(PLANETS.size()):
-		if PLANETS[i] == cap:
-			origin_option.selected  = i
-			planet_option.selected  = i   # target = same planet → local orbit
-			arrival_option.selected = 0   # "Orbit" (not Land)
-			_update_duration()
-			_update_cost()
-			break
+	# By body id: a moon's display name ("Luna") is not its id capitalised ("Earth Moon 0").
+	var o: int = _origin_ids.find(planet_name)
+	var t: int = _target_ids.find(planet_name)
+	if o < 0 or t < 0:
+		return
+	origin_option.selected  = o
+	planet_option.selected  = t   # target = same body → local orbit
+	arrival_option.selected = 0   # "Orbit" (not Land)
+	_update_duration()
+	_update_cost()
 
 ## Push the Dyson-swarm state (per-planet satellite stock + deployed/cap) so a Solar
 ## Deployment mission can size and gate its payload.
@@ -399,12 +406,27 @@ func _populate_origin() -> void:
 	origin_option.clear()
 	for p in PLANETS:
 		origin_option.add_item(p)
-	origin_option.selected = 2   # default Earth; overridden by set_current_planet()
+	# Default Earth, by id rather than by position; overridden by set_current_planet().
+	origin_option.selected = maxi(0, _origin_ids.find("earth"))
+	if _origin_picker:
+		_origin_picker.set_entries(PLANETS, _origin_ids)
 
 func _populate_planets() -> void:
 	planet_option.clear()
 	for p in TARGETS:
 		planet_option.add_item(p)
+	if _target_picker:
+		_target_picker.set_entries(TARGETS, _target_ids)
+
+## Put a hierarchical picker where `opt` sits in the form grid and hide `opt` (a hidden grid child
+## takes no cell).  The option keeps holding the selection; the picker drives it.
+func _replace_with_picker(opt: OptionButton) -> LaunchBodyPicker:
+	var picker := LaunchBodyPicker.new(opt)
+	var parent: Node = opt.get_parent()
+	parent.add_child(picker)
+	parent.move_child(picker, opt.get_index() + 1)
+	opt.visible = false
+	return picker
 
 ## The Sun can only be orbited, never landed on — disable "Land" while it's the
 ## selected target (and snap any stale Land selection back to Orbit).
@@ -460,11 +482,6 @@ func set_orbital_state(angles: Dictionary) -> void:
 	_update_duration()   # transfer distance (and thus time) depends on positions
 	_update_cost()
 
-## Push the policy-driven mission-duration multiplier (e.g. nuclear propulsion) so
-## the transit time shown to the player is the same time the mission really takes.
-func set_mission_duration_mult(m: float) -> void:
-	_mission_dur_mult = m
-	_update_duration()
 
 ## Launch-window energy multiplier (≥ 1.0) from the actual path between the planets
 ## at the chosen start date (see LaunchPlanner.path_energy_factor).
@@ -525,9 +542,9 @@ func _is_local_orbit() -> bool:
 		return false
 	return PLANETS[o_idx] == TARGETS[t_idx] and arrival_option.selected == 0
 
-## Combined duration multiplier: origin infrastructure (Space Elevator) × policy.
+## Duration multiplier from origin infrastructure (a Space Elevator).
 func _duration_mult() -> float:
-	return float(_origin_mods().get("duration", 1.0)) * _mission_dur_mult
+	return float(_origin_mods().get("duration", 1.0))
 
 func _selected_duration_days() -> int:
 	var o := _origin_name()

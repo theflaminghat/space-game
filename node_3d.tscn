@@ -1,20 +1,20 @@
 [gd_scene format=4 uid="uid://b0jhti3oe1xq6"]
 
-[ext_resource type="Texture2D" uid="uid://ce2cfyegxnmd" path="res://jupitervector.png" id="1_a202f"]
 [ext_resource type="Script" uid="uid://1yr2gr3hwj45" path="res://Game.gd" id="1_s0gvp"]
 [ext_resource type="Script" uid="uid://cee8q3xh7034x" path="res://camera_3d.gd" id="2_6iypd"]
 [ext_resource type="Script" uid="uid://bwixcgejmawaf" path="res://planet.gd" id="2_a0tk4"]
 [ext_resource type="Texture2D" uid="uid://d3els1phlgod2" path="res://my_image.png" id="2_noarx"]
 [ext_resource type="Script" uid="uid://cyalbtwe5bu3w" path="res://init_planets.gd" id="2_wlxy5"]
 [ext_resource type="Script" uid="uid://621s2gy68mxp" path="res://pausemenu.gd" id="3_jsk3o"]
-[ext_resource type="Texture2D" uid="uid://5p34rrgmrs1g" path="res://mercury.jpg" id="3_tcnuu"]
+[ext_resource type="Texture2D" uid="uid://dvy8uilrb1gxm" path="res://mercury.png" id="3_tcnuu"]
 [ext_resource type="Script" uid="uid://bxnd1yr1e3jyy" path="res://quit.gd" id="3_wc5p8"]
 [ext_resource type="Texture2D" uid="uid://dyn54tyxkccua" path="res://venus.png" id="5_3v7ru"]
 [ext_resource type="Script" uid="uid://cvr7gn0ykrfxg" path="res://camera_pivot.gd" id="5_cdqbm"]
-[ext_resource type="Texture2D" uid="uid://b6wbyq5ik0uue" path="res://earth.jpg" id="6_ealrb"]
+[ext_resource type="Texture2D" uid="uid://e3k7iganmx6" path="res://earth.png" id="6_ealrb"]
 [ext_resource type="Script" uid="uid://bumnblklwqp5m" path="res://player.gd" id="6_i5arm"]
-[ext_resource type="Texture2D" uid="uid://ij6cvj5l3rek" path="res://mars.svg" id="7_ealrb"]
-[ext_resource type="Texture2D" uid="uid://5qs0s4kob0ln" path="res://jupiter.jpg" id="7_tuemg"]
+[ext_resource type="Texture2D" uid="uid://ctb6hgk4g31h8" path="res://mars.png" id="7_ealrb"]
+[ext_resource type="Texture2D" uid="uid://bg8daplko6ies" path="res://jupiter.png" id="7_tuemg"]
+[ext_resource type="Texture2D" uid="uid://c2tb3lsvyqyp" path="res://saturn.png" id="8_saturn"]
 [ext_resource type="Texture2D" uid="uid://y38b2p0sa6r" path="res://neptune.png" id="9_i0g27"]
 [ext_resource type="Script" uid="uid://dpowh6itxdbvx" path="res://Schwarztiling.gd" id="9_s0gvp"]
 [ext_resource type="Script" uid="uid://dhcbbcs25wqx8" path="res://satellite.gd" id="11_dhlwf"]
@@ -118,10 +118,9 @@ albedo_color = Color(0.874281, 0.342513, 0.0604839, 1)
 albedo_texture = ExtResource("7_tuemg")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_4arys"]
-albedo_texture = ExtResource("1_a202f")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tereu"]
-albedo_color = Color(1, 0.731753, 0.42935, 1)
+albedo_texture = ExtResource("8_saturn")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cdqbm"]
 albedo_color = Color(0.69682, 1, 0.995453, 1)

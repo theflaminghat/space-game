@@ -6,6 +6,36 @@ class_name DevConsole
 
 var _game: Node = null
 
+## Every command the console understands.  `help` prints this list and the encyclopedia builds
+## its Console pages from it, so a command added here is documented in both places.  The
+## behaviour itself is in _run().
+const COMMANDS: Array = [
+	{"name": "help", "aliases": [], "args": "",
+		"summary": "list commands",
+		"detail": "Prints every command with a one-line summary."},
+	{"name": "impact", "aliases": [], "args": "",
+		"summary": "trigger an asteroid impact now",
+		"detail": "An asteroid strikes a random inhabited world in the Sol system immediately, with no warning dialog and no chance to intercept. The toll is rolled fresh: 50–85 % of that world's population, divided by the number of inhabited worlds in the system, less whoever its bunkers hold. Every structure there except bunkers and one Biomass Burner is destroyed."},
+	{"name": "solar", "aliases": ["redgiant"], "args": "",
+		"summary": "extinction: solar envelope expansion",
+		"detail": "Ends the run immediately with the solar-envelope extinction screen, whatever the civilisation holds elsewhere."},
+	{"name": "nebula", "aliases": [], "args": "",
+		"summary": "extinction: planetary nebula",
+		"detail": "Ends the run immediately with the planetary-nebula extinction screen, whatever the civilisation holds elsewhere."},
+	{"name": "extinct", "aliases": [], "args": "[cause…]",
+		"summary": "generic extinction with a custom cause",
+		"detail": "Ends the run immediately. Any words after the command become the cause shown on the extinction screen; with none, the cause reads \"Console-triggered extinction\"."},
+	{"name": "sandbox", "aliases": [], "args": "",
+		"summary": "(re)write the god-mode sandbox save slot",
+		"detail": "Writes the save slot \"sandbox_1945\": every research node unlocked, very large stockpiles of every material on every world, and every planet colonised in 1945. Load it from the start menu. The start menu also rewrites it every launch."},
+	{"name": "clear", "aliases": [], "args": "",
+		"summary": "clear this log",
+		"detail": "Clears the console's output log."},
+	{"name": "close", "aliases": [], "args": "",
+		"summary": "close the console",
+		"detail": "Closes the console. The backtick key and Escape do the same."},
+]
+
 var _panel:      PanelContainer
 var _output:     RichTextLabel
 var _cmd_input:  LineEdit   # NOT named _input — that would clash with the _input() virtual
@@ -99,13 +129,11 @@ func _run(cmd: String) -> void:
 	match name:
 		"help":
 			_log("Commands:")
-			_log("  [color=#ffd24a]impact[/color]            — trigger an asteroid impact now")
-			_log("  [color=#ffd24a]solar[/color] | redgiant  — extinction: solar envelope expansion")
-			_log("  [color=#ffd24a]nebula[/color]            — extinction: planetary nebula")
-			_log("  [color=#ffd24a]extinct[/color] [cause…]  — generic extinction with a custom cause")
-			_log("  [color=#ffd24a]sandbox[/color]           — (re)write the god-mode sandbox save slot")
-			_log("  [color=#ffd24a]clear[/color]             — clear this log")
-			_log("  [color=#ffd24a]close[/color]             — close the console")
+			for c: Dictionary in COMMANDS:
+				var usage: String = " | ".join([str(c["name"])] + (c["aliases"] as Array))
+				if str(c["args"]) != "":
+					usage += " " + str(c["args"])
+				_log("  [color=#ffd24a]%s[/color]  — %s" % [usage, str(c["summary"])])
 		"impact":
 			if _game.has_method("_trigger_asteroid_impact"):
 				_game._trigger_asteroid_impact()

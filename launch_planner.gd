@@ -15,7 +15,14 @@ const PLANET_ORBIT_AU := {
 	"Mercury": 0.387, "Venus": 0.723, "Earth": 1.0,   "Mars": 1.524,
 	"Jupiter": 5.203, "Saturn": 9.537, "Uranus": 19.191, "Neptune": 30.069,
 	"Sun": 0.05,
+	# Traffic to the belt lands at Ceres, its hub (see asteroid_belt.gd).
+	"Asteroid Belt": 2.7675,
 }
+
+## Key a body's display name to its entry in the orbital-angle map Game supplies (which is keyed
+## by body id: "asteroid_belt", not "asteroid belt").
+static func _angle_key(name: String) -> String:
+	return heliocentric_body(name).to_lower().replace(" ", "_")
 
 const AU_METERS:        float = 1.495978707e11
 const LIGHT_SPEED:      float = 2.998e8    # m/s
@@ -24,8 +31,21 @@ const V_EARTH_KMS:      float = 29.78      # circular heliocentric speed at 1 AU
 const SURFACE_TO_ORBIT_DV: float = 9.0     # Δv every launch pays; the 1.0× baseline
 const PHASE_ENERGY_WEIGHT: float = 1.0     # extra fuel a worst-case window adds
 
+## The planet a launch endpoint circles the Sun with: the endpoint itself, or a moon's parent.
+## Accepts a moon's display name ("Luna", what the LaunchPanel passes) or its capitalised body id
+## ("Earth Moon 0", what the automation executor passes).  Without this every moon fell through
+## to the 1 AU default and was costed as if it orbited where Earth does.
+static func heliocentric_body(name: String) -> String:
+	if PLANET_ORBIT_AU.has(name):
+		return name
+	var id: String = name.to_lower().replace(" ", "_")
+	for mid: String in PlanetData.MOON_NAMES:
+		if mid == id or str(PlanetData.MOON_NAMES[mid]) == name:
+			return mid.substr(0, mid.find("_moon_")).capitalize()
+	return name
+
 static func orbit_au(name: String) -> float:
-	return float(PLANET_ORBIT_AU.get(name, 1.0))
+	return float(PLANET_ORBIT_AU.get(heliocentric_body(name), 1.0))
 
 ## Mean motion (rad/day) of a circular orbit at semi-major axis a_au.
 static func mean_motion(a_au: float) -> float:
@@ -53,8 +73,9 @@ static func transfer_distance_au(origin: String, target: String,
 		angles: Dictionary, offset_days: float) -> float:
 	var r1: float = orbit_au(origin)
 	var r2: float = orbit_au(target)
-	var ol := origin.to_lower()
-	var tl := target.to_lower()
+	# A moon rides its planet's orbital angle.
+	var ol := _angle_key(origin)
+	var tl := _angle_key(target)
 	if angles.has(ol) and angles.has(tl):
 		var a1: float = float(angles[ol]) + mean_motion(r1) * offset_days
 		var a2: float = float(angles[tl]) + mean_motion(r2) * offset_days
@@ -69,8 +90,11 @@ static func path_energy_factor(origin: String, target: String,
 		angles: Dictionary, offset_days: float) -> float:
 	if origin == target:
 		return 1.0
-	var ol := origin.to_lower()
-	var tl := target.to_lower()
+	var ol := _angle_key(origin)
+	var tl := _angle_key(target)
+	# A planet and its own moon share a heliocentric orbit — there is no window to phase.
+	if ol == tl:
+		return 1.0
 	if not (angles.has(ol) and angles.has(tl)):
 		return 1.0
 	var a1: float = orbit_au(origin)
@@ -86,7 +110,7 @@ static func path_energy_factor(origin: String, target: String,
 
 ## Transit time in days.  Local orbit insertion (origin == target) is a fixed
 ## baseline; an interplanetary transfer is a brachistochrone floored at light-time.
-## `dur_mult` folds in origin infrastructure + policy duration discounts.
+## `dur_mult` folds in the origin's infrastructure discount (a Space Elevator).
 static func duration_days(origin: String, target: String, arrival: String,
 		accel: float, angles: Dictionary, offset_days: float, dur_mult: float) -> int:
 	if origin == target:

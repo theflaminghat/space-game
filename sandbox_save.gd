@@ -15,7 +15,7 @@ const SLOT_NAME: String = "sandbox_1945"
 ## Every world colonised at game start.  Earth is home (not in colonized_planets) but
 ## still gets a 1945 lineage epoch like the rest.
 const WORLDS: Array = [
-	"earth", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune",
+	"earth", "mercury", "venus", "mars", "asteroid_belt", "jupiter", "saturn", "uranus", "neptune",
 ]
 
 ## Per-planet stock of every compound (uncapped).  Raised from 1e12 once the swarm became a
@@ -134,8 +134,21 @@ static func _buildings() -> Dictionary:
 			r["Ranch"] = 1_300
 		else:
 			r["Hydroponics Bay"] = 20
+		# The belt gets only what can stand there (no Space Elevator, no Biomass Burner): unlike the
+		# planets' loadout, the build panel hides everything else on it, so it could never be
+		# managed or demolished.
+		if w == "asteroid_belt":
+			for bname: String in r.keys():
+				if not _allowed_in_belt(bname):
+					r.erase(bname)
 		out[w] = r
 	return out
+
+static func _allowed_in_belt(bname: String) -> bool:
+	for b: Dictionary in BuildingData.BUILDINGS:
+		if str(b["name"]) == bname:
+			return (b.get("allowed_types", []) as Array).has("belt")
+	return false
 
 ## Every world runs a food slate sized to feed it with room to spare.  Earth grows the full
 ## diet on open ground; everywhere else runs algae under lamps, which is what a world with no

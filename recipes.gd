@@ -566,6 +566,18 @@ const RECIPES: Array = [
 		"inputs":  {"Kerosene": 5.0, "O2": 8.0, "energy": 200.0},
 		"outputs": {"Propellant": 6.0},
 	},
+	# Char from asteroid carbon.  Carbonaceous asteroids hold ~3 % organic matter but no coal:
+	# heated without oxygen it gives up its volatiles and leaves char, which reduces ore and
+	# carburises iron exactly as coke does.  Without it a belt settlement could never make steel.
+	# ~1.2 g of organic matter per gram of char once the volatiles are gone.
+	{
+		"name":        "Organic Carbon Pyrolysis",
+		"category":    "fuels",
+		"description": "Pyrolysis of the organic matter in carbonaceous asteroids: heating without oxygen drives off volatiles and leaves char, a carbon reductant interchangeable with coal in smelting and steelmaking.",
+		"requires":    "",
+		"inputs":  {"C": 1.2, "energy": 30.0},
+		"outputs": {"Coal": 1.0},
+	},
 	# NOTE: there is no recipe for fusion fuel.  Helium-3 cannot be manufactured — it is mined,
 	# from lunar regolith where the solar wind implanted it, or condensed out of a gas giant's
 	# envelope.  Reaching it is the point; that is what fusion propulsion actually costs.
