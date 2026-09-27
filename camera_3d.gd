@@ -1,12 +1,14 @@
 extends Camera3D
 
-## The orbit camera's distance from the focused body, in the pivot's local units (1 = the closest
-## framing, about 2× the body's radius — see camera_pivot.gd).
+## The orbit camera's distance from the focused body, in the pivot's local units (1 ≈ twice the
+## body's radius — see camera_pivot.gd).
 ##
-## Zoom is kept as a whole number of steps out from the closest framing, and the distance is worked
-## out from that count, so zooming out and back in any number of times always returns to exactly
-## the same distances.  Each step out is 0.3 longer than the one before: 1, 2.3, 3.9, 5.8, 8.0, …
-const MIN_DIST: float = 1.0
+## Zoom is kept as a whole number of steps out from the closest framing, and the distance is
+## worked out from that count, so zooming out and back in any number of times always returns to
+## exactly the same distances.  Every body is framed at MIN_DIST — as close as the camera goes —
+## when the camera moves to it, and each step out is 0.3 longer than the one before:
+## 1.3, 2.6, 4.2, 6.1, 8.3, …
+const MIN_DIST: float = 1.3
 
 var _zoom_steps: int = 0
 

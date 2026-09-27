@@ -46,7 +46,8 @@ const LEVEL_OUTPUT_KEYS: Array = ["production", "storage", "consumption"]
 ## Bare numeric keys scaled the same way.
 const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacity", "habitat",
 	"atmo_rate", "radiator_capacity", "detection", "shelter",
-	"beam_send", "beam_recv"]
+	"beam_send", "beam_recv", "star_lift_power", "shade_fraction", "husbandry_power",
+	"mirror_coverage"]
 
 # ── Single buildings, not complexes ───────────────────────────────────────────
 ## Entries were originally authored at REGIONAL FLEET scale — one "Coal Plant" meant 132 GW of
@@ -145,6 +146,15 @@ static func all() -> Array:
 
 ## How many tiers a building has: its explicit "levels", or LEVEL_COUNT when it has any scalar
 ## output worth scaling.  A structure that only carries special effects gets no tiers.
+## One catalogue entry by name (any tier), or {} if there is no such building.  Game keeps its
+## own O(1) cache for the hot path; this is for the panels, which ask rarely.
+static func find(building_name: String) -> Dictionary:
+	for b: Dictionary in all():
+		if str(b.get("name", "")) == building_name:
+			return b
+	return {}
+
+
 static func _levels_for(b: Dictionary) -> int:
 	if b.has("levels"):
 		return maxi(1, int(b["levels"]))
@@ -224,6 +234,7 @@ const DESCRIPTIONS: Dictionary = {
 	"Natural Gas Burner": "Combined-cycle gas turbine. Emits about half the CO₂ of a coal station per watt generated. Burns natural gas (CH₄) from its world's inventory.",
 	"Oil Plant": "Oil-fired steam station. Burns refined fuel oil, not crude: crude must first pass through Oil Refining. Crude oil is scarce in Earth's crust, so mining alone cannot sustain a large oil fleet.",
 	"Matter Depot": "Steel silos and concrete bunkers. Raises the civilisation-wide matter storage cap. Ground only.",
+	"Orbital Construction Station": "Docks, gantries and a foundry flying free. The only manufacturing capacity that needs no ground under it, and the difference between a stellar build site that raises a megastructure in a human lifetime and one that takes an age. Solar orbit starts with nothing but its baseline industry, and the first station cannot be built where there is no industry, so it is flown out prefabricated from a world that has some.",
 	"Battery Bank": "Grid-scale electrochemical storage. Raises the civilisation-wide energy storage cap.",
 	"Flywheel Array": "Rotors spun in vacuum housings, storing energy kinetically. Raises the energy storage cap; can stand on gas giants.",
 	"Pumped Hydro Storage": "Water pumped uphill behind a dam. The only grid-scale energy store of 1945. Needs terrain and gravity, so rocky bodies only.",
@@ -261,6 +272,10 @@ const DESCRIPTIONS: Dictionary = {
 	"Stellar Rectenna Grid": "Receiving aperture at planetary-orbit scale, sized to land a Dyson swarm's output.",
 	"Swarm Relay Network": "Phased transmitting apertures strung between the swarm's collectors and the worlds that use the power.",
 	"Orbital Ring Store": "Superconducting loop of orbital diameter, holding current indefinitely. Stellar-scale energy storage.",
+	"Sunshade Constellation": "Light sails flown sunward of the inner worlds, held in place by the pressure of the light they block. They do nothing to the star — they stand between it and the planets. Shading offsets greenhouse warming directly, so a cooked Earth recovers, but every solar collector on a shaded world makes proportionally less, and shading past what the CO₂ is doing cools the world below its ceiling again.",
+	"Shkadov Mirror": "A statite sail flown to one side of the Sun: it reflects the star's light back, and the star feels the recoil. It burns nothing and needs no crew — the engine is the star itself, and the mirrors only have to exist. Thrust is a fraction of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century; left standing for geological time it moves the solar system light-years. A brighter star pushes harder and a lighter one is easier to push, so lifting cuts both ways. Aim it from the star map.",
+	"Core Mixing Array": "Driven circulation reaching from the Sun's envelope into its core, feeding it unburnt hydrogen it would never otherwise meet. Costs energy and returns time: the star's clock runs backwards while the array works, though never past the year the run began. Unlike lifting it removes no mass, so the Sun keeps its light — and yields nothing but the extra years.",
+	"Star Lifter": "Magnetic nozzles standing off the photosphere, driving a controlled wind off the Sun and collecting it as hydrogen. Draws its rated power from the civilisation's reserve and converts it into lifted mass at the binding energy of the material removed. Every kilogram taken off Sol dims it slightly and lengthens its life: the red-giant date moves further away for as long as the lifters run. The hydrogen lands in the Sun's own inventory.",
 	"Space Elevator": "Carbon-composite tether from the surface to beyond geostationary altitude. Launches departing its world need fewer vehicles and less propellant and arrive sooner. Also generates power.",
 	"Orbital Vault": "Sealed orbital storage domes. Raises the matter storage cap; unlike the Matter Depot, it can be built in solar orbit and on gas giants.",
 	"Orbital Battery": "Orbital battery farm. Raises the energy storage cap.",
@@ -575,6 +590,23 @@ const BUILDINGS := [
 		"production": {},
 		"mc_capacity": 600_000.0},
 
+	# Orbital Construction Station — a shipyard rather than a factory: docks, gantries, robotic
+	# arms and a foundry, flying free.  It is the only source of Manufacturing Capacity that does
+	# not need ground under it, which is what makes stellar-scale work practical.
+	#
+	# Solar orbit has BASE_MC and nothing else (see Game._planet_mc_capacity): the bill of
+	# materials on a Star Lifter or a swarm-class radiator is enormous, and ground-based industry
+	# cannot be trucked to the Sun.  Without a station, raising one there takes geological time.
+	# The first station cannot be built where there is no industry either, so it is flown out
+	# prefabricated — see the delivery missions in missions.gd.
+	{"name": "Orbital Construction Station",
+		"category": "industry",
+		"allowed_types": ["star", "rocky", "gas_giant", "belt"],
+		"cost": {"Steel": 260_000, "Al": 90_000, "Microchip": 40_000,
+			"Superconductor": 15_000, "energy": 420_000},
+		"production": {},
+		"mc_capacity": 500_000.0},
+
 	# Orbital Laser — a star-scale directed-energy weapon ringing the world it's built on.
 	# It can discharge the whole energy reserve in a single shot; firing it at another
 	# planet devastates the target — but channelling that much power through the array
@@ -776,6 +808,71 @@ const BUILDINGS := [
 			"QuantumProcessor": 900_000, "Al": 15_000_000, "energy": 60_000_000},
 		"production": {},
 		"beam_send": 2.5e21},
+
+	# Star Lifter — magnetic nozzles standing off the photosphere, driving a controlled wind off
+	# the Sun and catching what comes away.  The only structure in the game that changes the star
+	# rather than living off it: every kilogram it removes dims Sol slightly and, far more to the
+	# point, lengthens its life (see star_model.gd and SolarSystem's star section).
+	#
+	# It is a pure consumer, and an enormous one: "star_lift_power" is what a single lifter draws
+	# from the civilisation's reserve, and the mass that comes back is fixed by the binding energy
+	# of the material removed.  One lifter at full power takes roughly 3e17 kg a year off the Sun
+	# — about a hundred-millionth of a percent of it.  This is deep-time work, and it is meant to
+	# be: a serious campaign means hundreds of them and a swarm to feed them.
+	{"name": "Star Lifter",
+		"category": "support",
+		"allowed_types": ["star"],
+		"cost": {"Metamaterial": 14_000_000, "Superconductor": 16_000_000,
+			"SelfHealingComposite": 9_000_000, "CarbonNanotube": 7_000_000,
+			"Ti": 20_000_000, "energy": 80_000_000},
+		"production": {},
+		"star_lift_power": 1.0e22},
+
+	# Sunshade Constellation — light sails flown sunward of the inner worlds, held against
+	# gravity by the pressure of the light they intercept.  They change nothing about the star:
+	# they stand between it and the planets, so what they block never arrives.
+	#
+	# Two consequences, and the player owns both.  A warmed Earth cools, because shading offsets
+	# greenhouse forcing directly.  And every solar collector on a shaded world makes less, which
+	# is the price.  Overshoot and the ceiling falls again on the other side — an iced world is
+	# as hostile as a cooked one.
+	{"name": "Sunshade Constellation",
+		"category": "support",
+		"allowed_types": ["star"],
+		"cost": {"Metamaterial": 6_000_000, "Aerogel": 9_000_000, "Graphene": 7_000_000,
+			"Al": 12_000_000, "energy": 25_000_000},
+		"production": {},
+		"shade_fraction": 2.0e-5},
+
+	# Shkadov Mirror — a statite sail flown to one side of the Sun, reflecting its light back and
+	# letting the star feel the recoil.  The only structure in the game that moves the solar
+	# system itself.
+	#
+	# It burns nothing: the engine is the star, and the mirrors only have to exist.  What they
+	# cost is time — the thrust is a fraction of L/c against two thousand billion billion billion
+	# kilograms, so the star answers in millimetres per second per century and the payoff is a
+	# civilisation-long project measured in light-years.  "mirror_coverage" is the share of the
+	# sky one segment covers.
+	{"name": "Shkadov Mirror",
+		"category": "support",
+		"allowed_types": ["star"],
+		"cost": {"Metamaterial": 9_000_000, "Aerogel": 14_000_000, "Graphene": 11_000_000,
+			"SelfHealingComposite": 6_000_000, "energy": 40_000_000},
+		"production": {},
+		"mirror_coverage": 5.0e-5},
+
+	# Core Mixing Array — the surgical end of stellar engineering.  Where a lifter throws mass
+	# away, this stirs the star: circulation driven from outside, carrying unburnt hydrogen from
+	# the envelope down to a core that would never otherwise meet it.  The star's clock runs
+	# backwards while it works, and nothing else about Sol changes.
+	{"name": "Core Mixing Array",
+		"category": "support",
+		"allowed_types": ["star"],
+		"cost": {"Metamaterial": 18_000_000, "Superconductor": 20_000_000,
+			"QuantumProcessor": 2_000_000, "SelfHealingComposite": 12_000_000,
+			"Ti": 25_000_000, "energy": 120_000_000},
+		"production": {},
+		"husbandry_power": 1.0e22},
 
 	# Orbital Ring Store — a superconducting loop the diameter of a planet's orbit, holding
 	# current indefinitely.  A swarm's output is only useful if it can be banked between the

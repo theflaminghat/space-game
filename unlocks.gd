@@ -49,6 +49,13 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Stellar Rectenna Grid": "megastructure_materials",
 	"Swarm Relay Network":   "megastructure_materials",
 	"Orbital Ring Store":    "megastructure_materials",
+	# Taking Sol apart needs its own breakthrough — the swarm only supplies the power for it.
+	# Building in orbit at all is what this node is for; a shipyard is its largest expression.
+	"Orbital Construction Station": "precision_orbital_construction",
+	"Star Lifter":           "star_lifting",
+	"Sunshade Constellation": "solar_shading",
+	"Core Mixing Array":     "stellar_husbandry",
+	"Shkadov Mirror":        "stellar_propulsion",
 	"Space Elevator":  "nanostructured_materials",
 	"Matter Depot":    "",
 	"Battery Bank":    "",

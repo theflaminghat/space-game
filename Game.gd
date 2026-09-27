@@ -1,30 +1,29 @@
 extends Node
 
-# ── Timescale constants ────────────────────────────────────────────────────────
-## Real seconds per in-game day at the very start of the game.
-const TIMESCALE_INIT:  float = 0.25
-## Timescale falloff.  NOT an exponential.
-##
-## exp(-DECAY x elapsed) is uniform in ABSOLUTE years, so however gently it is tuned it spends
-## all its resolution on the first few centuries and then compresses everything after: at the
-## old 0.012 the whole span from one thousand years to a million passed instantly, which is
-## most of the game's actual subject.
-##
-## A power law is uniform in ORDERS OF MAGNITUDE instead.  With P near 1 each decade of game
-## time costs a comparable slice of real time, so the player spends real minutes in the
-## thousands, the tens of thousands and the hundreds of thousands rather than watching them
-## flick past.  P slightly above 1 tapers the far end so the road to heat death still shortens.
-##
-##   seconds_per_day = INIT / (1 + elapsed / T0) ^ POWER
-##
-## T0 sets how long the opening rate holds before the falloff bites; POWER sets how much each
-## successive decade is compressed relative to the last.
-const TIMESCALE_T0:    float = 20.0
-const TIMESCALE_POWER: float = 1.2
-## Minimum seconds per day (maximum speed).  At 1e-9, ~2.74M game-years/real-sec.
-const TIMESCALE_MIN:   float = 1e-9
+# ── Timescale ─────────────────────────────────────────────────────────────────
+## Real seconds per in-game day at 1×.  Time itself runs at this one rate for the whole run: the
+## game never decides the speed for the player.  How fast a run moves is the player's to choose
+## from the top bar, and the faster settings are earned by getting there.
+const TIMESCALE_BASE:  float = 0.25
 ## Below this threshold switch from day-by-day to year-based fast mode.
 const FAST_THRESHOLD:  float = 5e-4
+
+## The speed ladder: what each button multiplies the base rate by, and the year the run has to
+## reach before it can be pressed.  The rungs keep pace with the eras they have to cross — the
+## century after 2026 at 100×, and the hundred million years after that at a billion× — so deep
+## time stays crossable in minutes while the opening decades still run day by day.
+const SPEED_TIERS: Array = [
+	{"mult": 1.0,     "year": 1945,      "label": "1×"},
+	{"mult": 2.0,     "year": 1945,      "label": "2×"},
+	{"mult": 5.0,     "year": 1960,      "label": "5×"},
+	{"mult": 20.0,    "year": 1990,      "label": "20×"},
+	{"mult": 100.0,   "year": 2026,      "label": "100×"},
+	{"mult": 1.0e3,   "year": 2100,      "label": "1k×"},
+	{"mult": 1.0e4,   "year": 2500,      "label": "10k×"},
+	{"mult": 1.0e5,   "year": 10000,     "label": "100k×"},
+	{"mult": 1.0e7,   "year": 100000,    "label": "10M×"},
+	{"mult": 1.0e9,   "year": 10000000,  "label": "1B×"},
+]
 
 # ── Planet type lookup ────────────────────────────────────────────────────────
 ## Maps each planet name to the type string used by BuildingData.allowed_types.
@@ -52,13 +51,11 @@ const MOON_COMPOSITION: Dictionary = {
 }
 
 # ── Extinction-event thresholds ────────────────────────────────────────────────
-## Year the Sun reaches Earth's orbit at RGB tip — used for the HUD warning only.
-## Actual extinction is driven by dynamic engulfment in _check_extinction_events.
-const SUN_RED_GIANT_YEAR:    int = 7_590_000_000
-## HUD warning starts this many years before Earth is engulfed.
-const SUN_WARNING_YEAR:      int = SUN_RED_GIANT_YEAR - 1_000_000
-## After this year the Sun has ejected its envelope; all solar-system life ends.
-const PLANETARY_NEBULA_YEAR: int = 8_210_000_000
+## The Sun's end is no longer a date on the calendar: lighten the star and it arrives later.
+## These read the star's current state, so a run that never touches Sol gets the same figures it
+## always did (7.59 B and 8.21 B).  See star_model.gd and SolarSystem's star section.
+## Actual extinction is driven by dynamic engulfment in _check_extinction_events; the two dates
+## themselves are methods further down (sun_red_giant_year / sun_nebula_year).
 
 ## Orbital semi-major axes (AU) for each planet — used to determine engulfment order.
 const PLANET_ORBIT_AU: Dictionary = {
@@ -67,8 +64,8 @@ const PLANET_ORBIT_AU: Dictionary = {
 
 	"jupiter": 5.203, "saturn":  9.537, "uranus": 19.191, "neptune": 30.069,
 }
-## Physical radius of the present-day Sun in AU.
-const SUN_RADIUS_BASE_AU: float = 0.00465
+## Physical radius of the present-day Sun in AU (kept with the rest of its physics).
+const SUN_RADIUS_BASE_AU: float = StarModel.SUN_RADIUS_BASE_AU
 
 # ── Population model ────────────────────────────────────────────────────────────
 # Population follows logistic growth toward a carrying capacity (K) that is set by
@@ -291,7 +288,7 @@ func _swarm_power() -> float:
 		var n: int = mini(remaining, _swarm_lane_cap(lane))
 		total += float(n) * SWARM_SAT_POWER * pow(SWARM_INNER_AU / _swarm_lane_au(lane), 2.0)
 		remaining -= n
-	return total * SWARM_COLLECTORS_PER_PANEL * Planet.sun_luminosity_lsun(year)
+	return total * SWARM_COLLECTORS_PER_PANEL * SolarSystem.sun_luminosity_lsun(float(year))
 var colonized_planets: Array = []     # planets that have received a completed Colony Ship
 
 ## Interstellar colonies and in-flight colony ships (from the star map).
@@ -343,6 +340,8 @@ const VN_MASS_FRAC:      float = 0.05        # probes are light — a fraction o
 ## the galaxy can fill hands-free without a per-colony cost explosion.  _regions: cell id → record.
 var _regions: Dictionary = {}
 var _region_last_year: float = 2026.0
+## The year the seeded clusters were last advanced (see _settle_clusters).
+var _cluster_last_year: float = 2026.0
 const DETAILED_RADIUS_LY:   float = 2500.0   # inside this radius = individual colonies; outside = regions
 const HEX_HEIGHT_LY:        float = 6000.0   # prism height (ly): one tile spans the galaxy's full thickness
 ## Hex circumradius.  Sized so BOTH landmarks land on tile centres: the lattice is anchored on
@@ -380,6 +379,15 @@ var interstellar_attacks: Array = []
 ## Alien presence at stars: star_name → "aggressive" | "peaceful" (the TRUE alignment).
 ## Seeded per game.  Hidden from the player until its signature is detected — see below.
 var star_factions: Dictionary = {}
+## The polity holding each inhabited star: star_name → faction id.  star_factions above keeps
+## holding the ALIGNMENT, because everything from diplomacy to the map colours reads it; this is
+## the identity layer on top of it (see polities.gd).
+var star_polity: Dictionary = {}
+## Registries for what those ids mean, filled as systems are seeded: id → the dict polities.gd
+## produced.  Saved, so a run's neighbours keep their names even if the generator ever changes.
+var _factions: Dictionary = {}
+var _races: Dictionary = {}
+
 ## Which alien systems' alignments the player has discovered (via colony contact).  A
 ## detected-but-unvisited system shows "unknown" (yellow); contact reveals red/blue.
 var _known_alignments: Dictionary = {}
@@ -401,6 +409,28 @@ const ALIEN_DETECT_BASE:  float = 2.0e-3   # per-year detect chance at 1 ly with
 ## what the civilisation can resolve — the payoff for a mission that claims nothing.
 const RELAY_DETECT_GAIN:  float = 0.08
 const ALIEN_SPREAD_RATE:  float = 3.0e-4   # per-year chance each alien system founds another
+## Systems one government can hold before its far colonies stop taking orders.  Past this a new
+## colony founds a BREAKAWAY state of the same species instead of joining its parent — the same
+## thing the player's own colonies do at their split threshold.
+const POLITY_SPLIT_SYSTEMS: int = 40
+## Most colonisations resolved in one call.  A deep-time slice can ask for tens of thousands at
+## once; past this they simply do not all happen, which is preferable to a multi-second freeze
+## while the galaxy fills in a single tick.
+const ALIEN_SPREAD_PER_CALL: int = 200
+## Per-year chance each aggressive alien system tries to take a neighbouring system from another
+## government.  Rarer than colonising an empty star: an inhabited system fights back.
+const ALIEN_WAR_RATE: float = 1.2e-4
+## Conquests resolved in one call, for the same reason colonisations are capped.
+const ALIEN_WAR_PER_CALL: int = 60
+## How far a raid reaches.  A government cannot project force across the galaxy; beyond this the
+## light-lag makes the attempt meaningless.
+const ALIEN_WAR_REACH_LY: float = 400.0
+## Years of a conquered system's development undone by the taking of it.
+const ALIEN_CONQUEST_SETBACK_YEARS: float = 50_000.0
+## Candidate systems examined when choosing where a colony goes.  The nearest of a random sample
+## rather than the nearest of all: with thousands of alien systems and thousands of targets, the
+## exhaustive search was minutes of scanning per century of game time.
+const ALIEN_SPREAD_SAMPLE: int = 32
 const TELESCOPE_BASE_POWER: float = 1.0    # naked-eye/base astronomy every civilisation has
 
 ## Hostile aggression: aggressive systems fling relativistic kinetic missiles (RKKVs) at
@@ -447,9 +477,12 @@ var cluster_colonized: Dictionary = {}
 ## the galaxy maps read it every frame and on every mouse move.
 var _tile_presence: Dictionary = {}
 var _tile_presence_year: int = -1
-## Share of a cluster one arriving probe settles.  A probe seeds a foothold that then spreads
-## on its own, so the bite is meaningful without being the whole thing.
-const CLUSTER_CLAIM_PER_PROBE: float = 0.25
+## How fast a seeded cluster settles itself, per year.  One probe is the whole requirement: it
+## lands, the cluster starts at nothing, and the foothold spreads from there without being sent
+## anything else.  The rate is REGION_SATURATE_RATE, the same law the statistical regions fill
+## by, so a cluster and a region of the galaxy settle at the same pace (~250 000 years) rather
+## than by two different rules.
+const CLUSTER_SATURATE_RATE: float = REGION_SATURATE_RATE
 ## Orders each in-flight or arrived probe lineage is operating under: star → {mission, doctrine}.
 var _vn_orders: Dictionary = {}
 ## Stars and clusters hosting a self-replicating lineage — every place a probe arrived and did
@@ -533,8 +566,24 @@ var _cached_storage_caps: Dictionary = {"minerals": 100_000.0, "energy": 100_000
 var game_over: bool = false
 ## Set to true (by future interstellar mission logic) to survive the red-giant event.
 var has_left_solar_system: bool = false
-## User-chosen speed multiplier (slow / normal / fast buttons).
+## Sharpens the selected body's surface map (see body_texture_hires.gd).
+var _body_hires: BodyTextureHires = null
+
+## What the core mixing arrays actually drew last tick, in watts.
+var _husbandry_rate_w: float = 0.0
+
+## What the star lifters actually drew last tick, in watts.  They spend from the reserve rather
+## than from generation — a lifter can run off banked energy — so the HUD nets this off the
+## generation rate itself, or the reserve would be seen falling with nothing to explain it.
+var _star_lift_rate_w: float = 0.0
+
+## The speed the player has chosen: an index into SPEED_TIERS and the multiplier it gives.
+var _speed_tier: int = 0
 var _user_speed_mult: float = 1.0
+## The top-bar speed buttons, one per tier, and how many tiers were unlocked when they were last
+## refreshed (so a newly earned one is noticed and announced exactly once).
+var _speed_buttons: Array = []
+var _speed_tiers_unlocked: int = 0
 ## Last year we pushed a stats snapshot (used to throttle in fast mode).
 var _last_snapshot_year: int = 2026
 ## Cumulative number of humans ever born (Population Reference Bureau-style estimate)
@@ -927,6 +976,7 @@ func start_new_game() -> void:
 	_vn_milestone_idx = 0
 	_regions = {}
 	_region_last_year = float(year)
+	_cluster_last_year = float(year)
 	interstellar_attacks = []
 	incoming_attacks = []
 	outgoing_messages = []
@@ -1066,7 +1116,9 @@ func start_new_game() -> void:
 	_pop_cap_mult_cache = -1.0
 	game_over              = false
 	has_left_solar_system  = false
-	_user_speed_mult       = settings_menu.get_default_speed_mult() if settings_menu else 1.0
+	_speed_tiers_unlocked  = 0
+	set_speed_tier(settings_menu.get_default_speed_tier() if settings_menu else 0)
+	SolarSystem.reset_star()       # a fresh run gets an untouched Sol
 	_autosave_accum        = 0.0
 	_last_snapshot_year    = 1945
 	_people_ever_lived     = PEOPLE_EVER_LIVED_1945
@@ -1105,6 +1157,10 @@ func _ready() -> void:
 	add_child(wiki)
 	wiki.setup(self)
 
+	# Surface maps at double resolution for whichever body the player has selected.
+	_body_hires = BodyTextureHires.new()
+	add_child(_body_hires)
+
 	# Trade proposal window, opened from the star map's Trade button.
 	_trade_panel = TradePanel.new()
 	add_child(_trade_panel)
@@ -1125,8 +1181,10 @@ func _ready() -> void:
 	var eps: Array = launch_endpoints()
 	var tgts: Array = [["Sun", "sun"]] + eps   # the Sun heads the target list
 	launch_panel.set_bodies(eps, tgts)
+	launch_panel.set_body_kinds(body_kinds())
 	production_panel.production_changed.connect(_on_production_changed)
 	if sidebar and sidebar.automation_panel:
+		sidebar.automation_panel.set_body_kinds(body_kinds())
 		sidebar.automation_panel.automation_changed.connect(_on_automation_changed)
 		sidebar.automation_panel.doctrine_changed.connect(_on_doctrine_changed)
 	if sidebar and sidebar.star_map:
@@ -1138,6 +1196,8 @@ func _ready() -> void:
 		sidebar.star_map.vn_probe_requested.connect(_on_vn_probe_requested)
 		sidebar.star_map.message_requested.connect(_on_message_requested)
 		sidebar.star_map.trade_requested.connect(func(star: String) -> void: _trade_panel.open(star))
+		sidebar.star_map.thrust_aim_requested.connect(func(star: String) -> void:
+			aim_star_thruster(star))
 	politics_page.policy_changed.connect(_on_policy_changed)
 	game_over_screen.restart_requested.connect(_on_restart_requested)
 	settings_menu.closed.connect(_on_settings_closed)
@@ -1145,6 +1205,7 @@ func _ready() -> void:
 	_setup_event_notifications()
 	_setup_bar_backgrounds()
 	_setup_resource_boxes()
+	_setup_speed_buttons()
 	_setup_realtime_clock()
 	_setup_body_picker()
 	_setup_planet_tabs()
@@ -1610,6 +1671,41 @@ func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id:
 	)
 	_launch_satellites[launch_id] = sat
 
+## A structure carrier: flies to the berth its cargo will occupy in the target's orbital lane and
+## removes itself there, exactly as a Solar Deployment does at its swarm slot.  Without this the
+## craft aims at the body's CENTRE — which, for the Sun, means flying into the star and climbing
+## back out to park.
+##
+## The berth is reserved before the launch and tracked live, so the craft follows it as the lane
+## turns.  A lane spreads its structures evenly, so reserving means asking where the new one will
+## sit once it is there: index `reserved` of `reserved + 1`.
+func _spawn_structure_carrier(origin_planet: Planet, target_planet: Planet, structure: String,
+		launch_id: int, flight_days: float, reserved: int) -> void:
+	var sat := Satellite.new()
+	sat.name             = "Satellite_%d" % launch_id
+	sat.arrival_mode     = "swarm"        # fly to a point, then make way for what was carried
+	sat.swarm_target_pos = target_planet.infra_slot_world_pos(structure, reserved, reserved + 1)
+	sat.slot_provider = func() -> Vector3:
+		return target_planet.infra_slot_world_pos(structure, reserved, reserved + 1)
+	$WorldRoot.add_child(sat)
+	sat.begin_transfer($WorldRoot/Planets/sun as Node3D, origin_planet, target_planet, flight_days)
+	_launch_satellites[launch_id] = sat
+
+
+## How many of `structure` are already standing at `body` or on their way there — the index the
+## next delivery will take in the lane.
+func _reserved_structure_slot(body: String, structure: String) -> int:
+	var n: int = 0
+	for b in planet_buildings.get(body, []):
+		if str(b) == structure:
+			n += 1
+	for l in active_launches:
+		if str(l.get("status", "")) == "active" and str(l.get("structure", "")) == structure \
+				and str(l.get("target", "")) == body:
+			n += 1
+	return n
+
+
 func _process(delta: float) -> void:
 	_update_realtime_clock()   # wall clock ticks regardless of game pause/timescale
 
@@ -1665,6 +1761,9 @@ func _process(delta: float) -> void:
 		# Burn fuel FIRST: it sets how much of the fuel-burning fleet is running, which
 		# _get_total_production then folds into this slice's energy.
 		_consume_fuel(delta_days)
+		_run_star_lifters(delta_days)
+		_run_husbandry(delta_days)
+		_run_star_thrust(delta_days)
 		var production := _get_total_production()
 		for resource in production:
 			ResearchTree.resources[resource] = ResearchTree.resources.get(resource, 0.0) + production[resource] * delta_days
@@ -1731,8 +1830,19 @@ func _process(delta: float) -> void:
 				_extraction_page.set_extraction(current_planet, extraction_data(current_planet))
 			elif production_panel and production_panel.visible:
 				production_panel.set_planet(current_planet)   # no-op if the body didn't change
-		if _build_ui_dirty and launch_panel.visible:
-			launch_panel.set_launch_mods(_build_launch_mods_map())
+		if launch_panel.visible:
+			# The panel's live data — the date, where the planets are, what is in the hold and
+			# what is in flight.  This used to sit in advance_day(), so in fast mode (where the
+			# clock advances whole years and never ticks a day) the whole panel froze at whatever
+			# it last showed.  UI belongs on the UI pass, not on the day tick.
+			if _build_ui_dirty:
+				launch_panel.set_launch_mods(_build_launch_mods_map())
+			launch_panel.set_game_date(year, month + 1, day + 1)
+			launch_panel.set_orbital_state(_build_orbital_state())
+			launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed,
+				_swarm_max())
+			launch_panel.set_launch_stock(_build_launch_stock())
+			launch_panel.refresh_launches(_compute_launch_display_data())
 		_build_ui_dirty = false
 
 func advance_day() -> void:
@@ -1807,6 +1917,18 @@ func advance_day() -> void:
 						print("[Game] Colony established on %s from %s (split in ~%d yrs)" % [
 							target.capitalize(), _colony_parent[target], _split_thresholds[target]
 						])
+				# A prefabricated structure arrives assembled and joins the target's roster.
+				var arrived: String = str(launch.get("structure", ""))
+				if arrived != "":
+					if not planet_buildings.has(m_target):
+						planet_buildings[m_target] = []
+					planet_buildings[m_target].append(arrived)
+					_mark_prod_dirty()
+					_announce("%s delivered" % arrived,
+						"The carrier has arrived at %s and its %s is on station." % [
+							_body_display_name(m_target), arrived],
+						"structure_%d" % int(launch.get("id", 0)))
+
 				# Solar Satellites arrive at the Sun and join the Dyson swarm.
 				var payload: int = int(launch.get("payload", 0))
 				if payload > 0:
@@ -1823,12 +1945,6 @@ func advance_day() -> void:
 				still.append(l)
 		active_launches = still
 		_check_population_splits()
-	if launch_panel.visible:
-		launch_panel.set_game_date(year, month + 1, day + 1)
-		launch_panel.set_orbital_state(_build_orbital_state())
-		launch_panel.set_swarm_state(_build_satellite_stock(), solar_satellites_deployed, _swarm_max())
-		launch_panel.set_launch_stock(_build_launch_stock())
-		launch_panel.refresh_launches(_compute_launch_display_data())
 
 ## Populate _bdef_cache from the full levelled catalogue (called once in _ready).
 func _init_building_cache() -> void:
@@ -1905,7 +2021,7 @@ func _compute_storage_caps() -> Dictionary:
 func _recompute_production_cache() -> void:
 	# The Sun's current output, in today's units — read once per rebuild and applied to every
 	# solar collector below.
-	var sun_lum: float = Planet.sun_luminosity_lsun(year)
+	var sun_lum: float = SolarSystem.sun_luminosity_lsun(float(year))
 	var compute:  float = 0.0
 	var minerals: float = 0.0
 	var energy:   float = 0.0
@@ -1981,7 +2097,9 @@ func _recompute_production_cache() -> void:
 			# A solar collector's yield tracks the star it collects from, so the fleet brightens
 			# with the ageing Sun and dies with it (see the "solar" flag in buildings.gd).
 			if bool(bdef.get("solar", false)):
-				e *= sun_lum
+				# Shades stand between the star and the planets, so a shaded world's collectors
+				# see exactly what the sails let past.
+				e *= sun_lum * SolarSystem.insolation_mult()
 			if burn.is_empty():
 				energy += e
 				if planet_name != HOME_WORLD:
@@ -2043,6 +2161,9 @@ func _recompute_production_cache() -> void:
 	# Storage caps are also roster-derived — refresh them in the same dirty pass.
 	_cached_storage_caps = _compute_storage_caps()
 	_prod_dirty = false
+	# The shade fraction is roster-derived too, but it must come AFTER the flag is cleared: it
+	# counts what is switched on, and active_count() rebuilds this very cache while it is dirty.
+	_sync_star_shades()
 
 ## Cheap, O(1) per-frame combine of the cached building sums with the current population and
 ## the research/policy multipliers, producing the live compute rate and production dict.
@@ -2173,42 +2294,273 @@ func _check_population_splits() -> void:
 ## drawn once and is sorted by birth year, so this is a pointer walk that almost always does
 ## nothing.  Called on the year clock rather than per frame for the same reason.
 func _advance_star_formation() -> void:
+	# The sky is built around where Sol is, not where it started, so the catalogue is told both
+	# before it is asked to age.
+	StarMapPanel.set_sky_frame(SolarSystem.sol_position(), float(year))
 	StarMapPanel.advance_star_formation(float(year))
+	_seed_generated_factions()
 
-## Recompute SolarSystem.seconds_per_day from elapsed game-years.
-## Formula: INIT / (1 + elapsed/T0)^POWER, clamped to [MIN, INIT].
-## The _user_speed_mult divides the result so higher mult = faster real time.
+## Recompute SolarSystem.seconds_per_day: the fixed base rate divided by the player's chosen
+## multiplier, so a higher multiplier is faster real time.  Called on every year change, which is
+## also when a new rung of the ladder can come within reach.
 func _update_timescale() -> void:
-	var elapsed: float = maxf(float(year - 2026), 0.0)
-	var raw: float = TIMESCALE_INIT / pow(1.0 + elapsed / TIMESCALE_T0, TIMESCALE_POWER)
-	SolarSystem.seconds_per_day = maxf(TIMESCALE_MIN, raw) / _user_speed_mult
+	SolarSystem.seconds_per_day = TIMESCALE_BASE / maxf(_user_speed_mult, 0.001)
 	SolarSystem.current_year = year
 	SolarSystem.snap_year = float(year)   # default; _prepare_snap_year() overrides on pause
+	_sync_speed_unlocks()
+
+
+# ── Speed ladder ──────────────────────────────────────────────────────────────
+
+## How many rungs of SPEED_TIERS the run has reached; always at least the first.
+func unlocked_speed_tiers() -> int:
+	var n: int = 1
+	for i in range(SPEED_TIERS.size()):
+		if year >= int(SPEED_TIERS[i]["year"]):
+			n = maxi(n, i + 1)
+	return n
+
+
+## Choose a speed.  A rung that is not unlocked yet falls back to the fastest that is, so callers
+## (the settings default, a loaded save) can ask for anything and get something sensible.
+func set_speed_tier(tier: int) -> void:
+	_speed_tier = clampi(tier, 0, unlocked_speed_tiers() - 1)
+	_user_speed_mult = float(SPEED_TIERS[_speed_tier]["mult"])
+	SolarSystem.seconds_per_day = TIMESCALE_BASE / maxf(_user_speed_mult, 0.001)
+	_refresh_speed_buttons()
+
+
+## Note any rung the run has just reached: light its button up and say so once.
+func _sync_speed_unlocks() -> void:
+	var unlocked: int = unlocked_speed_tiers()
+	if unlocked == _speed_tiers_unlocked:
+		return
+	# Only an unlock earned during play is announced — not the ladder a loaded save starts with.
+	if unlocked > _speed_tiers_unlocked and _speed_tiers_unlocked > 0:
+		var tier: Dictionary = SPEED_TIERS[unlocked - 1]
+		_announce("Time control: %s" % str(tier["label"]),
+			"The run has reached a scale where %s the base rate is worth having. The new speed is available in the top bar." % str(tier["label"]),
+			"speed_tier_%d" % (unlocked - 1))
+	_speed_tiers_unlocked = unlocked
+	_refresh_speed_buttons()
+
+
+## How fast a rung actually moves the calendar, in words: game-days a second while a run is still
+## measured in days, game-years a second once it is not.
+static func speed_pace_text(mult: float) -> String:
+	var days_per_sec: float = mult / TIMESCALE_BASE
+	if days_per_sec < 365.25:
+		return "%s game-days a second" % Units.format_si(days_per_sec, "").strip_edges()
+	return "%s game-years a second" % Units.format_si(days_per_sec / 365.25, "").strip_edges()
+
+
+## Build the speed row in the top bar: one button per rung of the ladder, locked ones included so
+## what is still to come is visible from the first minute.
+func _setup_speed_buttons() -> void:
+	var row := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer/HBoxContainer") as HBoxContainer
+	if row == null:
+		return
+	var group := ButtonGroup.new()
+	for i in range(SPEED_TIERS.size()):
+		var b := Button.new()
+		b.text = str(SPEED_TIERS[i]["label"])
+		b.toggle_mode = true
+		b.button_group = group
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(54, 36)
+		b.pressed.connect(set_speed_tier.bind(i))
+		row.add_child(b)
+		_speed_buttons.append(b)
+	_speed_tiers_unlocked = unlocked_speed_tiers()
+	_refresh_speed_buttons()
+
+
+## Keep the row in step with what is unlocked and what is selected.  A locked button stays in
+## place and says which year opens it.
+func _refresh_speed_buttons() -> void:
+	var top: int = unlocked_speed_tiers() - 1
+	for i in range(_speed_buttons.size()):
+		var b: Button = _speed_buttons[i]
+		var tier: Dictionary = SPEED_TIERS[i]
+		b.disabled = i > top
+		b.button_pressed = i == _speed_tier
+		b.modulate = Color(1.0, 1.0, 1.0, 1.0 if i <= top else 0.45)
+		b.tooltip_text = ("%s the base rate — %s" % [
+				str(tier["label"]), speed_pace_text(float(tier["mult"]))]) \
+			if i <= top else \
+			"Locked until the year %s" % TimelineCanvas.fmt_year(float(tier["year"]))
 
 # ── Extinction events ─────────────────────────────────────────────────────────
 
-## Returns the Sun's current radius in AU by interpolating through Planet.SUN_STAGES.
-## Uses the same stage data that drives the visual so the engulfment threshold is
-## always in sync with what the player can see.
-## Returns the Sun's radius in AU, interpolated from Planet.SUN_STAGES.
-## Returns a very large value once the planetary nebula fires so every remaining
-## inhabited world is treated as engulfed in a single check.
+## The Sun's radius in AU at a year, from the star's own state (mass included).  Kept as a method
+## because the engulfment checks below read it every year.
 func _get_sun_radius_au(y: int) -> float:
-	if y >= PLANETARY_NEBULA_YEAR:
-		return 99999.0   # nebula sterilises everything
-	var stages: Array = Planet.SUN_STAGES
-	var lo: Array = stages[0]
-	var hi: Array = stages[stages.size() - 1]
-	for i in range(stages.size() - 1):
-		if y >= int(stages[i][0]) and y < int(stages[i + 1][0]):
-			lo = stages[i]
-			hi = stages[i + 1]
-			break
-	var span: float = float(int(hi[0]) - int(lo[0]))
-	var t: float = 0.0 if span <= 0.0 else clampf((float(y) - float(int(lo[0]))) / span, 0.0, 1.0)
-	# Index [4] = solar_radii (physics); index [2] = visual_mult (display only).
-	var solar_radii: float = lerpf(float(lo[4]), float(hi[4]), t)
-	return SUN_RADIUS_BASE_AU * solar_radii
+	return SolarSystem.sun_radius_au(float(y))
+
+
+# ── Star lifting ──────────────────────────────────────────────────────────────
+
+## Total power the lifters standing on the Sun would draw if the reserve could feed them, in
+## watts.  Only the ones switched on count, like every other structure, and every tier counts at
+## its own rating — a Star Lifter III draws (and lifts) far more than the base model.
+func star_lift_demand_w() -> float:
+	return _sun_structure_total("star_lift_power")
+
+
+## Total power the core mixing arrays would draw, in watts.
+func star_husbandry_demand_w() -> float:
+	return _sun_structure_total("husbandry_power")
+
+
+## Sum one rated figure across everything switched on at the Sun, each tier at its own rating.
+## Tallying per kind first keeps this cheap when the roster runs to thousands of structures.
+func _sun_structure_total(key: String) -> float:
+	var tally: Dictionary = {}
+	for bname in planet_buildings.get("sun", []):
+		tally[bname] = int(tally.get(bname, 0)) + 1
+	var total: float = 0.0
+	for bname: String in tally:
+		var rating: float = float(_find_building_def(bname).get(key, 0.0))
+		if rating > 0.0:
+			total += rating * float(active_count("sun", bname))
+	return total
+
+
+## Point the star's shade fraction at whatever is standing.  Shades cost nothing to run — they
+## are sails holding station on sunlight — so unlike the lifters they need no per-day step, only
+## to be kept in step with the roster.
+func _sync_star_shades() -> void:
+	SolarSystem.set_star_shade(_sun_structure_total("shade_fraction"))
+	# The Shkadov mirrors are sails too, and like the shades they cost nothing to run — they only
+	# have to be standing.  Their coverage is what decides how hard the star is pushed.
+	SolarSystem.set_star_mirror_coverage(_sun_structure_total("mirror_coverage"))
+
+
+## Run the core mixing arrays for this slice: energy in, stellar age off the clock.  Like the
+## lifters they spend from the reserve, and short of power they simply do less.
+func _run_husbandry(delta_days: float) -> void:
+	_husbandry_rate_w = 0.0
+	var demand_w: float = star_husbandry_demand_w()
+	if demand_w <= 0.0 or delta_days <= 0.0:
+		return
+	var want: float = demand_w * delta_days
+	var have: float = float(ResearchTree.resources.get("energy", 0.0))
+	var spend: float = minf(want, maxf(have, 0.0))
+	if spend <= 0.0:
+		return
+	var years: float = StarModel.years_rejuvenated(spend * DAY_SECONDS)
+	var gained: float = SolarSystem.rejuvenate_star(years)
+	if gained <= 0.0:
+		return
+	if gained < years:
+		spend *= gained / years            # nothing left to undo; charge only for what was
+	ResearchTree.resources["energy"] = have - spend
+	_husbandry_rate_w = spend / delta_days
+
+
+## Run the lifters for this slice.  They draw from the civilisation's energy reserve and turn
+## what they get into mass off the Sun — at the binding energy of the material removed, so the
+## exchange rate is physics rather than a dial.  Short of power they simply lift less, the way a
+## plant short of fuel simply makes less.
+##
+## The mass goes two places at once: off the star (which dims it and, far more usefully, defers
+## its death) and into the Sun's inventory as hydrogen, which is what was lifted.
+func _run_star_lifters(delta_days: float) -> void:
+	_star_lift_rate_w = 0.0
+	var demand_w: float = star_lift_demand_w()
+	if demand_w <= 0.0 or delta_days <= 0.0:
+		return
+	# The reserve is held in watt-days, so demand converts straight across.
+	var want: float = demand_w * delta_days
+	var have: float = float(ResearchTree.resources.get("energy", 0.0))
+	var spend: float = minf(want, maxf(have, 0.0))
+	if spend <= 0.0:
+		return
+	var mass_msun: float = StarModel.mass_lifted_msun(spend * DAY_SECONDS)
+	# Never lift past the floor: take only what there is room for, and pay only for that.
+	var before: float = SolarSystem.star_mass_msun
+	var taken: float = SolarSystem.lift_star_mass(mass_msun)
+	if taken <= 0.0:
+		return
+	if taken < mass_msun:
+		spend *= taken / mass_msun
+	ResearchTree.resources["energy"] = have - spend
+	_star_lift_rate_w = spend / delta_days
+	# What came off the star is hydrogen, and it lands where it was caught.
+	var lifted_kg: float = taken * StarModel.SUN_MASS_KG
+	var inv: Dictionary = _planet_inv("sun")
+	inv["H2"] = float(inv.get("H2", 0.0)) + lifted_kg * 1000.0
+	_announce_star_lifting(before)
+
+
+## Let the mirrors push for this slice, and say so at every light-year.  The engine spends
+## nothing, so unlike the lifters there is no reserve to draw on — it just runs.
+func _run_star_thrust(delta_days: float) -> void:
+	if SolarSystem.star_mirror_coverage <= 0.0:
+		return
+	# Aim at the last star the player pointed it at; with no aim it does nothing, since a thruster
+	# pushing in no particular direction is just a way to lose a solar system.
+	if SolarSystem.star_thrust_dir.length_squared() <= 0.0:
+		return
+	var before: float = SolarSystem.star_drift_ly.length()
+	SolarSystem.advance_star_thrust(delta_days)
+	var now: float = SolarSystem.star_drift_ly.length()
+	if floori(now) > floori(before) and now >= 1.0:
+		_announce("Sol has moved %s light-years" % Units.format_si(now, "").strip_edges(),
+			"The Shkadov mirrors have shifted the solar system %s light-years from where it began, at %s. Every distance measured from Sol has moved with it." % [
+				Units.format_si(now, "").strip_edges(),
+				Units.format_si(SolarSystem.star_velocity_ms, "m/s")],
+			"star_drift_%d" % floori(now))
+
+
+## Aim the thruster at a star, from the star map.  The heading is fixed when it is set: the
+## mirrors push that way until they are aimed somewhere else, and the target star keeps moving on
+## its own, so an aim is a heading rather than a guarantee of arrival.
+func aim_star_thruster(star_name: String) -> bool:
+	var entry: Dictionary = _star_lookup(star_name)
+	if entry.is_empty() or not entry.has("pos"):
+		return false
+	var heading: Vector3 = (entry["pos"] as Vector3) - SolarSystem.sol_position()
+	if heading.length_squared() <= 0.0:
+		return false
+	SolarSystem.aim_star_thrust(heading, star_name)
+	_announce("Thruster aimed at %s" % star_name,
+		"The Shkadov mirrors are trimmed to push Sol towards %s, %s light-years away. The aim is a heading, not a guidance system: it holds until it is set again, and the star does not stop when it gets there." % [
+			star_name, Units.format_si(heading.length(), "").strip_edges()],
+		"star_aim_%s_%d" % [star_name, year])
+	return true
+
+
+## Tell the player when the work has actually moved something: every whole percent of Sol that
+## has come off.  Silent between milestones — this is a process measured in geological time and
+## a notice per tick would be a flood.
+func _announce_star_lifting(mass_before: float) -> void:
+	var pct_before: int = int(floor((1.0 - mass_before) * 100.0))
+	var pct_now: int = int(floor((1.0 - SolarSystem.star_mass_msun) * 100.0))
+	if pct_now <= pct_before or pct_now <= 0:
+		return
+	_announce("Star lifting: %d%% of Sol removed" % pct_now,
+		"The lifters have taken %d%% of the Sun's mass. It burns at %.2f of its old light, and the red-giant tip now falls in year %s — %s later than it would have." % [
+			pct_now, StarModel.luminosity_mult(SolarSystem.star_mass_msun),
+			Units.format_si(SolarSystem.sun_red_giant_year(), "yr"),
+			Units.format_si(SolarSystem.sun_red_giant_year() - StarModel.RED_GIANT_AGE, "yr")],
+		"star_lift_%d" % pct_now)
+
+
+## The year the Sun reaches the red-giant tip and Earth's orbit — 7.59 B for a pristine star,
+## later once mass has been lifted.
+func sun_red_giant_year() -> int:
+	return int(SolarSystem.sun_red_giant_year())
+
+
+## When the HUD should start warning about it: a million stellar years out.
+func sun_warning_year() -> int:
+	return int(SolarSystem.sun_warning_year())
+
+
+## The year the envelope is ejected and everything left in the system dies.
+func sun_nebula_year() -> int:
+	return int(SolarSystem.sun_nebula_year())
 
 ## Called every in-game year (and from fast mode). Safe to call repeatedly.
 func _check_extinction_events() -> void:
@@ -2245,7 +2597,7 @@ func _check_extinction_events() -> void:
 					+ ", and " + engulfed[engulfed.size() - 1]
 			var cause: String
 			var event_line: String
-			if year >= PLANETARY_NEBULA_YEAR:
+			if year >= sun_nebula_year():
 				cause = "Planetary nebula"
 				event_line = "Sol has ejected its outer envelope. System-wide ultraviolet flux exceeds habitable tolerance."
 			else:
@@ -2261,7 +2613,7 @@ func _check_extinction_events() -> void:
 					"%s Inhabited worlds in the Sol system: 0. Settled holdings beyond Sol: %d." % [
 						event_line, beyond],
 					"sol_lost_%s_%d" % [cause, year])
-			elif year >= PLANETARY_NEBULA_YEAR:
+			elif year >= sun_nebula_year():
 				trigger_game_over(cause, event_line + " Inhabited worlds: 0. Remnant: white dwarf, cooling.")
 			else:
 				trigger_game_over(cause, event_line + " Inhabited worlds outside the photosphere: 0.")
@@ -2682,6 +3034,38 @@ func _is_moon(id: String) -> bool:
 func _moon_parent(id: String) -> String:
 	var idx: int = id.find("_moon_")
 	return id.substr(0, idx) if idx > 0 else ""
+
+## The scene node for a body id: planets (and the Sun and the belt) sit under Planets, a moon
+## under the planet it orbits.  Null for anything not in the solar system.
+func _body_node(id: String) -> MeshInstance3D:
+	if id == "":
+		return null
+	var path: String = "WorldRoot/Planets/" + id
+	if _is_moon(id):
+		path = "WorldRoot/Planets/%s/%s" % [_moon_parent(id), id]
+	return get_node_or_null(path) as MeshInstance3D
+
+
+## What kind of body an id is — "star", "rocky", "gas_giant" or "belt", the same words a
+## building's allowed_types uses.  A moon counts as its parent's kind of ground, i.e. rocky.
+## The mission rules (MissionData.allows_target) are written against these, so the panels and
+## the launch itself judge a target the same way.
+func body_kind(id: String) -> String:
+	if id == "":
+		return ""
+	if PLANET_TYPES.has(id):
+		return str(PLANET_TYPES[id])
+	return "rocky" if _is_moon(id) else ""
+
+
+## Every launch endpoint with its kind: { id → kind }, for the panels' validity checks.
+func body_kinds() -> Dictionary:
+	var out: Dictionary = {}
+	for e: Array in launch_endpoints():
+		out[str(e[1])] = body_kind(str(e[1]))
+	out["sun"] = "star"
+	return out
+
 
 ## Any real body's info/build panel can be opened — no probe required to inspect a world.
 ## (Whether you can BUILD there is a separate check; see _is_body_buildable.)
@@ -3142,6 +3526,28 @@ func get_planet_data(planet_name: String) -> Dictionary:
 		"compute":    0.0,
 	}
 
+	# The Sun is a body the player can eventually re-engineer, so its panel carries the star's
+	# state instead of a colony's: what is left of it, what it puts out, and the two dates that
+	# end the solar system.  All of it moves once mass is lifted.
+	if planet_name == "sun":
+		d["star"] = {
+			"mass_msun":    SolarSystem.star_mass_msun,
+			"luminosity":   SolarSystem.sun_luminosity_lsun(float(year)),
+			"radius_solar": SolarSystem.sun_radius_solar(float(year)),
+			"ageing":       1.0 / StarModel.lifetime_stretch(SolarSystem.star_mass_msun),
+			"red_giant":    SolarSystem.sun_red_giant_year(),
+			"nebula":       SolarSystem.sun_nebula_year(),
+			"engineered":   SolarSystem.star_is_engineered(),
+			"fate":         SolarSystem.sun_fate_text(),
+			"dated_fate":   SolarSystem.sun_fate_dates_known(),
+			"shade":        SolarSystem.star_shade_fraction,
+			"rejuvenated":  SolarSystem.star_age_offset_years,
+			"drift":        SolarSystem.star_drift_ly.length(),
+			"drift_speed":  SolarSystem.star_velocity_ms,
+			"thrust_aim":   SolarSystem.star_thrust_target,
+			"mirrors":      SolarSystem.star_mirror_coverage,
+		}
+
 	# Larder: what this world holds to eat, what it eats per day, and how long that lasts.
 	var inv_f: Dictionary = _planet_inv(planet_name)
 	var stored_food: float = 0.0
@@ -3384,6 +3790,9 @@ func select_planet(planet_name: String) -> void:
 	if not _is_body_selectable(planet_name):
 		return
 	current_planet = planet_name
+	# The selected body is the one filling the screen, so it gets the sharper map.
+	if _body_hires:
+		_body_hires.select(_body_node(planet_name))
 	sidebar.hide_all()
 	# Populate every tab up front, then reveal the merged panel (tabs switch between them).
 	planet_info_page.set_planet_info(get_planet_data(planet_name))
@@ -3522,6 +3931,29 @@ func try_upgrade(planet_name: String, building_name: String) -> bool:
 	})
 	_build_ui_dirty = true
 	return true
+
+## Whether `origin` holds the whole bill of materials for one `building_name`, and whether the
+## structure is unlocked at all.  Used by the carriers that fly a finished structure to the Sun:
+## it is built at the origin's expense, so it costs exactly what building it there would.
+func _can_afford_structure(building_name: String, origin: String) -> bool:
+	var def: Dictionary = _find_building_def(building_name)
+	if def.is_empty():
+		return false
+	var req: String = str(BuildingUnlocks.BUILDING_UNLOCK_REQUIREMENTS.get(building_name, ""))
+	if req != "" and not ResearchTree.is_unlocked(req):
+		return false
+	for resource: String in (def.get("cost", {}) as Dictionary):
+		if _get_stockpile(resource, origin) < float(def["cost"][resource]):
+			return false
+	return true
+
+
+## Charge one structure's full bill of materials to `origin`.
+func _charge_structure(building_name: String, origin: String) -> void:
+	var cost: Dictionary = _find_building_def(building_name).get("cost", {})
+	for resource: String in cost:
+		_deduct_stockpile(resource, float(cost[resource]), origin)
+
 
 ## Work (MC·days) needed to assemble a building: the bulk of its material bill, so larger
 ## structures take proportionally longer.  A planet builds at its MC (work/day), so the
@@ -3752,10 +4184,25 @@ func _on_launch_requested(params: Dictionary) -> void:
 	var target_name: String = params.get("target", "")
 	var arrival: String = params.get("arrival", "orbit")
 
+	# The panels only offer combinations that pass this, but automation rules and the console
+	# call straight in here, so the rule is enforced where the launch actually happens.
+	if not MissionData.allows_arrival(mission_def, body_kind(target_name), arrival):
+		return
+
 	# Solar Deployment ferries a batch of manufactured Solar Satellites to the Sun.
 	# Validate (and size) the payload before spending anything on the launch vehicle.
 	var sat_payload: int = 0
-	if mission_def.get("sun_only", false):
+	# A structure mission carries one finished building instead of manufactured units: its whole
+	# bill of materials is paid at the origin now, and it is simply standing at the Sun when the
+	# carrier arrives.
+	var structure: String = str(mission_def.get("structure", ""))
+	if structure != "":
+		if target_name != "sun":
+			return                                    # these carriers only fly to the Sun
+		if not _can_afford_structure(structure, origin_name):
+			return
+		_charge_structure(structure, origin_name)
+	elif mission_def.get("sun_only", false):
 		if target_name != "sun":
 			return                                    # this carrier only flies to the Sun
 		var room: int = _swarm_max() - solar_satellites_deployed
@@ -3815,6 +4262,7 @@ func _on_launch_requested(params: Dictionary) -> void:
 		"target":      target_name,
 		"arrival":     arrival,
 		"payload":     sat_payload,
+		"structure":   structure,
 		"start_year":  start_date[0],
 		"start_month": start_date[1],
 		"start_day":   start_date[2],
@@ -3844,6 +4292,12 @@ func _on_launch_requested(params: Dictionary) -> void:
 				if planets and planets.has_method("swarm_slot_world_pos"):
 					slot_pos = planets.swarm_slot_world_pos(reserved)
 				_spawn_swarm_satellite(origin_planet, slot_pos, launch["id"], float(duration), reserved)
+			elif structure != "":
+				# The berth is reserved counting what is already there and what is still in
+				# flight, so two carriers in the air do not aim at the same spot.  This launch is
+				# already in active_launches, hence the -1.
+				_spawn_structure_carrier(origin_planet, target_planet, structure, launch["id"],
+					float(duration), maxi(0, _reserved_structure_slot(target_name, structure) - 1))
 			else:
 				_spawn_satellite(origin_planet, target_planet, arrival, launch["id"], float(duration))
 
@@ -3876,12 +4330,24 @@ func _build_launch_stock() -> Dictionary:
 	var keys: Array = ["Rocket"]
 	for f: Dictionary in MissionData.FUELS:
 		keys.append(str(f["id"]))
+	# The carriers that fly a finished structure to the Sun are paid for in that structure's own
+	# bill of materials, so the panel needs those materials too in order to price and gate them.
+	for m: Dictionary in MissionData.MISSION_TYPES:
+		var sname: String = str(m.get("structure", ""))
+		if sname == "":
+			continue
+		for res: String in (_find_building_def(sname).get("cost", {}) as Dictionary):
+			if not keys.has(res):
+				keys.append(res)
 	var out: Dictionary = {}
 	for p: String in compound_inventory:
 		var inv: Dictionary = compound_inventory[p]
 		var stock: Dictionary = {}
 		for k: String in keys:
 			stock[k] = int(float(inv.get(k, 0.0)))
+		# Energy is one civilisation-wide reserve rather than a thing each world holds, so every
+		# origin reports the same figure — the same rule _get_stockpile() follows.
+		stock["energy"] = int(float(ResearchTree.resources.get("energy", 0.0)))
 		out[p] = stock
 	return out
 
@@ -3930,10 +4396,20 @@ func _star_lookup(star_name: String) -> Dictionary:
 		for c: Dictionary in StarMapPanel.star_clusters():
 			_star_index[str(c["name"])] = c
 		_star_index_size = all.size()
-	return _star_index.get(star_name, {})
+	if _star_index.has(star_name):
+		return _star_index[star_name]
+	# A star the chunk generator made is not in the index — it is derived on demand from its own
+	# name, so a colony or a message can name one wherever it is.
+	return StarChunks.star_by_name(star_name, galaxy_seed, float(year))
 
+## Distance from Sol to a star, in light-years — measured from where Sol IS, not where it began.
+## Every flight, message and trade round-trip is priced through here, so a solar system under
+## thrust really does close on what it is aimed at.
 func _star_distance_ly(star_name: String) -> float:
-	return float(_star_lookup(star_name).get("dist", 0.0))
+	var entry: Dictionary = _star_lookup(star_name)
+	if entry.has("pos"):
+		return ((entry["pos"] as Vector3) - SolarSystem.sol_position()).length()
+	return float(entry.get("dist", 0.0))
 
 ## Launch an interstellar colony ship from Sol to a star with a chosen max speed β and
 ## max acceleration.  The real relativistic energy (accel + coast + decel for the ship's
@@ -4023,23 +4499,24 @@ func _check_interstellar_arrivals() -> void:
 					newly_vn.append(target)
 					continue
 
-				# A cluster is not a system.  An arrival claims a SHARE of it — the probe seeds a
-				# foothold that spreads through the cluster on its own — so taking one is a
-				# campaign of several launches rather than a single destination.
+				# A cluster is not a system, and it is not taken in one go either.  One probe
+				# landing is the whole requirement: it puts a foothold on a single star and the
+				# cluster settles itself from there, at CLUSTER_SATURATE_RATE, over the next
+				# quarter of a million years.  Sending more probes to the same cluster achieves
+				# nothing — it is already doing the only thing it needs to.
 				if _is_cluster(target):
-					var was: float = float(cluster_colonized.get(target, 0.0))
-					var now: float = clampf(was + CLUSTER_CLAIM_PER_PROBE, 0.0, 1.0)
-					cluster_colonized[target] = now
+					var seeded: bool = cluster_colonized.has(target)
+					if not seeded:
+						cluster_colonized[target] = 0.0
 					_region_colonize(tpos)     # its stars also feed the statistical galaxy
-					if now >= 1.0 and was < 1.0:
-						_announce("%s settled" % target,
-							"Probe arrival recorded at %s. Settled fraction of the cluster: 100%%." % target,
-							"cluster_done_%s" % target)
+					if seeded:
+						_announce("Probe arrival — %s" % target,
+							"Another probe reaches %s, which is already settling itself. Nothing here needed a second landing." % target,
+							"cluster_extra_%s_%d" % [target, year])
 					else:
 						_announce("Foothold in %s" % target,
-							"Probe arrival recorded at %s. Settled fraction of the cluster: %d%%." % [
-								target, int(round(now * 100.0))],
-							"cluster_%s_%d" % [target, int(now * 100.0)])
+							"A probe has landed in %s. The cluster is settled from that one foothold from here on, spreading star to star on its own." % target,
+							"cluster_%s" % target)
 					newly_vn.append(target)
 					continue
 
@@ -4221,15 +4698,16 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
 		if d <= max_ly and d > 0.01:
 			_keep_nearest(cand, d, nm, max_n)
 	# Clusters are colonisation targets too — a whole cluster is what a probe reaches once it is
-	# past the range where individual stars can be resolved, and a partly-settled one is still
-	# worth sending more probes to (see cluster_colonized).
+	# past the range where individual stars can be resolved.  One that has already had a probe is
+	# NOT a candidate, however little of it is settled so far: it is filling itself, and a second
+	# landing would add nothing (see cluster_colonized).
 	for c: Dictionary in StarMapPanel.star_clusters():
 		var cnm: String = str(c["name"])
 		# The home cluster is a Voronoi seed on Sol, not a destination — it is where the probes
 		# are launched FROM.
 		if bool(c.get("is_home", false)):
 			continue
-		if enroute.has(cnm) or float(cluster_colonized.get(cnm, 0.0)) >= 1.0:
+		if enroute.has(cnm) or cluster_colonized.has(cnm):
 			continue
 		var cd: float = origin.distance_to(c["pos"] as Vector3)
 		if cd <= max_ly and cd > 0.01:
@@ -4492,9 +4970,9 @@ func _holdings_beyond_earth() -> int:
 ## The same count without the in-system colony worlds: what survives the death of Sol itself.
 func _holdings_beyond_sol() -> int:
 	var n: int = colonized_stars.size()
-	for c: String in cluster_colonized:
-		if float(cluster_colonized[c]) > 0.0:
-			n += 1
+	# Presence, not fraction: a cluster with a probe in it is somewhere the species is, even on
+	# the day it lands with none of the cluster settled yet.
+	n += cluster_colonized.size()
 	for id: String in _regions:
 		var r: Dictionary = _regions[id]
 		if float(r.get("colonized", 0.0)) > 0.0 or float(r.get("pop", 0.0)) > 0.0:
@@ -4534,7 +5012,34 @@ func _region_taken(pos: Vector3) -> bool:
 ## Cheap closed-form evolution of the statistical galaxy: each colonised region colonises more of
 ## its own stars, grows its population logistically toward the colonised capacity, and diffuses to
 ## a neighbour.  O(regions) per tick — independent of how many stars the galaxy actually holds.
+## Settle the clusters a probe has reached.  One landing is the whole requirement: the cluster
+## starts at nothing and fills itself at CLUSTER_SATURATE_RATE thereafter.
+##
+## Kept apart from _update_regions() and given its own clock because a cluster settles whether or
+## not the statistical galaxy holds anything — the region model returns early when it is empty,
+## and a foothold in a cluster must not stop spreading just because nothing else has been
+## claimed yet.
+func _settle_clusters() -> void:
+	if cluster_colonized.is_empty():
+		return
+	var dyears: float = float(year) - _cluster_last_year
+	if dyears <= 0.0:
+		return
+	_cluster_last_year = float(year)
+	for cname: String in cluster_colonized:
+		var frac: float = float(cluster_colonized[cname])
+		if frac >= 1.0:
+			continue
+		var grown: float = minf(1.0, frac + CLUSTER_SATURATE_RATE * dyears)
+		cluster_colonized[cname] = grown
+		if grown >= 1.0:
+			_announce("%s settled" % cname,
+				"%s is fully settled. It took one probe and the time to spread from it." % cname,
+				"cluster_done_%s" % cname)
+
+
 func _update_regions() -> void:
+	_settle_clusters()
 	if _regions.is_empty():
 		return
 	var dyears: float = float(year) - _region_last_year
@@ -4713,6 +5218,9 @@ func _reveal_alignment(star_name: String) -> void:
 ## epochs are set in the past so their light is already en route (detection depends on optics).
 func _seed_star_factions() -> void:
 	star_factions = {}
+	star_polity = {}
+	_factions = {}
+	_races = {}
 	_known_alignments = {}
 	_alien_since = {}
 	_detected_aliens = {}
@@ -4730,14 +5238,88 @@ func _seed_star_factions() -> void:
 	var nb: Dictionary = GameSession.choice("neighbours")
 	var total: int = int(nb.get("total", 6))
 	var hostile: int = int(nb.get("hostile", 3))
-	for i in range(names.size()):
-		if i >= total:
+	# The setup screen's figures count CIVILISATIONS, and a civilisation is a polity rather than
+	# a star: one government may hold several systems.  So polities are counted here, not stars —
+	# a second star belonging to a neighbour already seeded joins it and shares its temperament,
+	# because a state cannot be at once peaceful and hostile.
+	var seeded_polities: Dictionary = {}
+	var armed: int = 0
+	for nm: String in names:
+		if seeded_polities.size() >= total:
 			break
-		var nm: String = names[i]
-		star_factions[nm] = "aggressive" if i < hostile else "peaceful"
+		var pos: Vector3 = _star_pos(nm)
+		var pid: String = str(Polities.faction_at(pos, galaxy_seed, _hostile_share())["id"])
+		var known: bool = seeded_polities.has(pid)
+		# A new neighbour is armed while the setup's quota of hostiles is unfilled.
+		var force: int = -1
+		if not known:
+			force = 1 if armed < hostile else 0
+		var faction: Dictionary = _settle_alien_star(nm, pos, force)
+		if not known:
+			seeded_polities[pid] = true
+			if str(faction["alignment"]) == "aggressive":
+				armed += 1
 		# Founded in the past, so its signal is already crossing to us — some may be
 		# detectable early with good optics, others still en route.
 		_alien_since[nm] = float(year) - _star_distance_ly(nm) - randf_range(0.0, 800.0)
+
+## The share of polities that are hostile, as the setup screen set it.
+func _hostile_share() -> float:
+	var nb: Dictionary = GameSession.choice("neighbours")
+	var total: float = maxf(float(nb.get("total", 6)), 1.0)
+	return clampf(float(nb.get("hostile", 3)) / total, 0.0, 1.0)
+
+
+## Put inhabitants at a star: the polity that holds that volume of space, and the race behind it.
+## Idempotent — a star already occupied keeps who it has.  Returns the faction.
+## `force_aggressive` (-1 derive, 0 peaceful, 1 hostile) is used for the starting neighbours,
+## whose count of armed systems the setup screen fixes.
+func _settle_alien_star(star_name: String, pos: Vector3, force_aggressive: int = -1) -> Dictionary:
+	if star_polity.has(star_name):
+		return _factions.get(str(star_polity[star_name]), {})
+	# Which polity holds this space.  If it is one already met, the star JOINS it and takes its
+	# temperament: a government holds whatever it holds with one policy, and regenerating it per
+	# star was what let a "Compact" turn out to be hostile at one of its own systems.
+	var fid: String = str(Polities.faction_at(pos, galaxy_seed, _hostile_share())["id"])
+	var faction: Dictionary = _factions.get(fid, {})
+	if faction.is_empty():
+		faction = Polities.faction_at(pos, galaxy_seed, _hostile_share(), force_aggressive)
+		_factions[fid] = faction
+		_races[str(faction["race_id"])] = {"id": faction["race_id"], "name": faction["race_name"]}
+	star_polity[star_name] = fid
+	star_factions[star_name] = str(faction["alignment"])
+	return faction
+
+
+## Hand a star to an existing polity — a colony it founded, or a system it absorbed.  The star
+## takes that government's temperament, because it is that government.
+func _attach_star_to_polity(star_name: String, faction_id: String) -> void:
+	var faction: Dictionary = _factions.get(faction_id, {})
+	if faction.is_empty():
+		return
+	star_polity[star_name] = faction_id
+	star_factions[star_name] = str(faction["alignment"])
+
+
+## Who lives at a star: the full polity dict, or {} if nobody does.
+func faction_of(star_name: String) -> Dictionary:
+	return _factions.get(str(star_polity.get(star_name, "")), {})
+
+
+## Give the stars the chunk generator marked as inhabited their polities, once they are close
+## enough to be part of the resolved sky.  A generated civilisation is out there whether or not
+## it has been seen — this only registers it; _detected_aliens still decides what is shown.
+func _seed_generated_factions() -> void:
+	for s: Dictionary in StarMapPanel.all_stars():
+		if not bool(s.get("civ", false)):
+			continue
+		var nm: String = str(s["name"])
+		if star_factions.has(nm):
+			continue
+		_settle_alien_star(nm, s["pos"] as Vector3)
+		# Founded long enough ago that its light is already on the way, as the original six are.
+		_alien_since[nm] = float(year) - _star_distance_ly(nm) - randf_range(0.0, 800.0)
+
 
 ## 3-D map position of a star (game units), or ZERO if unknown.
 func _star_pos(star_name: String) -> Vector3:
@@ -4801,8 +5383,13 @@ func _alien_intel() -> Dictionary:
 		var infra: Dictionary = _alien_infra_at(star, obs_year)
 		var detail: float = 1.0 if probed \
 			else clampf(tel / maxf(dist * INFRA_DETAIL_REACH, 1.0), 0.0, 1.0)
+		var who: Dictionary = faction_of(star)
 		out[star] = {
 			"alignment":  str(star_factions[star]) if _known_alignments.has(star) else "unknown",
+			# Identity is not alignment: a neighbour's name and species read the moment its star
+			# is detected, while whether it means harm waits for contact.
+			"faction":    str(who.get("name", "")),
+			"race":       str(who.get("race_name", "")),
 			"dyson":      float(infra["dyson"]),
 			"telescopes": int(infra["telescopes"]),
 			"lasers":     int(infra["lasers"]),
@@ -4856,6 +5443,7 @@ func _process_aliens() -> void:
 	_alien_last_year = float(year)
 	_detect_alien_signatures(dyears)
 	_spread_aliens(dyears)
+	_alien_wars(dyears)
 	_launch_alien_attacks(dyears)
 
 ## How many known civilisations it takes before a distant detection stops earning a card, and how
@@ -4919,25 +5507,137 @@ func _spread_aliens(dyears: float) -> void:
 			targets.append(nm)
 	if targets.is_empty():
 		return
-	count = mini(count, targets.size())
+	count = mini(mini(count, targets.size()), ALIEN_SPREAD_PER_CALL)
 	var sources: Array = star_factions.keys()
+	# How much each government already holds, so an overgrown one knows to break up.
+	var holdings: Dictionary = {}
+	for star: String in star_polity:
+		var h: String = str(star_polity[star])
+		holdings[h] = int(holdings.get(h, 0)) + 1
 	for _i in range(count):
 		if targets.is_empty():
 			break
 		var src: String = str(sources[randi() % sources.size()])
 		var align: String = str(star_factions[src])
 		var spos: Vector3 = _star_pos(src)
-		var best: int = 0
-		var best_d: float = INF
-		for ti in range(targets.size()):
+		# Nearest of a random sample, not of everything: the exhaustive scan was O(targets) per
+		# colonisation, which is minutes of work once a galaxy has filled.
+		var best: int = randi() % targets.size()
+		var best_d: float = spos.distance_to(_star_pos(str(targets[best])))
+		for _s in range(mini(ALIEN_SPREAD_SAMPLE, targets.size())):
+			var ti: int = randi() % targets.size()
 			var d: float = spos.distance_to(_star_pos(str(targets[ti])))
 			if d < best_d:
 				best_d = d
 				best = ti
 		var tgt: String = str(targets[best])
 		targets.remove_at(best)
-		star_factions[tgt] = align
+		# The colony belongs to the government that founded it, not merely to its temperament —
+		# a state expanding into the next system is still that state, even when it crosses into
+		# the volume some other polity would hold.  Alignment comes with the polity, so `align`
+		# stays what it always was for stars whose parent has one.
+		var pid: String = str(star_polity.get(src, ""))
+		if pid != "" and _factions.has(pid):
+			if int(holdings.get(pid, 0)) >= POLITY_SPLIT_SYSTEMS:
+				# Too big to govern across the light-lag: the colony declares for itself.
+				var parent: Dictionary = _factions[pid]
+				var splinter: Dictionary = Polities.splinter_of(parent, _star_pos(tgt),
+					galaxy_seed, _factions.size(), _hostile_share())
+				_factions[str(splinter["id"])] = splinter
+				_attach_star_to_polity(tgt, str(splinter["id"]))
+				holdings[str(splinter["id"])] = 1
+				_announce("A state breaks away",
+					"%s has declared itself independent of %s. Both are %s." % [
+						str(splinter["name"]), str(parent["name"]), str(splinter["race_name"])],
+					"splinter_%s" % str(splinter["id"]))
+			else:
+				_attach_star_to_polity(tgt, pid)
+				holdings[pid] = int(holdings.get(pid, 0)) + 1
+		else:
+			star_factions[tgt] = align
 		_alien_since[tgt] = float(year)   # a fresh signature begins here, en route to Sol
+
+## Aliens fight each other.  An aggressive government raids a neighbouring system held by some
+## OTHER government and, if the raid succeeds, keeps it.
+##
+## Resolved statistically rather than as flights of missiles: the player cannot watch a war
+## between two civilisations three hundred light-years away, they can only notice that a system
+## they had catalogued now answers to somebody else.  What they see is the ownership change, and
+## only for systems they have actually detected.
+func _alien_wars(dyears: float) -> void:
+	if star_polity.size() < 2 or dyears <= 0.0:
+		return
+	var aggressors: Array = []
+	for star: String in star_polity:
+		if str(star_factions.get(star, "")) == "aggressive":
+			aggressors.append(star)
+	if aggressors.is_empty():
+		return
+	var expected: float = float(aggressors.size()) * ALIEN_WAR_RATE * dyears * setup_hostility
+	var count: int = int(expected)
+	if randf() < (expected - float(count)):
+		count += 1
+	count = mini(count, ALIEN_WAR_PER_CALL)
+	if count <= 0:
+		return
+	var held: Array = star_polity.keys()
+	var announced: int = 0
+	for _i in range(count):
+		var src: String = str(aggressors[randi() % aggressors.size()])
+		var src_pid: String = str(star_polity.get(src, ""))
+		if src_pid == "":
+			continue
+		# Nearest of a random sample, as colonisation does — an exhaustive scan of every held
+		# system per raid is what made expansion cost seconds.
+		var tgt: String = ""
+		var tgt_d: float = INF
+		for _s in range(mini(ALIEN_SPREAD_SAMPLE, held.size())):
+			var cand: String = str(held[randi() % held.size()])
+			if str(star_polity.get(cand, "")) == src_pid:
+				continue                      # not its own systems
+			if _col_star_set.has(cand):
+				continue                      # ours is a separate matter — see _launch_alien_attacks
+			var d: float = _star_pos(src).distance_to(_star_pos(cand))
+			if d < tgt_d:
+				tgt_d = d
+				tgt = cand
+		if tgt == "" or tgt_d > ALIEN_WAR_REACH_LY:
+			continue
+		# Whether it succeeds: what each side has built, by the age of its presence.  A young
+		# colony is easy prey; an ancient hostile bristling with lasers is not.
+		var atk: Dictionary = _alien_infra_at(src, float(year))
+		var def: Dictionary = _alien_infra_at(tgt, float(year))
+		var atk_str: float = 1.0 + float(atk["lasers"]) + float(atk.get("missiles", 0))
+		var def_str: float = 1.0 + float(def["lasers"]) * 2.0   # defending emplacements count double
+		if randf() > atk_str / (atk_str + def_str):
+			continue                          # the raid is beaten off
+		var loser_pid: String = str(star_polity.get(tgt, ""))
+		var loser: Dictionary = _factions.get(loser_pid, {})
+		var winner: Dictionary = _factions.get(src_pid, {})
+		_attach_star_to_polity(tgt, src_pid)
+		# A conquered system is a damaged one: its development is set back, which also means its
+		# captured arsenal is not immediately turned on the next neighbour.
+		_alien_since[tgt] = minf(float(year),
+			float(_alien_since.get(tgt, float(year))) + ALIEN_CONQUEST_SETBACK_YEARS)
+		# Did that finish the loser off?
+		var remaining: int = 0
+		for star2: String in star_polity:
+			if str(star_polity[star2]) == loser_pid:
+				remaining += 1
+		# Only what the player can see is reported, and only a few per tick.
+		if _detected_aliens.has(tgt) and announced < 2 and not winner.is_empty():
+			announced += 1
+			if remaining == 0 and not loser.is_empty():
+				_announce("%s is gone" % str(loser["name"]),
+					"%s has taken the last system of %s. The %s hold nothing there now." % [
+						str(winner["name"]), str(loser["name"]), str(loser["race_name"])],
+					"conquest_end_%s_%d" % [loser_pid, year])
+			else:
+				_announce("A system changes hands",
+					"%s has taken %s from %s." % [str(winner["name"]), tgt,
+						str(loser.get("name", "its neighbour"))],
+					"conquest_%s_%d" % [tgt, year])
+
 
 ## Aggressive civilisations fling relativistic kinetic missiles at human worlds.  Each
 ## aggressive system has a small per-year chance to launch at Sol or one of our colonies;
@@ -5751,6 +6451,15 @@ func save_game(path: String = "") -> void:
 	var data: Dictionary = {
 		"research":           ResearchTree.save_state(),
 		"galaxy_seed":        galaxy_seed,
+		"star_mass_msun":     SolarSystem.star_mass_msun,
+		"star_lifted_msun":   SolarSystem.star_lifted_msun,
+		"star_age_offset":    SolarSystem.star_age_offset_years,
+		"star_drift_ly":      [SolarSystem.star_drift_ly.x, SolarSystem.star_drift_ly.y,
+			SolarSystem.star_drift_ly.z],
+		"star_velocity_ms":   SolarSystem.star_velocity_ms,
+		"star_thrust_dir":    [SolarSystem.star_thrust_dir.x, SolarSystem.star_thrust_dir.y,
+			SolarSystem.star_thrust_dir.z],
+		"star_thrust_target": SolarSystem.star_thrust_target,
 		"year":               year,
 		"month":              month,
 		"day":                day,
@@ -5785,6 +6494,7 @@ func save_game(path: String = "") -> void:
 		"vn_milestone_idx":      _vn_milestone_idx,
 		"regions":               _regions,
 		"region_last_year":      _region_last_year,
+		"cluster_last_year":     _cluster_last_year,
 		"interstellar_attacks":  interstellar_attacks,
 		"incoming_attacks":      incoming_attacks,
 		"outgoing_messages":     outgoing_messages,
@@ -5793,6 +6503,9 @@ func save_game(path: String = "") -> void:
 		"infra_probed":          _infra_probed,
 		"star_factions":      star_factions,
 		"known_alignments":   _known_alignments,
+		"star_polity":        star_polity,
+		"factions":           _factions,
+		"races":              _races,
 		"alien_since":        _alien_since,
 		"detected_aliens":    _detected_aliens,
 		"alien_fired":        _alien_fired,
@@ -5844,6 +6557,22 @@ func load_game(path: String = "") -> void:
 	# seeds existed has no key and gets 0, which reproduces exactly the sky it was written in.
 	galaxy_seed = int(data.get("galaxy_seed", 0))
 	StarMapPanel.set_galaxy_seed(galaxy_seed)
+	# A save from before stellar engineering has no star entry, and defaults to a pristine Sun.
+	SolarSystem.set_star_mass(float(data.get("star_mass_msun", 1.0)))
+	# The running total carries the slivers the mass itself is too coarse to hold.
+	SolarSystem.star_lifted_msun = maxf(SolarSystem.star_lifted_msun,
+		float(data.get("star_lifted_msun", 0.0)))
+	SolarSystem.star_age_offset_years = float(data.get("star_age_offset", 0.0))
+	var drift: Array = data.get("star_drift_ly", [])
+	SolarSystem.star_drift_ly = Vector3(float(drift[0]), float(drift[1]), float(drift[2])) \
+		if drift.size() == 3 else Vector3.ZERO
+	SolarSystem.star_velocity_ms = float(data.get("star_velocity_ms", 0.0))
+	var aim: Array = data.get("star_thrust_dir", [])
+	SolarSystem.star_thrust_dir = Vector3(float(aim[0]), float(aim[1]), float(aim[2])) \
+		if aim.size() == 3 else Vector3.ZERO
+	SolarSystem.star_thrust_target = str(data.get("star_thrust_target", ""))
+	# The shades follow the roster, which the load has just restored.
+	_sync_star_shades()
 	_star_index_size = -1
 
 	# Dyson-swarm size.  Set the base value first so the Orbital Array migration in
@@ -6030,6 +6759,7 @@ func load_game(path: String = "") -> void:
 				"colonizable": float(rec.get("colonizable", 0.0)),
 			}
 	_region_last_year = float(data.get("region_last_year", float(year)))
+	_cluster_last_year = float(data.get("cluster_last_year", float(year)))
 	_vn_milestone_idx = int(data.get("vn_milestone_idx", 0))
 	interstellar_attacks = []
 	if data.has("interstellar_attacks") and data["interstellar_attacks"] is Array:
@@ -6062,6 +6792,19 @@ func load_game(path: String = "") -> void:
 	else:
 		_seed_star_factions()   # older save: assign fresh alien presence
 	_known_alignments = {}
+	star_polity = {}
+	_factions = {}
+	_races = {}
+	if data.has("star_polity") and data["star_polity"] is Dictionary:
+		for k: String in data["star_polity"]:
+			star_polity[k] = str(data["star_polity"][k])
+	if data.has("factions") and data["factions"] is Dictionary:
+		for k: String in data["factions"]:
+			_factions[k] = data["factions"][k]
+	if data.has("races") and data["races"] is Dictionary:
+		for k: String in data["races"]:
+			_races[k] = data["races"][k]
+
 	if data.has("known_alignments") and data["known_alignments"] is Dictionary:
 		for k: String in data["known_alignments"]:
 			_known_alignments[k] = true
@@ -6223,7 +6966,18 @@ func _population_capacity() -> float:
 func _climate_capacity_factor() -> float:
 	var co2: float = float(atmospheric_co2.get("earth", 0.0))
 	# setup_climate widens or narrows the CO2 a biosphere absorbs before its ceiling falls.
-	return maxf(0.05, 1.0 / (1.0 + co2 / (CO2_K_HALF * setup_climate)))
+	var warming: float = co2 / (CO2_K_HALF * setup_climate)
+	# The other side of the same balance is the light Earth never receives — whether the shades
+	# took it or the star stopped making it.  Dimming Sol is not a free way to buy time: lift a
+	# quarter of it away and the biosphere is working with a third of its sunlight.
+	#
+	# The penalty is on the NET, so shading a warmed Earth back to neutral restores the ceiling,
+	# and cooling past neutral drops it again — an iced world is as hostile as a cooked one.  A
+	# pristine Sun with no shades sits at exactly 1.0 of the epoch's light, which leaves this the
+	# expression it has always been.
+	var dimming: float = clampf(1.0 - SolarSystem.insolation_at_earth(float(year)), 0.0, 1.0)
+	var cooling: float = dimming * StarModel.SHADE_OFFSET_PER_FRACTION
+	return maxf(0.05, 1.0 / (1.0 + absf(warming - cooling)))
 
 ## Everyone eats.  A world draws from its own larder in proportion to what it holds, so no
 ## single foodstuff is exhausted while others sit full.  What it cannot cover is hunger, and
@@ -6358,6 +7112,12 @@ func _fmt_year_hud() -> String:
 		return "%d : %02d : %02d" % [year, month + 1, day + 1]
 
 func _update_hud() -> void:
+	# The star map's thruster controls, refreshed with the rest of the HUD.  This used to sit in
+	# advance_day(), which meant the button only appeared while the clock was running day by day
+	# — not while paused, and not in fast mode, which is most of when a thruster exists at all.
+	if sidebar and sidebar.star_map and sidebar.star_map.visible:
+		sidebar.star_map.set_thruster_state(SolarSystem.star_mirror_coverage > 0.0,
+			SolarSystem.star_drift_ly.length(), SolarSystem.star_thrust_target)
 	if time_label:
 		time_label.text = _fmt_year_hud()
 
@@ -6375,10 +7135,18 @@ func _update_hud() -> void:
 		"%s / %s" % [Units.format_si(ResearchTree.resources.get("minerals", 0.0), "g"),
 			Units.format_si(min_cap, "g")],
 		"+%s" % Units.format_si(prod.get("minerals", 0.0), "g/s"))
+	# Net of what the star lifters are burning, and say so: an enormous drain with no line item
+	# would just look like the reserve leaking.
+	var stellar_draw: float = _star_lift_rate_w + _husbandry_rate_w
+	var net_energy: float = float(prod.get("energy", 0.0)) - stellar_draw
+	var energy_rate: String = "%s%s" % ["+" if net_energy >= 0.0 else "−",
+		Units.format_si(absf(net_energy), "W")]
+	if stellar_draw > 0.0:
+		energy_rate += "  · star work %s" % Units.format_si(stellar_draw, "W")
 	_set_res_box("energy",
 		"%s / %s" % [Units.format_si(ResearchTree.resources.get("energy", 0.0), "J"),
 			Units.format_si(en_cap, "J")],
-		"+%s" % Units.format_si(prod.get("energy", 0.0), "W"))
+		energy_rate)
 	_set_res_box("heat",
 		"%s / %s" % [Units.format_si(raw_load, "W"), Units.format_si(_cached_radiator_cap, "W")], "")
 	# Amber the Heat box when the grid is radiating-limited (draw over capacity).
@@ -6399,18 +7167,6 @@ func _on_settings_pressed() -> void:
 func _on_settings_closed() -> void:
 	# Settings saved itself; nothing extra needed — game remains in its current pause state.
 	pass
-
-func _on_low_speed_pressed() -> void:
-	_user_speed_mult = 0.25   # 4× slower than base
-	_update_timescale()
-
-func _on_medium_speed_pressed() -> void:
-	_user_speed_mult = 1.0    # base speed
-	_update_timescale()
-
-func _on_high_speed_pressed() -> void:
-	_user_speed_mult = 4.0    # 4× faster than base
-	_update_timescale()
 
 # ── Game event system ─────────────────────────────────────────────────────────
 

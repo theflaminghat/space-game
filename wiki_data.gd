@@ -279,7 +279,7 @@ static func _building_stats(b: Dictionary, game: Node) -> Array:
 	if e > 0.0:
 		var line: String = "Generates %s" % Units.format_si(e, "W")
 		if bool(b.get("solar", false)):
-			line += " × the Sun's luminosity (now %.2f L☉)" % Planet.sun_luminosity_lsun(
+			line += " × the Sun's luminosity (now %.2f L☉)" % SolarSystem.sun_luminosity_lsun(
 				int(game.year) if game else 1945)
 		out.append(line)
 		out.append("Generation anywhere but Earth reaches the grid only through the %s." % _link(
@@ -633,7 +633,7 @@ static func _controls_page() -> String:
 		["Space", "Pause or resume the simulation"],
 		["Escape", "Pause menu"],
 		["` (backtick)", "Developer console"],
-		["Slow / Normal / Fast", "Top-bar buttons: 0.25×, 1× and 4× the base timescale"],
+		["Speed buttons", "Top-bar row: how much to multiply the base rate by; faster ones unlock as the run reaches their year"],
 	]:
 		t += _li("[b]%s[/b] — %s" % [_esc(str(row[0])), str(row[1])])
 	t += _h2("Solar system view")
@@ -680,9 +680,12 @@ static func _mechanics_page(key: String, game: Node) -> String:
 	var g = game
 	match key:
 		"time":
-			t += _p("The run begins on 1 January 1945. Until 2026 each game-day takes %s real seconds at Normal speed. After that the timescale follows a power law in elapsed years — seconds per day = %s ÷ (1 + years/%s)^%s — so each decade of game time costs a comparable slice of real time, down to a floor of %s s per day." % [
-				_n(g.TIMESCALE_INIT), _n(g.TIMESCALE_INIT), _n(g.TIMESCALE_T0), _n(g.TIMESCALE_POWER), _n(g.TIMESCALE_MIN)])
-			t += _li("Slow, Normal and Fast multiply the rate by 0.25, 1 and 4.")
+			t += _p("The run begins on 1 January 1945. Time runs at one fixed rate — %s real seconds per game-day — for the whole run; how fast a run moves is the player's to choose. The top bar multiplies that rate, and the faster settings are earned by getting there: each unlocks when the run reaches its year." % _n(g.TIMESCALE_BASE))
+			for tier: Dictionary in g.SPEED_TIERS:
+				var when: String = "from the start" if int(tier["year"]) <= 1945 \
+					else "from year %s" % TimelineCanvas.fmt_year(float(tier["year"]))
+				t += _li("[b]%s[/b] — %s, %s." % [
+					str(tier["label"]), g.speed_pace_text(float(tier["mult"])), when])
 			t += _li("Below %s s per day the simulation advances whole years per frame and the calendar shows years only." % _n(g.FAST_THRESHOLD))
 			t += _li("Past year %s planetary orbits freeze and the bodies are hidden while time runs; pausing shows them again." % _n(float(SolarSystem.ORBIT_FREEZE_YEAR)))
 			t += _li("Every flow — production, burn, growth, decay — is integrated on game-days, so results are the same at any speed.")
@@ -768,23 +771,47 @@ static func _mechanics_page(key: String, game: Node) -> String:
 			t += _li("[b]Relativistic strikes[/b] — hostile civilisations fire lasers (light speed), missiles (%s c) and berserker swarms at human worlds. A hit on a colony destroys it; a hit on Earth kills everyone there and destroys about a third of its structures. Missiles and swarms can be shot down on arrival by an Orbital Laser; lasers cannot." % _n(float(g.RKKV_BETA)))
 			t += _li("%s guarantee survivors in impacts and nuclear war." % _building_link("Bunker"))
 		"sol":
+			# Both figures follow the star's current state: a lightened Sol swells less, and
+			# reaches each stage later.
 			var peak: float = 0.0
-			var peak_year: int = 0
+			var peak_age: float = 0.0
 			for s: Array in Planet.SUN_STAGES:
-				var r: float = float(g.SUN_RADIUS_BASE_AU) * float(s[4])
+				var r: float = float(g.SUN_RADIUS_BASE_AU) * float(s[4]) \
+					* StarModel.radius_mult(SolarSystem.star_mass_msun)
 				if r > peak:
 					peak = r
-					peak_year = int(s[0])
-			t += _p("Sol follows a fixed evolutionary track: slow brightening on the main sequence, then the red-giant branch, helium flash, horizontal branch and asymptotic giant branch, then envelope ejection.")
-			t += _li("Any planet whose orbit lies inside the photosphere is destroyed with its moons, structures and people. The photosphere peaks at %.3f AU around year %s (Earth orbits at 1.000 AU)." % [peak, _n(float(peak_year))])
-			t += _li("In year %s Sol ejects its envelope; ultraviolet flux ends all life remaining in the system." % _n(float(g.PLANETARY_NEBULA_YEAR)))
+					peak_age = float(s[0])
+			t += _p("Sol follows one evolutionary track: slow brightening on the main sequence, then the red-giant branch, helium flash, horizontal branch and asymptotic giant branch, then envelope ejection. Where the star sits on that track depends on its mass, which is the one thing a civilisation can change about it.")
+			if SolarSystem.star_is_engineered():
+				t += _li("[b]Sol has been altered.[/b] %.4f M☉ remain, %.1f %% of the original. It burns at %s of its old light and ages at %.3f× the calendar, which is what moves the dates below." % [
+					SolarSystem.star_mass_msun, SolarSystem.star_mass_msun * 100.0,
+					("%.3f" % StarModel.luminosity_mult(SolarSystem.star_mass_msun)),
+					1.0 / StarModel.lifetime_stretch(SolarSystem.star_mass_msun)])
+			t += _li("Any planet whose orbit lies inside the photosphere is destroyed with its moons, structures and people. The photosphere peaks at %.3f AU around year %s (Earth orbits at 1.000 AU)." % [
+				peak, _n(SolarSystem.star_year_of_age(peak_age))])
+			t += _li("In year %s Sol ejects its envelope; ultraviolet flux ends all life remaining in the system." % _n(float(g.sun_nebula_year())))
+			t += _li("[b]Star lifting.[/b] %s built on the Sun drive a controlled wind off it and catch what comes away. Each kilogram removed costs the binding energy of the material, %s J/kg — a floor set by physics — and the lifters draw that from the civilisation's reserve, banked energy included. What comes off is hydrogen, and it lands in the Sun's inventory." % [
+				_building_link("Star Lifter"), _n(StarModel.LIFT_ENERGY_PER_KG)])
+			t += _li("[b]Fate.[/b] Mass decides how Sol ends, and lifting can carry it past two thresholds. Above %s M☉ the track above runs to its end. Below that the core never ignites helium: there is no giant branch, Earth is never engulfed, no envelope is ever ejected, and the star settles as a helium dwarf — the two dates simply stop existing. Below %s M☉ nothing fuses at all and the Sun is out. Sol is currently bound to be: [b]%s[/b]." % [
+				_n(StarModel.HELIUM_FUSION_MIN_MSUN), _n(StarModel.HYDROGEN_FUSION_MIN_MSUN),
+				SolarSystem.sun_fate_text()])
+			t += _li("[b]The cost of a dimmer sun.[/b] Earth's ceiling answers to the light that reaches it, whether the shades took it or the star stopped making it. A quarter of Sol lifted away leaves the biosphere about a third of its sunlight, which is a climate catastrophe in the cold direction — buying billions of years this way means having somewhere else to live, or a warmed world to spend.")
+			t += _li("A lighter star burns dimmer and lives longer: luminosity follows M^%s and lifetime M^%s, so lifting 1 %% of Sol costs about a tenth of its remaining light-budget in effort and buys roughly 190 million years. Mass cannot be added, and lifting stops at %s M☉." % [
+				_n(StarModel.LUMINOSITY_EXP), _n(absf(StarModel.LIFETIME_EXP)), _n(StarModel.MIN_MASS_MSUN)])
+			t += _li("[b]Sunshades.[/b] %s do nothing to the star: they stand between it and the planets. Shading offsets greenhouse warming in the same balance, so a warmed Earth recovers — but shading past what the CO₂ is doing chills it, and every solar collector on a shaded world makes proportionally less. At most %s %% of the light can be intercepted." % [
+				_building_link("Sunshade Constellation"), _n(StarModel.MAX_SHADE_FRACTION * 100.0)])
+			t += _li("[b]Stellar husbandry.[/b] %s mix unburnt hydrogen from the envelope into the core, taking years off the star's clock at %s J a year — far cheaper per year than lifting, and it costs no mass and no light. It cannot wind Sol back past the year the run began." % [
+				_building_link("Core Mixing Array"), _n(StarModel.HUSBANDRY_ENERGY_PER_YEAR)])
+			t += _li("[b]Stellar propulsion.[/b] %s hung to one side of the Sun reflect its light back, and the star feels the recoil — a Shkadov thruster. It spends nothing: the engine is the star, and the mirrors only have to stand. Thrust is %s of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century and light-years over geological time. Aim it at a star from the star map; every distance the game measures from Sol moves with it." % [
+				_building_link("Shkadov Mirror"), "%d %%" % int(round(StarModel.MIRROR_THRUST_EFFICIENCY * 100.0))])
 			t += _li("The run survives the loss of the Sol system only if the species holds something beyond it: an interstellar colony, a share of a star cluster, or a settled galaxy region.")
-			t += _li("Sun's luminosity now: %.2f L☉." % Planet.sun_luminosity_lsun(int(g.year)))
+			t += _li("Sun's luminosity now: %.2f L☉." % SolarSystem.sun_luminosity_lsun(int(g.year)))
 		"interstellar":
 			t += _p("With %s researched, the star map can launch colony ships. A flight accelerates to the chosen speed, coasts and decelerates; its energy is the relativistic kinetic energy of a %s kg ship, paid twice." % [
 				_research_link("relativistic_navigation"), _n(StarMapPanel.SHIP_MASS)])
 			t += _li("Arrivals within %s ly of Sol become individually simulated colonies. Farther arrivals fold into the statistical region model, which then fills and spreads on its own." % _n(float(g.DETAILED_RADIUS_LY)))
-			t += _li("A star cluster is taken a share at a time: each arrival claims %d %% of it." % int(round(float(g.CLUSTER_CLAIM_PER_PROBE) * 100.0)))
+			t += _li("A star cluster needs one probe and no more. The landing puts a foothold on a single star — the cluster reads 0 %% settled that day — and it spreads on its own from there at %s of the cluster a year, the same rate a region of the galaxy fills its own stars, so a cluster takes about %s years to settle completely. Sending further probes to it achieves nothing." % [
+				_n(float(g.CLUSTER_SATURATE_RATE)), _n(1.0 / float(g.CLUSTER_SATURATE_RATE))])
 			t += _li("A system known to be inhabited cannot be targeted by colony ships or colonising probes; an unknown inhabited one is discovered on arrival and nothing is founded.")
 			t += _li("Colonies develop their own Dyson swarm, telescopes and lasers over time; their telescopes extend how far stars can be resolved.")
 		"probes":

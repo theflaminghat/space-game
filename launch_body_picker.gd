@@ -17,6 +17,8 @@ var _ids: Array = []
 var _popup: PopupPanel = null
 var _tree: Tree = null
 var _shown: int = -2        # the option index the button text last showed
+## Ids that may be selected; empty means everything.
+var _valid_ids: Array = []
 
 
 func _init(opt: OptionButton = null) -> void:
@@ -43,6 +45,13 @@ func set_entries(names: Array, ids: Array) -> void:
 	_names = names
 	_ids = ids
 	_shown = -2
+
+
+## Ids the current mission may actually fly to.  Everything else is shown greyed and cannot be
+## picked — the hierarchy is a map of the system, so hiding entries would be worse than saying
+## which ones are closed.  An empty list (the default) means no restriction.
+func set_valid_ids(ids: Array) -> void:
+	_valid_ids = ids
 
 
 ## Keep the button's label on whatever the option has selected, however it was selected.
@@ -77,6 +86,7 @@ func _open() -> void:
 		it.set_text(0, str(_names[i]))
 		it.set_metadata(0, i)
 		it.collapsed = id != sel_parent          # open only the branch holding the current pick
+		_mark_validity(it, id)
 		by_id[id] = it
 	for i in range(_ids.size()):
 		var id: String = str(_ids[i])
@@ -87,6 +97,7 @@ func _open() -> void:
 		var it: TreeItem = _tree.create_item(parent)
 		it.set_text(0, str(_names[i]))
 		it.set_metadata(0, i)
+		_mark_validity(it, id)
 		by_id[id] = it
 	# Highlight the current pick.  This fires item_selected, but the popup is not open yet, which
 	# is how _on_tree_selected tells it from a real pick.
@@ -94,6 +105,15 @@ func _open() -> void:
 		(by_id[str(_ids[sel])] as TreeItem).select(0)
 	var at: Vector2 = get_screen_position() + Vector2(0.0, size.y)
 	_popup.popup(Rect2i(Vector2i(at), Vector2i(maxi(int(size.x), POPUP_SIZE.x), POPUP_SIZE.y)))
+
+
+## Grey an entry the current mission cannot reach, and make it unselectable.
+func _mark_validity(item: TreeItem, id: String) -> void:
+	if _valid_ids.is_empty() or _valid_ids.has(id):
+		return
+	item.set_custom_color(0, Color(0.50, 0.52, 0.58))
+	item.set_selectable(0, false)
+	item.set_tooltip_text(0, "This mission cannot fly here")
 
 
 func _on_tree_selected() -> void:

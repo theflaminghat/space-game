@@ -53,6 +53,10 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 
 
+## Star rows, by key: { key: Label, value: Label }.  Only the Sun shows them.
+var _star_rows: Dictionary = {}
+
+
 func _ready() -> void:
 	# Hide the scene-defined Tree; we replace it with a scrollable row list.
 	composition_tree.hide()
@@ -137,7 +141,91 @@ func _ready() -> void:
 	_composition_container.add_theme_constant_override("separation", 2)
 	_composition_scroll.add_child(_composition_container)
 
+	# ── Star rows (the Sun only) ──────────────────────────────────────────────
+	# The Sun has no population or larder; what matters about it is its state as a star, and —
+	# once stellar engineering starts — what the player has done to it.  These rows stay hidden
+	# for every other body.
+	for spec: Array in [["Mass", "mass"], ["Luminosity", "luminosity"], ["Radius", "radius"],
+			["Ageing", "ageing"], ["Shading", "shade"], ["Rejuvenated", "rejuvenated"],
+			["Thrust", "thrust"], ["Fate", "fate"], ["Red giant", "red_giant"],
+			["Nebula", "nebula"]]:
+		var k := Label.new()
+		k.text = str(spec[0])
+		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		stats_grid.add_child(k)
+		var v := Label.new()
+		v.text = "-"
+		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		stats_grid.add_child(v)
+		_star_rows[str(spec[1])] = {"key": k, "value": v}
+		k.hide()
+		v.hide()
+
 	custom_minimum_size = Vector2(340, 0)
+
+
+## Show the star block for the Sun and hide it for everything else.  The two dates are the ones
+## stellar engineering exists to move, so they are spelled out as years rather than countdowns.
+func _set_star_rows(star: Dictionary) -> void:
+	var show: bool = not star.is_empty()
+	for key: String in _star_rows:
+		(_star_rows[key]["key"] as Label).visible = show
+		(_star_rows[key]["value"] as Label).visible = show
+	if not show:
+		return
+	var mass: float = float(star.get("mass_msun", 1.0))
+	var engineered: bool = bool(star.get("engineered", false))
+	_star_rows["mass"]["value"].text = "%.4f M☉" % mass
+	# An untouched Sun is the baseline; a lifted one says how much is gone, which is the number
+	# every other figure here follows from.
+	_star_rows["mass"]["value"].modulate = Color(0.55, 0.85, 1.0) if engineered else Color(1, 1, 1)
+	if engineered:
+		_star_rows["mass"]["value"].text += "  (−%.2f%%)" % ((1.0 - mass) * 100.0)
+	_star_rows["luminosity"]["value"].text = "%s L☉" % _fmt_solar(float(star.get("luminosity", 1.0)))
+	_star_rows["radius"]["value"].text = "%s R☉" % _fmt_solar(float(star.get("radius_solar", 1.0)))
+	# How fast the star is living, against the calendar.  This is the whole return on lifting
+	# mass: below 1.00× the Sun is ageing slower than the years are passing.
+	var ageing: float = float(star.get("ageing", 1.0))
+	_star_rows["ageing"]["value"].text = "%.3f× calendar" % ageing
+	_star_rows["ageing"]["value"].modulate = Color(0.55, 0.85, 1.0) if engineered else Color(1, 1, 1)
+	# Shading and rejuvenation are the other two levers; both read "none" until something stands.
+	var shade: float = float(star.get("shade", 0.0))
+	_star_rows["shade"]["value"].text = "none" if shade <= 0.0 else "%.3f%% of the light" % (shade * 100.0)
+	_star_rows["shade"]["value"].modulate = Color(0.55, 0.85, 1.0) if shade > 0.0 else Color(1, 1, 1)
+	var rejuv: float = float(star.get("rejuvenated", 0.0))
+	_star_rows["rejuvenated"]["value"].text = "none" if rejuv <= 0.0 else Units.format_si(rejuv, "yr")
+	_star_rows["rejuvenated"]["value"].modulate = Color(0.55, 0.85, 1.0) if rejuv > 0.0 else Color(1, 1, 1)
+	# Where the star is going, once there are mirrors pushing it.
+	var mirrors: float = float(star.get("mirrors", 0.0))
+	var drift: float = float(star.get("drift", 0.0))
+	if mirrors <= 0.0 and drift <= 0.0:
+		_star_rows["thrust"]["value"].text = "none"
+		_star_rows["thrust"]["value"].modulate = Color(1, 1, 1)
+	else:
+		var aim: String = str(star.get("thrust_aim", ""))
+		_star_rows["thrust"]["value"].text = "%s ly at %s%s" % [
+			("%.3f" % drift).rstrip("0").rstrip("."),
+			Units.format_si(float(star.get("drift_speed", 0.0)), "m/s"),
+			"" if aim == "" else " → %s" % aim]
+		_star_rows["thrust"]["value"].modulate = Color(0.55, 0.85, 1.0)
+
+	# What the star is bound to become — and, when lifting has taken it below helium ignition,
+	# there is no giant branch left to date, so the two dates read "never" rather than a number.
+	var dated: bool = bool(star.get("dated_fate", true))
+	_star_rows["fate"]["value"].text = str(star.get("fate", ""))
+	_star_rows["fate"]["value"].modulate = Color(1, 1, 1) if dated else Color(0.55, 0.85, 1.0)
+	_star_rows["red_giant"]["value"].text = Units.format_si(float(star.get("red_giant", 0.0)), "yr") \
+		if dated else "never"
+	_star_rows["nebula"]["value"].text = Units.format_si(float(star.get("nebula", 0.0)), "yr") \
+		if dated else "never"
+
+
+## Solar units read better as plain decimals than as SI: 0.365 L☉, not "365.4 m L☉".  Falls back
+## to SI at the extremes, where a red giant's thousands of suns need it.
+func _fmt_solar(v: float) -> String:
+	if v >= 0.001 and v < 1000.0:
+		return ("%.3f" % v).rstrip("0").rstrip(".")
+	return Units.format_si(v, "")
 
 
 ## Format a whole-number population with thousands separators, e.g. 2300000000
@@ -180,6 +268,8 @@ func set_planet_info(data: Dictionary) -> void:
 	var planet_name: String = str(data.get("name", ""))
 
 	planet_name_label.text = planet_name
+
+	_set_star_rows(data.get("star", {}))
 
 	var scap: Dictionary = data.get("storage_cap", {})
 	var min_cap: float   = scap.get("minerals", 0.0)

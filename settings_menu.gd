@@ -127,10 +127,10 @@ func _build_ui() -> void:
 	speed_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	speed_row.add_child(speed_lbl)
 	_speed_option = OptionButton.new()
-	_speed_option.add_item("Slow  (0.25×)")
-	_speed_option.add_item("Normal  (1×)")
-	_speed_option.add_item("Fast  (4×)")
-	_speed_option.selected = 1
+	_speed_option.add_item("1×  (base rate)")
+	_speed_option.add_item("2×")
+	_speed_option.add_item("Fastest unlocked")
+	_speed_option.selected = 0
 	_speed_option.custom_minimum_size = Vector2(150, 0)
 	speed_row.add_child(_speed_option)
 
@@ -203,7 +203,7 @@ func _load_and_apply() -> void:
 		_vsync_btn.set_pressed_no_signal(     bool(cfg.get_value("display",  "vsync",              true)))
 		_aa_option.selected =                  int(cfg.get_value("display",  "aa_idx",             5))
 		_volume_slider.value =             float(cfg.get_value("audio",    "master_volume",       1.0))
-		_speed_option.selected  =           int(cfg.get_value("gameplay", "default_speed_idx",  1))
+		_speed_option.selected  =           int(cfg.get_value("gameplay", "default_speed_tier", 0))
 		_autosave_option.selected =         int(cfg.get_value("gameplay", "autosave_idx",        0))
 	_volume_val_label.text = "%d%%" % int(_volume_slider.value * 100.0)
 	_apply_display()
@@ -215,7 +215,7 @@ func save_settings() -> void:
 	cfg.set_value("display",  "vsync",             _vsync_btn.button_pressed)
 	cfg.set_value("display",  "aa_idx",            _aa_option.selected)
 	cfg.set_value("audio",    "master_volume",     _volume_slider.value)
-	cfg.set_value("gameplay", "default_speed_idx", _speed_option.selected)
+	cfg.set_value("gameplay", "default_speed_tier", _speed_option.selected)
 	cfg.set_value("gameplay", "autosave_idx",      _autosave_option.selected)
 	cfg.save(SETTINGS_PATH)
 
@@ -254,12 +254,13 @@ func _apply_volume(vol: float) -> void:
 
 # ── Public getters (read by Game.gd) ─────────────────────────────────────────
 
-## Speed multiplier to apply at the start of a new game (0.25 / 1.0 / 4.0).
-func get_default_speed_mult() -> float:
+## Which rung of Game.SPEED_TIERS a run should start on.  A number past the end of the ladder
+## means "the fastest unlocked", which set_speed_tier() clamps to whatever the run has reached.
+func get_default_speed_tier() -> int:
 	match _speed_option.selected:
-		0: return 0.25
-		2: return 4.0
-		_: return 1.0
+		1: return 1
+		2: return 9999
+		_: return 0
 
 ## Autosave interval in real seconds; 0 means disabled.
 func get_autosave_seconds() -> int:

@@ -33,6 +33,17 @@ const MOON_COUNTS := {
 	"earth": 1, "mars": 2, "jupiter": 4, "saturn": 4, "uranus": 3, "neptune": 2,
 }
 
+## Surface maps for moons that have one, by moon node name (see PlanetData.MOON_NAMES).  The rest
+## are plain grey spheres.
+const MOON_TEXTURES := {
+	"earth_moon_0": preload("res://luna.svg"),     # Luna
+	"mars_moon_0":  preload("res://phobos.svg"),   # Phobos
+	"mars_moon_1":  preload("res://deimos.svg"),   # Deimos
+	"jupiter_moon_0": preload("res://io.svg"),     # Io
+	"jupiter_moon_1": preload("res://europa.svg"), # Europa
+	"jupiter_moon_2": preload("res://ganymede.svg"), # Ganymede
+}
+
 ## Orbital infrastructure lanes.  Each buildable orbital structure gets its OWN ring around
 ## the planet (distinct radius = separate lane) and its own placeholder-textured mesh, so a
 ## planet's orbital build-out is visible the way the Dyson swarm is around the Sun.  One
@@ -45,8 +56,8 @@ const MOON_COUNTS := {
 ## "ground" marks the two that are NOT orbital on a world with a surface: a radiator field and a
 ## superconducting storage ring both stand on the ground of a rocky planet.  They still get a
 ## lane around a gas giant, where there is no ground to stand on and everything built is hanging
-## in vacuum by definition.  The Matter Depot used to be here as a third; it is ground-only now,
-## so it has no lane at all — silos and bunkers are not orbital infrastructure anywhere.
+## in vacuum by definition.  The Matter Depot has no lane at all — silos and bunkers are not
+## orbital infrastructure anywhere, and solar orbit stores its matter in Orbital Vaults.
 const INFRA_LANES := [
 	{"type": "Orbital Laser",         "radius": 0.95, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
 	{"type": "Space Telescope",       "radius": 1.20, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
@@ -70,6 +81,14 @@ const INFRA_LANES := [
 	{"type": "Orbital Ring Store",    "radius": 4.45, "color": Color(0.55, 0.85, 0.78), "mesh": "ring"},
 	# People.
 	{"type": "Orbital Habitat",       "radius": 4.70, "color": Color(0.70, 0.95, 0.65), "mesh": "ring"},
+	# Industry and its stores, flown out to a build site that has no ground.
+	{"type": "Orbital Construction Station", "radius": 1.08, "color": Color(0.85, 0.88, 0.95),
+		"mesh": "box"},
+	# Stellar engineering: the lifters hang closest of anything here, because they have to.
+	{"type": "Star Lifter",           "radius": 0.80, "color": Color(1.00, 0.85, 0.45), "mesh": "dish"},
+	{"type": "Sunshade Constellation","radius": 0.88, "color": Color(0.70, 0.78, 0.95), "mesh": "flat"},
+	{"type": "Core Mixing Array",     "radius": 0.72, "color": Color(0.95, 0.60, 0.95), "mesh": "ring"},
+	{"type": "Shkadov Mirror",        "radius": 0.64, "color": Color(0.95, 0.95, 1.00), "mesh": "flat"},
 ]
 const INFRA_MAX_PER_LANE: int = 64   # cap per lane (MultiMesh instance budget)
 
@@ -108,47 +127,10 @@ var _star_infra_built: bool = false
 ##   8.0 – 8.2 B  : AGB thermal pulses — peak radius ~1.8 AU (Mars engulfed ~8.12 B)
 ##   8.2 B        : Sun ejects outer envelope → planetary nebula + white dwarf
 ##                  All remaining solar-system colonies sterilised.
-const SUN_STAGES: Array = [
-	# Each entry: [year, color, visual_mult, emiss_mult, solar_radii, luminosity_Lsun]
-	#
-	# luminosity_Lsun — physically accurate power output in solar luminosities (see
-	#                sun_luminosity_lsun()).  1 L☉ today, +10% per Gyr on the main sequence,
-	#                soaring to ~2700 L☉ at the red-giant tip and ~4000 L☉ on the AGB before
-	#                the envelope is ejected.  emiss_mult (the display glow) is a log-compressed
-	#                image of this curve so the render brightens hugely at the giant tips
-	#                without blowing the frame out to pure white.
-	#
-	# visual_mult  — multiplied by _sun_base_scale (= log(16) ≈ 2.773) for display.
-	#                _sun_base_scale × visual_mult × sphere_radius (0.5) = game-unit radius.
-	#                Calibrated so visual_mult 16.0 = Earth orbit ring (22.18 game units).
-	#                Proportional formula: visual_mult ≈ solar_radii × (16.0 / 215).
-	#
-	# Orbit ring radii and visual_mult needed to reach them:
-	#   Mercury 10.47 game units → 7.55×    Venus 17.42 → 12.57×
-	#   Earth   22.18 game units → 16.00×   Mars  29.63 → 21.37× (NOT reached — AGB only ~12.6×)
-	#
-	# solar_radii  — AU-radius physics only (Game.gd/_get_sun_radius_au).
-	#
-	# Timeline notes:
-	#   RGB tip (7.59B): peak expansion, Earth engulfed.
-	#   Helium flash (7.591B): rapid collapse back to ~10 solar radii — still 3.5× modern sun,
-	#     NOT tiny.  The 1 M yr window between RGB tip and CHeB represents the flash + settling.
-	#   AGB tip (8.2B): second expansion peaks at ~170 solar radii (~0.79 AU).
-	#     Mars at 1.524 AU is NOT engulfed.  Outer-system colonies survive until the
-	#     planetary nebula fires at PLANETARY_NEBULA_YEAR (8.21B), which sterilises everything
-	#     via intense UV/X-ray radiation regardless of orbital distance.
-	[0,              Color(1.00, 0.95, 0.80),   1.00,  0.90,   1.0,      1.0],  # modern Sun
-	[1_000_000_000,  Color(1.00, 0.92, 0.72),   1.00,  0.95,   1.05,     1.1],  # brightening MS — imperceptible change
-	[5_400_000_000,  Color(1.00, 0.84, 0.45),   1.15,  1.10,   1.5,      1.8],  # subgiant begins
-	[7_000_000_000,  Color(1.00, 0.60, 0.18),   3.50,  3.50,  10.0,     50.0],  # lower RGB (≈10 SR)
-	[7_500_000_000,  Color(1.00, 0.32, 0.06),   9.50,  9.90, 100.0,   1200.0],  # upper RGB — past Mercury, near Venus
-	[7_590_000_000,  Color(0.96, 0.18, 0.04),  16.00, 14.00, 215.0,   2700.0],  # RGB tip — Earth orbit, ~2700 L☉
-	[7_591_000_000,  Color(0.60, 0.82, 1.00),   3.50,  3.50,  10.0,     50.0],  # helium flash — shrinks, turns blue-white, dims
-	[7_700_000_000,  Color(0.90, 0.88, 0.80),   3.50,  3.80,  11.0,     60.0],  # CHeB stable (~100 M yr, ~11 SR)
-	[8_000_000_000,  Color(1.00, 0.58, 0.20),   5.50,  7.80,  50.0,    500.0],  # early AGB — past Mercury again
-	[8_200_000_000,  Color(0.94, 0.14, 0.03),  12.60, 16.00, 170.0,   4000.0],  # AGB tip (~170 SR = 0.79 AU), ~4000 L☉
-	[8_210_000_000,  Color(0.62, 0.80, 1.00),   0.05, 12.00,   0.05,  3000.0],  # planetary nebula → white dwarf
-]
+## The Sun's evolutionary track now lives with the rest of its physics, keyed by the star's own
+## age rather than the calendar (see star_model.gd).  Aliased here because the swarm renderer and
+## the encyclopedia read the table directly.
+const SUN_STAGES: Array = StarModel.SUN_STAGES
 
 ## Base scale stored at scene-load so we can multiply cleanly.
 var _sun_base_scale: Vector3 = Vector3.ONE
@@ -238,6 +220,8 @@ func _ready() -> void:
 			_sun_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_sun_mat.emission_enabled = true
 		set_surface_override_material(0, _sun_mat)
+	else:
+		_apply_polar_blur()
 
 	var pname: String = name.to_lower()
 	if PlanetData.PLANETS.has(pname):
@@ -304,6 +288,28 @@ func _init_from_planet_data(data: Dictionary) -> void:
 
 	_use_kepler = true
 	_update_kepler_position()
+
+## Surface shader that softens a texture map's poles (see planet_polar_blur.gdshader).
+const POLAR_BLUR_SHADER: Shader = preload("res://planet_polar_blur.gdshader")
+
+## Swap the body's textured StandardMaterial3D for the polar-blur shader, carrying over its map
+## and tint.  The material in effect is the first of: material_override, the surface override,
+## the mesh's own.  A body with no texture map is left alone — a flat colour has no poles to blur.
+func _apply_polar_blur() -> void:
+	var src: Material = material_override
+	if src == null:
+		src = get_surface_override_material(0)
+	if src == null and mesh != null and mesh.get_surface_count() > 0:
+		src = mesh.surface_get_material(0)
+	var base := src as StandardMaterial3D
+	if base == null or base.albedo_texture == null:
+		return
+	var mat := ShaderMaterial.new()
+	mat.shader = POLAR_BLUR_SHADER
+	mat.set_shader_parameter("albedo_tex", base.albedo_texture)
+	mat.set_shader_parameter("albedo_color", base.albedo_color)
+	material_override = mat
+
 
 ## Sample the orbit centreline as `segments`+1 points (closed: last == first).
 ## Kepler orbits trace their true ellipse; fallback bodies trace a circle.
@@ -651,24 +657,34 @@ func _create_moons() -> void:
 
 		var moon := MeshInstance3D.new()
 		moon.name = "%s_moon_%d" % [name, i]
+		var tex: Texture2D = MOON_TEXTURES.get(moon.name.to_lower(), null)
 		var sphere := SphereMesh.new()
 		sphere.radius = 0.5
 		sphere.height = 1.0
-		sphere.radial_segments = 12
-		sphere.rings = 6
+		# A textured moon is one the camera may be shown up close, so it gets a smooth sphere;
+		# a plain grey one stays low-poly.
+		sphere.radial_segments = 48 if tex else 12
+		sphere.rings = 24 if tex else 6
 		moon.mesh = sphere
 		moon.scale = Vector3(msize, msize, msize)
 		moon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
-		var mat := StandardMaterial3D.new()
-		var g: float = rng.randf_range(0.55, 0.80)
-		mat.albedo_color = Color(g, g, g * 0.96)
 		# A little self-emission keeps moons readable even on the night side / when the
 		# scene has no light reaching them.
-		mat.emission_enabled = true
-		mat.emission = Color(g, g, g)
-		mat.emission_energy_multiplier = 0.18
-		moon.set_surface_override_material(0, mat)
+		var g: float = rng.randf_range(0.55, 0.80)
+		if tex:
+			var smat := ShaderMaterial.new()
+			smat.shader = POLAR_BLUR_SHADER
+			smat.set_shader_parameter("albedo_tex", tex)
+			smat.set_shader_parameter("self_light", 0.18)
+			moon.set_surface_override_material(0, smat)
+		else:
+			var mat := StandardMaterial3D.new()
+			mat.albedo_color = Color(g, g, g * 0.96)
+			mat.emission_enabled = true
+			mat.emission = Color(g, g, g)
+			mat.emission_energy_multiplier = 0.18
+			moon.set_surface_override_material(0, mat)
 		add_child(moon)
 
 		_moons.append({
@@ -828,6 +844,29 @@ func _update_infra(delta: float) -> void:
 			mm.set_instance_transform(i,
 				Transform3D(Basis(t1 * inv_s, radial * inv_s, t2 * inv_s), pos))
 
+## World position of one slot in an orbital lane — where the `index`-th structure of `type` sits
+## once the lane holds `total` of them.
+##
+## This is the same layout _update_infra() draws: evenly spaced around the ring, on the lane's
+## live phase and inclination, so a craft flying to a reserved slot tracks it as the lane turns
+## rather than aiming at where it was when the launch went up.  A lane redistributes its
+## instances whenever the count changes, so the slot is exact only for the count passed in — a
+## delivery reserves the position it will occupy on arrival.
+##
+## Falls back to the body's own position for a type this body has no lane for.
+func infra_slot_world_pos(type_name: String, index: int, total: int) -> Vector3:
+	for lane: Dictionary in _infra:
+		if str(lane["type"]) != type_name:
+			continue
+		var n: int = maxi(total, 1)
+		var r: float = float(lane["radius"])
+		var incl: float = float(lane["incl"])
+		var th: float = float(lane["phase"]) + TAU * float(clampi(index, 0, n - 1)) / float(n)
+		var z: float = r * sin(th)
+		return to_global(Vector3(r * cos(th), z * sin(incl), z * cos(incl)))
+	return global_position
+
+
 ## Returns the planet's current visual distance from the orbit centre.
 ## For Keplerian orbits this varies with true anomaly; for circular fallback
 ## it equals orbit_radius (the semi-major axis).
@@ -838,68 +877,26 @@ func get_visual_radius() -> float:
 
 # ── Stellar evolution ─────────────────────────────────────────────────────────
 
-## Physically accurate solar luminosity (in solar luminosities, L☉) at a game year,
-## interpolated in LOG space across SUN_STAGES[..][5] so the enormous RGB/AGB swings read
-## smoothly.  1 L☉ today, ~2700 L☉ at the red-giant tip, ~4000 L☉ on the AGB, then the
-## remnant fades.  Static so Game and the UI can query the Sun's power output over time.
-static func sun_luminosity_lsun(y: int) -> float:
-	var yy: float = float(y)
-	var last: Array = SUN_STAGES[SUN_STAGES.size() - 1]
-	if yy >= float(int(last[0])):
-		return float(last[5])
-	var lo: Array = SUN_STAGES[0]
-	var hi: Array = SUN_STAGES[1]
-	for i in range(SUN_STAGES.size() - 1):
-		if yy >= float(int(SUN_STAGES[i][0])) and yy < float(int(SUN_STAGES[i + 1][0])):
-			lo = SUN_STAGES[i]
-			hi = SUN_STAGES[i + 1]
-			break
-	var span: float = float(int(hi[0])) - float(int(lo[0]))
-	var t: float = 0.0 if span <= 0.0 else clampf((yy - float(int(lo[0]))) / span, 0.0, 1.0)
-	var l0: float = maxf(float(lo[5]), 1.0e-6)
-	var l1: float = maxf(float(hi[5]), 1.0e-6)
-	return exp(lerpf(log(l0), log(l1), t))
-
-## Interpolate the Sun's emission colour, scale, and glow across SUN_STAGES.
-## Only called once per game-year so it is essentially free.
+## Paint the Sun for the star's CURRENT AGE — which is not the calendar year once mass has been
+## lifted: a lightened Sun looks younger because it is.  Colour, size and glow come from the same
+## track the physics reads (StarModel.appearance_at_age), so what the player sees and what
+## engulfs their planets can never disagree.
+## Only called once per in-game year, so it is essentially free.
 func _update_sun_appearance(current_year: int) -> void:
 	if _sun_mat == null:
 		return
-
-	var y: float = float(current_year)
-
-	# Clamp to final stage if beyond the last defined year.
-	var last: Array = SUN_STAGES[SUN_STAGES.size() - 1]
-	if y >= float(int(last[0])):
-		_sun_mat.albedo_color               = last[1] as Color
-		_sun_mat.emission                   = last[1] as Color
-		_sun_mat.emission_energy_multiplier = float(last[3])   # [3] = emiss_mult
-		scale = _sun_base_scale * float(last[2])               # [2] = visual_mult
-		return
-
-	# Find the two surrounding stage entries.
-	var lo: Array = SUN_STAGES[0]
-	var hi: Array = SUN_STAGES[1]
-	for i in range(SUN_STAGES.size() - 1):
-		if y >= float(int(SUN_STAGES[i][0])) and y < float(int(SUN_STAGES[i + 1][0])):
-			lo = SUN_STAGES[i]
-			hi = SUN_STAGES[i + 1]
-			break
-
-	var span: float = float(int(hi[0])) - float(int(lo[0]))
-	var t: float    = 0.0 if span <= 0.0 else clampf((y - float(int(lo[0]))) / span, 0.0, 1.0)
-
-	# Use smoothstep so transitions ease in and out rather than snapping linearly.
-	var st: float = t * t * (3.0 - 2.0 * t)
-
-	var col:   Color = (lo[1] as Color).lerp(hi[1] as Color, st)
-	var vscl:  float = lerpf(float(lo[2]), float(hi[2]), st)   # visual game-scale mult
-	var emiss: float = lerpf(float(lo[3]), float(hi[3]), st)   # emission energy mult
-
+	# appearance_at() applies the mass scalings and substitutes the other fates, so a star lifted
+	# past helium ignition is drawn as what it now is — a small red dwarf, and eventually a white
+	# one — rather than as a 1 M☉ star's track scaled down.
+	var look: Dictionary = StarModel.appearance_at(
+		SolarSystem.stellar_age(float(current_year)), SolarSystem.star_mass_msun)
+	var col: Color = look["color"]
+	var vis: float = float(look["visual_mult"])
+	var emiss: float = float(look["emiss_mult"])
+	scale = _sun_base_scale * vis
 	_sun_mat.albedo_color               = col
 	_sun_mat.emission                   = col
 	_sun_mat.emission_energy_multiplier = emiss
-	scale = _sun_base_scale * vscl
 
 # ── Planetary rings (gas giants) ──────────────────────────────────────────────
 

@@ -263,7 +263,11 @@ func reset_node(node_id: String) -> void:
 
 ## Call this from _process(delta) (or a timer) to advance active research.
 ## `research_speed` multiplies progress rate (default 1.0).
-func tick(delta: float, research_speed: float = 1.0) -> void:
+##
+## `_delta` is deliberately unused: a project advances by how much science has been banked, never
+## by how much time has passed (see below), so there is no wall clock to integrate.  It stays in
+## the signature because this belongs on the frame tick and callers already have the frame delta.
+func tick(_delta: float, research_speed: float = 1.0) -> void:
 	if active_research == null or SolarSystem.paused or research_paused:
 		return
 

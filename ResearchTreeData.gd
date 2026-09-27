@@ -1028,6 +1028,63 @@ static func build() -> Array:
 		lane_pos(10, MATERIALS, X_SPACING, Y_SPACING)
 	))
 
+	# NEW — Star Lifting
+	# Taking a star apart, slowly and on purpose: magnetic nozzles standing off the photosphere,
+	# driving a controlled wind and catching it.  Needs the swarm-class structures to build with
+	# (megastructure materials) and a star's worth of power to drive with (Stellar Power).  The
+	# deepest energy node in the tree, and the first thing a civilisation can do to its own sun.
+	nodes.append(make.call(
+		"star_lifting",
+		"Star Lifting",
+		"Magnetic confinement and nozzle systems able to drive, shape, and collect a controlled stellar wind — removing mass from a star and banking it as hydrogen.",
+		["megastructure_materials", "stellar_energy_harvesting"],
+		{"science": 4600},
+		44.0,
+		lane_pos(11, ENERGY, X_SPACING, Y_SPACING)
+	))
+
+	# NEW — Solar Shading
+	# Statites: sails held against gravity by the light they block, hovering sunward of the inner
+	# worlds.  The cheapest thing on this branch and the only one that helps a living planet in
+	# the short term — a thermostat for a world that has warmed itself.
+	nodes.append(make.call(
+		"solar_shading",
+		"Solar Shading",
+		"Light sails flown as statites — held in place by radiation pressure rather than orbit — arranged to intercept a measured fraction of the sunlight falling on the inner system.",
+		["stellar_energy_harvesting", "high_performance_materials"],
+		{"science": 2600},
+		34.0,
+		lane_pos(10, ESTORAGE, X_SPACING, Y_SPACING)
+	))
+
+	# NEW — Stellar Husbandry
+	# The surgical end of stellar engineering: mixing unburnt hydrogen from the envelope down
+	# into a core that would never otherwise meet it, so the star's clock runs back instead of
+	# forward.  Deeper than lifting, and it gives nothing but time.
+	nodes.append(make.call(
+		"stellar_husbandry",
+		"Stellar Husbandry",
+		"Driven circulation reaching from a star's envelope into its core, feeding it unburnt hydrogen and carrying spent material away — extending a main-sequence life rather than merely outlasting it.",
+		["star_lifting", "civilization_scale_coordination"],
+		{"science": 5400},
+		48.0,
+		lane_pos(12, ENERGY, X_SPACING, Y_SPACING)
+	))
+
+	# NEW — Stellar Propulsion
+	# A mirror hung on one side of the star, held up by the light it reflects.  The star feels the
+	# recoil and starts to move, and keeps moving for as long as it burns.  Needs the sail work
+	# that shading is built on and the megastructure materials to build at that size.
+	nodes.append(make.call(
+		"stellar_propulsion",
+		"Stellar Propulsion",
+		"Statite mirrors flown at stellar scale, turning a star's own radiation pressure into thrust on the star itself — a Shkadov thruster, which moves a solar system rather than anything in it.",
+		["solar_shading", "megastructure_materials"],
+		{"science": 5000},
+		46.0,
+		lane_pos(11, ESTORAGE, X_SPACING, Y_SPACING)
+	))
+
 	nodes.append(make.call(
 		"civilization_scale_coordination",
 		"Macro Coordination",

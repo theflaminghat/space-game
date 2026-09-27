@@ -31,20 +31,82 @@ const ROCKET_UNIT_MASS_G: float = 5.0e8
 ## injections cost more again — the Δv difficulty and window factors scale this up.
 const LAUNCH_ENERGY_PER_GRAM: float = 4.4e4
 
+# ── What may fly where ────────────────────────────────────────────────────────
+## Every mission names the kind of body it can fly to, and every body has a kind — the same
+## strings Game.PLANET_TYPES uses, with a moon counting as rocky.  Both panels and the launch
+## itself ask the functions below, so the list a player can choose from and the rule the game
+## enforces are one thing and cannot drift apart.
+##
+##   ANY      – anything in the system: you can look at, or ship cargo to, anywhere
+##   WORLD    – anything but the star: people and colonies need somewhere to be
+##   SURFACE  – something with ground: rocky bodies, moons and the belt
+##   STAR     – the Sun alone: the carriers that service solar orbit
+const TARGET_ANY:     String = "any"
+const TARGET_WORLD:   String = "world"
+const TARGET_SURFACE: String = "surface"
+const TARGET_STAR:    String = "star"
+
+
+## Whether a body of this kind has ground a craft could land on.
+static func kind_has_surface(kind: String) -> bool:
+	return kind == "rocky" or kind == "belt"
+
+
+## Whether `mission` may fly to a body of this kind.
+static func allows_target(mission: Dictionary, kind: String) -> bool:
+	if kind == "":
+		return false
+	match str(mission.get("targets", TARGET_ANY)):
+		TARGET_STAR:    return kind == "star"
+		TARGET_SURFACE: return kind_has_surface(kind)
+		TARGET_WORLD:   return kind != "star"
+		_:              return true
+
+
+## Whether a mission of this kind may arrive the given way.  Landing needs ground: a gas giant
+## has none to reach and a star is not somewhere anything arrives at all.
+static func allows_arrival(mission: Dictionary, kind: String, arrival: String) -> bool:
+	if not allows_target(mission, kind):
+		return false
+	if arrival != "land":
+		return true
+	return kind_has_surface(kind)
+
+
+## Why a combination is refused, in a few words for the panel to show.  "" when it is fine.
+static func refusal(mission: Dictionary, kind: String, arrival: String) -> String:
+	if not allows_target(mission, kind):
+		match str(mission.get("targets", TARGET_ANY)):
+			TARGET_STAR:    return "flies to the Sun only"
+			TARGET_SURFACE: return "needs a surface to work on"
+			TARGET_WORLD:   return "cannot be sent to a star"
+	if not allows_arrival(mission, kind, arrival):
+		return "nothing lands on a star" if kind == "star" else "no surface to land on"
+	return ""
+
+
+## The first mission that may fly to a body of this kind, or -1 if somehow none can.
+static func first_valid_index(kind: String) -> int:
+	for i in range(MISSION_TYPES.size()):
+		if allows_target(MISSION_TYPES[i], kind):
+			return i
+	return -1
+
+
 const MISSION_TYPES := [
 	# Small interplanetary probe on a single rocket.
-	{"name": "Survey",          "rockets": 1,  "fuel": 8},
+	{"name": "Survey",          "rockets": 1,  "fuel": 8,  "targets": TARGET_ANY},
 	# Robotic prospecting hardware + lander — heavy-lift class.
-	{"name": "Mining Ops",      "rockets": 6,  "fuel": 80},
+	{"name": "Mining Ops",      "rockets": 6,  "fuel": 80, "targets": TARGET_SURFACE},
 	# Crewed habitat + life support + ISRU — by far the largest.
-	{"name": "Colony Ship",     "rockets": 30, "fuel": 500},
+	{"name": "Colony Ship",     "rockets": 30, "fuel": 500, "targets": TARGET_WORLD},
 	# Instrument-laden science probe.
-	{"name": "Research Probe",  "rockets": 2,  "fuel": 16},
+	{"name": "Research Probe",  "rockets": 2,  "fuel": 16, "targets": TARGET_ANY},
 	# Cargo resupply to an established colony.
 	# Supply Run — the only mission that moves MATTER between worlds.  The player picks what
 	# goes in the hold and how much of each; the rockets and fuel below are the empty vehicle,
 	# and the cargo's own mass is charged on top (see Game._on_launch_requested).
-	{"name": "Supply Run",      "rockets": 4,  "fuel": 50, "cargo": true},
+	{"name": "Supply Run",      "rockets": 4,  "fuel": 50, "cargo": true, "targets": TARGET_ANY},
 	# Carrier that ferries one collector array to the Sun and slots it into the swarm.  Only
 	# valid with the Sun as target, and one array per launch, so the swarm is built out a piece
 	# at a time — 1 409 launches for a complete ring.
@@ -55,7 +117,23 @@ const MISSION_TYPES := [
 	# a megastructure is ever built, and it is why the launched mass is merely industrial while
 	# the deployed area is stellar.
 	{"name": "Solar Deployment", "rockets": 2, "fuel": 20,
-		"payload": "SolarSatellite", "payload_per_launch": 1, "sun_only": true},
+		"payload": "SolarSatellite", "payload_per_launch": 1, "sun_only": true,
+		"targets": TARGET_STAR},
+
+	# ── Prefabricated structures flown to the Sun ─────────────────────────────
+	# Solar orbit is a build site with no industry of its own: it has the baseline manufacturing
+	# capacity every body has and nothing else, and the first structure that would fix that is
+	# exactly the one it cannot build in reasonable time.  These two break that circle by flying
+	# the thing out whole, assembled on a world that does have industry.
+	#
+	# "structure" names a building: its full bill of materials is charged at the ORIGIN when the
+	# launch goes up, and the finished structure is added to the Sun's roster when it arrives —
+	# no construction queue at the far end, because there is nothing out there to build with.
+	# Heavy-lift class: a shipyard is not a satellite.
+	{"name": "Construction Station", "rockets": 20, "fuel": 320,
+		"structure": "Orbital Construction Station", "sun_only": true, "targets": TARGET_STAR},
+	{"name": "Vault Delivery",       "rockets": 10, "fuel": 140,
+		"structure": "Orbital Vault", "sun_only": true, "targets": TARGET_STAR},
 ]
 
 # Selectable propellants.  The player chooses one per launch; its `accel` (m/s²) drives

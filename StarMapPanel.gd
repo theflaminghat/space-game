@@ -32,6 +32,9 @@ signal message_requested(star_name: String, kind: String)
 ## The Trade button: Game opens the trade panel for this system, where the proposal is composed.
 signal trade_requested(star_name: String)
 
+## Aim the Shkadov thruster at the selected star (see Game.aim_star_thruster).
+signal thrust_aim_requested(star_name: String)
+
 ## Laser cost is a FLAT base energy (independent of distance) — scaled only by the power
 ## multiplier the player dials in.  Shared with Game for the cost readout.
 const LASER_BASE_ENERGY: float = 1.0e9
@@ -273,6 +276,19 @@ static var _proc_stars:   Array = []
 static var _all_stars:    Array = []
 static var _all_full:     Array = []   # real + EVERY procedural star, ignoring range (debug view)
 static var _obs_range_ly: float = PROC_BASE_RANGE_LY
+## Where Sol is now, and the year, as Game last reported them.  The resolved catalogue is built
+## around these rather than around the origin, so a star under thrust carries its sky with it.
+static var _sol_pos: Vector3 = Vector3.ZERO
+static var _sky_year: float = STELLAR_EPOCH
+## How far Sol may drift before the resolved list is rebuilt.  Small enough that the sky keeps up,
+## large enough that a fast-forwarded crossing is not rebuilding it every frame — at the rate a
+## Shkadov thruster actually moves a star, this is tens of millions of years apart.
+const SKY_STEP_LY: float = 25.0
+## Most stars the map will hold at once.  A RENDERING budget, not a claim about what is out
+## there: deep in the disk a 460 ly sphere holds a hundred thousand resolvable stars, and drawing,
+## ranking and picking among them costs seconds.  The nearest ones are kept, so the sky thins
+## from the outside in.  Region statistics are untouched by this — they never read this list.
+const MAX_RESOLVED: int = 12000
 ## The run's galaxy seed, mixed into every generator below.  CLUSTER_SEED and PROC_SEED remain
 ## the constants that give each generator its own stream; this is what makes one playthrough's
 ## sky different from the next.  Zero reproduces the layout every build shipped before it
@@ -335,18 +351,62 @@ static func all_stars_full() -> Array:
 		_all_full.append_array(_proc_stars)
 	return _all_full
 
-## The stars the player can currently resolve = real STARS + procedural stars inside the
-## observation range.  Cached; rebuilt only when the range expands.
+## How far out to GENERATE sky, as opposed to how far the telescopes reach.
+##
+## The budget is a star count, not a radius: deep in the disk a full-reach sphere holds a hundred
+## thousand stars, and generating them all to then throw nine tenths away costs seconds of freeze
+## for a sky no denser on screen.  Solving the same budget for a radius instead means a crowded
+## neighbourhood is generated out to less distance and an empty one out to the full reach — which
+## is also the honest reading of "the map holds twelve thousand stars".
+static func _chunk_reach(reach: float) -> float:
+	var per_ly3: float = galactic_density(_sol_pos) * STARS_PER_LY3_PER_DENSITY * StarChunks.SAMPLE
+	if per_ly3 <= 0.0:
+		return reach
+	var budget_r: float = pow(float(MAX_RESOLVED) / per_ly3 * 3.0 / (4.0 * PI), 1.0 / 3.0)
+	return minf(reach, budget_r)
+
+
+## Tell the catalogue where Sol is and what year it is.  Called from Game on the year clock and
+## whenever the star moves; a big enough move rebuilds the resolved list.
+static func set_sky_frame(sol_pos: Vector3, year: float) -> void:
+	if sol_pos.distance_to(_sol_pos) >= SKY_STEP_LY or absf(year - _sky_year) >= 1.0:
+		_sol_pos = sol_pos
+		_sky_year = year
+		_stars_dirty = true
+
+
+## The stars the player can currently resolve: the real catalogue and the home-cell field, plus
+## whatever the chunk generator puts around Sol once it has left that cell — everything judged by
+## its distance from where Sol IS.  Cached; rebuilt when the range changes or the star moves.
 static func all_stars() -> Array:
 	if _stars_dirty or _all_stars.is_empty():
 		_name_to_idx.clear()   # rebuilt below, in step with the list it indexes
 		if _proc_stars.is_empty():
 			_proc_stars = _generate_procedural_stars()
-		_all_stars = STARS.duplicate()
 		var reach: float = observation_range()
+		_all_stars = []
+		# The real catalogue is never range-filtered, and was not before: these are the stars
+		# that are actually there, and the bright ones among them (Deneb, Antares) are catalogued
+		# precisely because they are visible from much further than the telescopes reach.
+		_all_stars.append_array(STARS)
+		# The home-cell field, by LIVE distance: travel far enough and the old neighbourhood
+		# really does fall out of range behind you.
 		for s: Dictionary in _proc_stars:
-			if float(s["dist"]) <= reach:
+			if (s["pos"] as Vector3).distance_to(_sol_pos) <= reach:
 				_all_stars.append(s)
+		# Sky the original field never covered.  Skipped inside the home cell, which the field
+		# above already owns — the two must not both populate the same volume.
+		if _sol_pos.length() > 0.0:
+			for s: Dictionary in StarChunks.stars_near(_sol_pos, _chunk_reach(reach), _galaxy_seed, _sky_year):
+				var p: Vector3 = s["pos"]
+				if not in_sol_cell(p, p.length()):
+					_all_stars.append(s)
+		# Trim to the budget by keeping the nearest.
+		if _all_stars.size() > MAX_RESOLVED:
+			_all_stars.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+				return (a["pos"] as Vector3).distance_squared_to(_sol_pos) \
+					< (b["pos"] as Vector3).distance_squared_to(_sol_pos))
+			_all_stars.resize(MAX_RESOLVED)
 		_max_star_dist = 1.0
 		for i in range(_all_stars.size()):
 			var sd: Dictionary = _all_stars[i]
@@ -1384,8 +1444,10 @@ var _landmarks: Array = []
 ## Reference frame: the world position placed at the centre of the map (Sol by default).  Every
 ## object is drawn at log(pos − _ref_pos), so switching frames re-lays-out the whole log-scaled
 ## map around a different origin.  Right-click a star to recentre, empty space to reset.
-var _ref_pos:  Vector3 = Vector3.ZERO
+var _ref_pos:  Vector3 = Vector3.ZERO   # kept level with Sol's drift; see _sync_sol_frame()
 var _ref_name: String  = "Sol"
+## The "Aim thruster" button, shown only when Shkadov mirrors are standing.
+var _thrust_btn: Button = null
 ## Orthonormal galactic basis in the equatorial frame + the galactic-centre position (ly).
 var _g_x: Vector3 = Vector3.RIGHT   # toward the galactic centre (l=0, b=0)
 var _g_y: Vector3 = Vector3.FORWARD # toward l=90 (direction of galactic rotation)
@@ -1574,10 +1636,18 @@ func _build_launch_ui() -> void:
 		if n != "":
 			trade_requested.emit(n))
 	_war_btn     = _diplo_button("Declare war", func(): _emit_message("war"))
+	# Aiming the star itself sits with the other things you can do to a selected star.  It only
+	# appears once there are mirrors to aim (see set_thruster_state).
+	_thrust_btn  = _diplo_button("Aim thruster", func():
+		var n := selected_star()
+		if n != "":
+			thrust_aim_requested.emit(n))
+	_thrust_btn.visible = false
 	diplo.add_child(_contact_btn)
 	diplo.add_child(_ally_btn)
 	diplo.add_child(_trade_btn)
 	diplo.add_child(_war_btn)
+	diplo.add_child(_thrust_btn)
 	vb.add_child(diplo)
 
 	_build_action_dialog()
@@ -2231,7 +2301,15 @@ func _intel_block(name: String) -> String:
 	var probed: bool = bool(d.get("probed", false))
 	var detail: float = float(d.get("detail", 0.0))
 	var lines: Array = []
+	# Identity first, temperament second: a detected neighbour has a name and a species long
+	# before anyone knows whether it means harm.
+	var who: String = str(d.get("faction", ""))
+	var race: String = str(d.get("race", ""))
 	var head: String = "Alien civilisation: %s" % str(d.get("alignment", "unknown"))
+	if who != "":
+		head = "%s — %s" % [who, str(d.get("alignment", "unknown"))]
+		if race != "":
+			head += "\nSpecies: %s" % race
 	var diplo: String = str(d.get("diplo", ""))
 	if diplo != "":
 		head += "  [%s]" % diplo
@@ -3156,6 +3234,7 @@ func _draw() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.55, 0.72, 0.66))
 	# Current reference frame — the object at the map's centre (Sol unless recentred).  A
 	# crosshair marks the frame origin (always the centre), labelled with the frame's name.
+	_sync_sol_frame()
 	var frame_col := Color(0.7, 0.85, 0.7) if _ref_name == "Sol" else Color(0.95, 0.85, 0.55)
 	draw_string(_font, Vector2(14, 90),
 		"Frame: %s%s" % [_ref_name, "" if _ref_name == "Sol" else "  ·  right-click empty space to reset"],
@@ -3355,9 +3434,29 @@ func _try_set_frame(mouse: Vector2) -> void:
 		_ref_pos = best_pos
 		_ref_name = best_name
 	else:
-		_ref_pos = Vector3.ZERO   # empty space → back to the Sol frame
+		# Empty space → back to the Sol frame, wherever Sol has got to: under a Shkadov thruster
+		# the star is no longer at the origin it started from.
+		_ref_pos = SolarSystem.sol_position()
 		_ref_name = "Sol"
 	queue_redraw()
+
+## Hold the Sol frame on Sol as it moves.  Everything on the map is drawn relative to _ref_pos,
+## so this is the whole of what a moving star means for the view: the neighbourhood slides past.
+func _sync_sol_frame() -> void:
+	if _ref_name == "Sol" and not _ref_pos.is_equal_approx(SolarSystem.sol_position()):
+		_ref_pos = SolarSystem.sol_position()
+		_rank_ref = Vector3(INF, INF, INF)   # distances changed; the ordering has to be rebuilt
+
+
+## Show or hide the aiming button, and say where the star is headed.  Called by Game whenever the
+## star's state changes.
+func set_thruster_state(has_mirrors: bool, drift_ly: float, aim: String) -> void:
+	if _thrust_btn:
+		_thrust_btn.visible = has_mirrors
+		_thrust_btn.tooltip_text = ("Push Sol towards this star" if aim == ""
+			else "Now aimed at %s — %.2f ly travelled" % [aim, drift_ly])
+	queue_redraw()
+
 
 ## Pick the nearest projected star to the click (within PICK_PX); clicking empty space clears it.
 func _try_select(mouse: Vector2) -> void:

@@ -47,12 +47,74 @@ func set_bodies(origins: Array, targets: Array) -> void:
 		origin_option.selected = _origin_ids.find(keep_o)
 	if keep_t != "" and _target_ids.has(keep_t):
 		planet_option.selected = _target_ids.find(keep_t)
-	_update_arrival_options()
+	_refresh_validity()
 	_update_cost()
+
+## Tell the panel what kind each body is (see Game.body_kinds).
+func set_body_kinds(kinds: Dictionary) -> void:
+	_body_kinds = kinds
+	_refresh_validity()
+
+
+## The kind of the currently selected target, or "" when nothing sensible is selected.
+func _target_kind() -> String:
+	return str(_body_kinds.get(_target_id(planet_option.selected), ""))
+
+
+## Grey out every choice the launch would refuse, and move any stale selection off one.
+##
+## Three lists have to agree: a mission that only flies to the Sun, a target with no ground, an
+## arrival that lands on it.  Rather than let the player build an impossible combination and then
+## silently drop it, the mission list is filtered by the chosen target, the arrival list by both,
+## and the target picker by the chosen mission.
+func _refresh_validity() -> void:
+	if _body_kinds.is_empty() or mission_option == null:
+		return
+	var kind: String = _target_kind()
+
+	# Missions that cannot fly to this target.
+	for i in range(MissionData.MISSION_TYPES.size()):
+		if i >= mission_option.item_count:
+			break
+		var ok: bool = MissionData.allows_target(MissionData.MISSION_TYPES[i], kind)
+		mission_option.set_item_disabled(i, not ok)
+		var why: String = MissionData.refusal(MissionData.MISSION_TYPES[i], kind, "orbit")
+		mission_option.set_item_tooltip(i, "" if ok else why.capitalize())
+	# A selection that has just become impossible moves to the first that is not.
+	if mission_option.selected >= 0 \
+			and not MissionData.allows_target(MissionData.MISSION_TYPES[mission_option.selected], kind):
+		var first: int = MissionData.first_valid_index(kind)
+		if first >= 0:
+			mission_option.selected = first
+			_refresh_cargo()
+
+	# Targets this mission cannot reach: greyed in the picker, so the hierarchy still shows
+	# everything and says which entries are closed rather than hiding them.
+	if _target_picker:
+		var valid: Array = []
+		var m_def: Dictionary = _selected_mission_def()
+		for id: String in _target_ids:
+			if MissionData.allows_target(m_def, str(_body_kinds.get(id, ""))):
+				valid.append(id)
+		_target_picker.set_valid_ids(valid)
+
+	_update_arrival_options()
+
+
+## The mission currently selected, or {} when none is.
+func _selected_mission_def() -> Dictionary:
+	var i: int = mission_option.selected if mission_option else -1
+	return MissionData.MISSION_TYPES[i] if i >= 0 and i < MissionData.MISSION_TYPES.size() else {}
+
 
 ## Hierarchical pickers shown in place of the two option buttons: the Sun and the planets at the
 ## top level, moons folded under their planet.  The option buttons stay, hidden, as the selection
 ## every other function here reads (see launch_body_picker.gd).
+## Body id → kind ("star", "rocky", "gas_giant", "belt"), from Game.  Every validity question
+## here goes through MissionData with one of these, so the panel offers exactly what the launch
+## will accept.
+var _body_kinds: Dictionary = {}
+
 var _origin_picker: LaunchBodyPicker = null
 var _target_picker: LaunchBodyPicker = null
 
@@ -175,8 +237,9 @@ func _ready() -> void:
 		_manifest.clear()          # a hold loaded at one world cannot fly from another
 		_update_duration(); _refresh_cargo(); _update_cost())
 	planet_option.item_selected.connect(func(_i):
-		_update_arrival_options(); _update_duration(); _update_cost())
-	mission_option.item_selected.connect(func(_i): _refresh_cargo(); _update_cost())
+		_refresh_validity(); _update_duration(); _update_cost())
+	mission_option.item_selected.connect(func(_i):
+		_refresh_cargo(); _refresh_validity(); _update_cost())
 	arrival_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
 	launch_button.pressed.connect(_on_launch_pressed)
 	_update_arrival_options()
@@ -217,6 +280,28 @@ func set_swarm_state(stock: Dictionary, deployed: int, max_slots: int) -> void:
 	_update_cost()
 
 ## Satellites stockpiled at the currently-selected origin.
+## The building a mission flies out prefabricated, or "" for every other mission.
+func _mission_structure(mission_idx: int) -> String:
+	if mission_idx < 0 or mission_idx >= MissionData.MISSION_TYPES.size():
+		return ""
+	return str(MissionData.MISSION_TYPES[mission_idx].get("structure", ""))
+
+
+## What is missing at the origin to build this mission's structure: resource → shortfall.
+## Empty when the origin can cover the whole bill.
+func _structure_shortfall(mission_idx: int) -> Dictionary:
+	var sname: String = _mission_structure(mission_idx)
+	var out: Dictionary = {}
+	if sname == "":
+		return out
+	var def: Dictionary = BuildingData.find(sname)
+	for res: String in (def.get("cost", {}) as Dictionary):
+		var need: float = float(def["cost"][res])
+		if float(_origin_stock(res)) < need:
+			out[res] = need - float(_origin_stock(res))
+	return out
+
+
 func _origin_sat_stock() -> int:
 	var o := origin_option.selected
 	if o < 0 or o >= PLANETS.size():
@@ -428,14 +513,17 @@ func _replace_with_picker(opt: OptionButton) -> LaunchBodyPicker:
 	opt.visible = false
 	return picker
 
-## The Sun can only be orbited, never landed on — disable "Land" while it's the
-## selected target (and snap any stale Land selection back to Orbit).
+## Landing needs ground: not the Sun, and not a gas giant either — there is nothing to touch
+## down on.  Disable "Land" where it cannot happen and snap a stale selection back to Orbit.
 func _update_arrival_options() -> void:
-	var t_idx := planet_option.selected
-	var is_sun: bool = t_idx >= 0 and TARGETS[t_idx] == "Sun"
-	arrival_option.set_item_disabled(1, is_sun)   # index 1 = "Land"
-	if is_sun and arrival_option.selected == 1:
-		arrival_option.selected = 0               # force Orbit
+	var kind: String = _target_kind()
+	var m_def: Dictionary = _selected_mission_def()
+	var can_land: bool = MissionData.allows_arrival(m_def, kind, "land")
+	arrival_option.set_item_disabled(1, not can_land)   # index 1 = "Land"
+	arrival_option.set_item_tooltip(1, "" if can_land
+		else MissionData.refusal(m_def, kind, "land").capitalize())
+	if not can_land and arrival_option.selected == 1:
+		arrival_option.selected = 0                     # force Orbit
 
 func _populate_missions() -> void:
 	mission_option.clear()
@@ -622,8 +710,21 @@ func _update_cost() -> void:
 		if pf > 1.005:
 			txt += "\n(+%d%% fuel — %s window)" % [
 				int(round((pf - 1.0) * 100.0)), _window_label(pf)]
+	# A carrier flying a finished structure: name it, and say what the origin is short of.
+	var carried: String = _mission_structure(idx)
+	if carried != "":
+		txt += "\n+ 1 %s, built at the origin" % carried
+		if not _selected_target_is_sun():
+			txt += "  — target must be the Sun"
+		else:
+			var missing: Dictionary = _structure_shortfall(idx)
+			if not missing.is_empty():
+				var parts: PackedStringArray = []
+				for res: String in missing:
+					parts.append("%s %s" % [Units.format_si(float(missing[res]), ""), res])
+				txt += "  — short %s" % ", ".join(parts)
 	# Solar Deployment: show the satellite payload and why it might be blocked.
-	if MissionData.MISSION_TYPES[idx].get("sun_only", false):
+	elif MissionData.MISSION_TYPES[idx].get("sun_only", false):
 		var avail: int = _origin_sat_stock()
 		var batch: int = _payload_batch(idx)
 		txt += "\n+ %d Solar Satellite payload (have %d)" % [batch, avail]
@@ -679,8 +780,12 @@ func _on_launch_pressed() -> void:
 	var duration := _selected_duration_days()
 	if duration <= 0:
 		return   # invalid combination (e.g. land on the same body or on the Sun)
+	# A structure carrier must fly to the Sun with the whole structure paid for at the origin.
+	if _mission_structure(m_idx) != "":
+		if target_name != "Sun" or not _structure_shortfall(m_idx).is_empty():
+			return
 	# A Solar Deployment must fly to the Sun and actually carry satellites.
-	if MissionData.MISSION_TYPES[m_idx].get("sun_only", false):
+	elif MissionData.MISSION_TYPES[m_idx].get("sun_only", false):
 		if target_name != "Sun" or _payload_batch(m_idx) <= 0:
 			return
 	var fuel: Dictionary = _selected_fuel()

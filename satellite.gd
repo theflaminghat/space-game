@@ -38,6 +38,9 @@ var swarm_target_pos: Vector3 = Vector3.ZERO
 ## Reserved slot index, so the craft can home on the slot's LIVE position as the lane rotates
 ## rather than on where it was when the launch was ordered.  -1 falls back to the snapshot.
 var swarm_slot_index: int = -1
+## Where the reserved slot is NOW, for craft flying to something other than a swarm slot (an
+## orbital-lane berth, say).  Takes precedence over swarm_slot_index when set; returns a Vector3.
+var slot_provider: Callable = Callable()
 var _is_swarm:  bool    = false
 var _start_pos: Vector3 = Vector3.ZERO   # departure position, captured at launch
 
@@ -229,6 +232,10 @@ func _swarm_point(p: float) -> Vector3:
 ## Current world position of the reserved slot, falling back to the snapshot taken at launch
 ## if the swarm renderer is not reachable (loading, or a save restored mid-flight).
 func _live_swarm_slot() -> Vector3:
+	if slot_provider.is_valid():
+		var p: Variant = slot_provider.call()
+		if p is Vector3:
+			return p
 	if swarm_slot_index >= 0 and orbit_center != null:
 		var planets: Node = orbit_center.get_parent()
 		if planets != null and planets.has_method("swarm_slot_world_pos"):
@@ -324,6 +331,13 @@ func _process_landing(delta_days: float) -> void:
 func _set_craft_pos(pos: Vector3) -> void:
 	if _dot:
 		_dot.global_position = pos
+
+
+## Where the craft actually is.  The node itself stays put and only its dot moves, so anything
+## asking where the craft is (a test, a camera, a UI marker) has to ask for this rather than the
+## node's own transform.
+func craft_position() -> Vector3:
+	return _dot.global_position if _dot else global_position
 
 # ── Visibility (mirror the planets: hidden when frozen unless paused) ─────────────
 

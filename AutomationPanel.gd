@@ -45,6 +45,9 @@ var _b_building: OptionButton = null
 var _b_count:    SpinBox      = null
 
 # ── Launch-form refs ──────────────────────────────────────────────────────────
+## Body id → kind, from Game — the same table the launch panel validates against.
+var _body_kinds: Dictionary = {}
+
 var _l_mission: OptionButton = null
 var _l_origin:  OptionButton = null
 var _l_target:  OptionButton = null
@@ -151,6 +154,45 @@ func _section_label(parent: Control, text: String) -> void:
 	lbl.add_theme_font_size_override("font_size", 13)
 	lbl.modulate = Color(0.85, 0.88, 0.95)
 	parent.add_child(lbl)
+
+## Tell the panel what kind each body is (see Game.body_kinds).
+func set_body_kinds(kinds: Dictionary) -> void:
+	_body_kinds = kinds
+	_refresh_launch_validity()
+
+
+## The id this rule editor's target list means — its entries are planet names and the Sun.
+func _target_rule_id() -> String:
+	var i: int = _l_target.selected if _l_target else -1
+	return str(TARGETS[i]).to_lower() if i >= 0 and i < TARGETS.size() else ""
+
+
+## Grey out whatever this target (or mission) makes impossible, and move a stale selection off it.
+func _refresh_launch_validity() -> void:
+	if _l_mission == null or _l_target == null or _l_arrival == null or _body_kinds.is_empty():
+		return
+	var kind: String = str(_body_kinds.get(_target_rule_id(), ""))
+	for i in range(MissionData.MISSION_TYPES.size()):
+		if i >= _l_mission.item_count:
+			break
+		var m: Dictionary = MissionData.MISSION_TYPES[i]
+		var ok: bool = MissionData.allows_target(m, kind)
+		_l_mission.set_item_disabled(i, not ok)
+		_l_mission.set_item_tooltip(i, "" if ok else MissionData.refusal(m, kind, "orbit").capitalize())
+	if _l_mission.selected >= 0 \
+			and not MissionData.allows_target(MissionData.MISSION_TYPES[_l_mission.selected], kind):
+		var first: int = MissionData.first_valid_index(kind)
+		if first >= 0:
+			_l_mission.selected = first
+	var m_def: Dictionary = MissionData.MISSION_TYPES[_l_mission.selected] \
+		if _l_mission.selected >= 0 else {}
+	var can_land: bool = MissionData.allows_arrival(m_def, kind, "land")
+	_l_arrival.set_item_disabled(1, not can_land)
+	_l_arrival.set_item_tooltip(1, "" if can_land
+		else MissionData.refusal(m_def, kind, "land").capitalize())
+	if not can_land and _l_arrival.selected == 1:
+		_l_arrival.selected = 0
+
 
 func _form_label(grid: Control, text: String) -> void:
 	var lbl := Label.new()
@@ -309,6 +351,14 @@ func _build_launch_form(vbox: VBoxContainer) -> void:
 	_l_count = _count_spin()
 	grid.add_child(_l_count)
 
+	# A standing order fires the same launch for ever, so an impossible combination here is not
+	# one dropped launch but a rule that silently never fires.  The same rules the launch panel
+	# offers apply: pick a target and the missions that cannot reach it grey out, and so does an
+	# arrival the body has no ground for.
+	_l_mission.item_selected.connect(func(_i) -> void: _refresh_launch_validity())
+	_l_target.item_selected.connect(func(_i) -> void: _refresh_launch_validity())
+	_refresh_launch_validity()
+
 	var add := Button.new()
 	add.text = "+ Add launch rule"
 	add.custom_minimum_size = Vector2(0, 32)
@@ -424,10 +474,31 @@ func _describe(rule: Dictionary) -> String:
 		if str((f as Dictionary)["id"]) == fuel_name:
 			fuel_name = str((f as Dictionary)["name"])
 			break
-	return "Launch  ·  keep %d active  %s  %s→%s  [%s, %s]" % [
+	var line: String = "Launch  ·  keep %d active  %s  %s→%s  [%s, %s]" % [
 		int(rule.get("keep", 1)),
 		str(rule.get("mission", "?")),
 		str(rule.get("origin", "?")).capitalize(),
 		str(rule.get("target", "?")).capitalize(),
 		fuel_name,
 		str(rule.get("arrival", "orbit"))]
+	# A rule saved before these checks existed (or edited by hand) can hold a combination the
+	# launch refuses.  It would simply never fire, which looks like nothing at all — so say so.
+	var why: String = _rule_refusal(rule)
+	if why != "":
+		line += "   ⚠ never fires — %s" % why
+	return line
+
+
+## Why a standing launch order can never fire, or "" when it is fine.
+func _rule_refusal(rule: Dictionary) -> String:
+	if _body_kinds.is_empty():
+		return ""
+	var m_def: Dictionary = {}
+	for m in MissionData.MISSION_TYPES:
+		if str((m as Dictionary)["name"]) == str(rule.get("mission", "")):
+			m_def = m
+			break
+	if m_def.is_empty():
+		return "no such mission"
+	return MissionData.refusal(m_def, str(_body_kinds.get(str(rule.get("target", "")), "")),
+		str(rule.get("arrival", "orbit")))
