@@ -48,9 +48,8 @@ const CIV_PER_LY3: float = 6.0 / 4.10e8
 ## chunk key → Array of star dicts, and the keys in the order they were generated (for eviction).
 static var _cache: Dictionary = {}
 static var _order: Array = []
-## The seed and year the cache was built against; either changing invalidates it.
+## The galaxy the cache was built for; a different one invalidates it.
 static var _cache_seed: int = -1
-static var _cache_year: float = -1.0
 
 
 ## The chunk a position falls in.
@@ -111,6 +110,18 @@ static func _pick_type(u: float) -> Array:
 ## them.  That is what lets a chunk be a pure function of the year rather than a thing that has
 ## to be stepped forward.
 static func generate_chunk(idx: Vector3i, galaxy_seed: int, year: float) -> Array:
+	# The year only ever ADDS stars, so generation ignores it and the filter happens here.  This
+	# is what lets the cache survive a changing clock: keyed on the year, it was thrown away and
+	# rebuilt on every tick, which in fast mode is every frame.
+	var out: Array = []
+	for s: Dictionary in _all_in_chunk(idx, galaxy_seed):
+		if float(s.get("born", -INF)) <= year:
+			out.append(s)
+	return out
+
+
+## Every star the chunk will ever hold, born or not.  Pure in (index, seed).
+static func _all_in_chunk(idx: Vector3i, galaxy_seed: int) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _seed_for(idx, galaxy_seed)
 	var centre: Vector3 = chunk_centre(idx)
@@ -161,10 +172,9 @@ static func generate_chunk(idx: Vector3i, galaxy_seed: int, year: float) -> Arra
 		if is_future:
 			var born: float = StarMapPanel.STAR_FORMATION_START_YEAR \
 				* pow(StarMapPanel.STAR_FORMATION_END_YEAR / StarMapPanel.STAR_FORMATION_START_YEAR, u)
-			if born > year:
-				continue                      # not formed yet: the sky simply has no star here
-			# Same convention the home cell uses: a seed age that reads as "born in that year"
-			# once _star_age_now adds the elapsed time to it.
+			# Kept whatever the clock says; stars_near() and generate_chunk() drop the ones not
+			# yet formed.  Same convention the home cell uses: a seed age that reads as "born in
+			# that year" once _star_age_now adds the elapsed time to it.
 			star["age"] = (float(StarMapPanel.STELLAR_EPOCH) - born) / 1.0e9
 			star["born"] = born
 		else:
@@ -174,24 +184,31 @@ static func generate_chunk(idx: Vector3i, galaxy_seed: int, year: float) -> Arra
 	return out
 
 
-## A chunk's stars, cached.  The cache is keyed on the seed and the year the sky was generated
-## for; a new year can only ADD stars, so it is rebuilt when the year moves enough to matter.
-static func chunk(idx: Vector3i, galaxy_seed: int, year: float) -> Array:
-	if galaxy_seed != _cache_seed or not is_equal_approx(year, _cache_year):
+## A chunk's full population, cached.  Only a different galaxy turns the cache over — the year
+## does not, because it changes which stars are VISIBLE rather than which exist.
+static func cached_chunk(idx: Vector3i, galaxy_seed: int) -> Array:
+	if galaxy_seed != _cache_seed:
 		_cache.clear()
 		_order.clear()
 		_cache_seed = galaxy_seed
-		_cache_year = year
-	var key: Vector3i = idx
-	if _cache.has(key):
-		return _cache[key]
-	var stars: Array = generate_chunk(idx, galaxy_seed, year)
-	_cache[key] = stars
-	_order.append(key)
+	if _cache.has(idx):
+		return _cache[idx]
+	var stars: Array = _all_in_chunk(idx, galaxy_seed)
+	_cache[idx] = stars
+	_order.append(idx)
 	if _order.size() > CACHE_LIMIT:
 		var drop: Vector3i = _order.pop_front()
 		_cache.erase(drop)
 	return stars
+
+
+## A chunk's stars as of `year`.
+static func chunk(idx: Vector3i, galaxy_seed: int, year: float) -> Array:
+	var out: Array = []
+	for s: Dictionary in cached_chunk(idx, galaxy_seed):
+		if float(s.get("born", -INF)) <= year:
+			out.append(s)
+	return out
 
 
 ## Every generated star within `radius` of `centre`, for the sky around a travelling Sol.
@@ -205,7 +222,9 @@ static func stars_near(centre: Vector3, radius: float, galaxy_seed: int, year: f
 	for x in range(lo.x, hi.x + 1):
 		for y in range(lo.y, hi.y + 1):
 			for z in range(lo.z, hi.z + 1):
-				for s: Dictionary in chunk(Vector3i(x, y, z), galaxy_seed, year):
+				for s: Dictionary in cached_chunk(Vector3i(x, y, z), galaxy_seed):
+					if float(s.get("born", -INF)) > year:
+						continue                  # not formed yet at this date
 					if (s["pos"] as Vector3).distance_squared_to(centre) <= r2:
 						out.append(s)
 	return out
@@ -238,4 +257,3 @@ static func clear_cache() -> void:
 	_cache.clear()
 	_order.clear()
 	_cache_seed = -1
-	_cache_year = -1.0

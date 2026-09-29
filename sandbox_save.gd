@@ -49,6 +49,32 @@ const PLANET_LOADOUT: Dictionary = {
 	"Biomass Burner":                 1,   # min_count soft-lock guard
 }
 
+## Solar orbit, fully built out.
+##
+## The Sun is a build SITE in this game, not a world, and the sandbox exists to test what can be
+## done from it — so it starts with the site finished rather than empty.  Every structure whose
+## allowed_types includes "star" is placed, each tier of it included, because each tier is its
+## own entry in the build list.
+##
+## PER_LANE is what fills one orbital lane: planet.gd draws at most INFRA_MAX_PER_LANE (64) of a
+## type, so this is the count at which a lane looks full and stops gaining anything visually.
+##
+## The four stellar-engineering levers are deliberately NOT given a full lane.  Unlike a rectenna
+## or a radiator, each of them acts on the star itself the moment the save is loaded: sunshades
+## dim the Earth, lifters burn the reserve and strip the Sun, mirrors push the whole system off
+## its mark.  A sandbox that starts with those maxed has already made the player's decisions for
+## them, so they get a working installation to scale up or tear down instead.
+const SUN_PER_LANE: int = 64
+const SUN_STELLAR_ENGINEERING: int = 4
+const STELLAR_LEVERS: Array = [
+	"Star Lifter", "Sunshade Constellation", "Core Mixing Array", "Shkadov Mirror",
+]
+
+## Collectors in the Dyson swarm.  The swarm's real cap is Game._swarm_max(), which is lane
+## geometry rather than a constant, so it cannot be read from here — tests/verify_sandbox.gd
+## asserts this still matches it.
+const SWARM_COLLECTORS: int = 1409
+
 ## Write the sandbox save to disk (creating user://saves/ if needed).
 static func write(path: String = SAVE_PATH) -> void:
 	var dir := DirAccess.open("user://")
@@ -77,7 +103,7 @@ static func build() -> Dictionary:
 		"resources":          _global_resources(),
 		"active_launches":    [],
 		"next_launch_id":     1,
-		"solar_satellites_deployed": 0,
+		"solar_satellites_deployed": SWARM_COLLECTORS,
 		"colonized_planets":  _colonized_planets(),
 		"colonized_year":     _per_world_int(1945),
 		"split_thresholds":   _per_world_int(750_000),
@@ -124,7 +150,7 @@ const EARTH_POP:  float = 1.0e10
 const COLONY_POP: float = 1.0e6
 
 static func _buildings() -> Dictionary:
-	var out: Dictionary = {}
+	var out: Dictionary = {"sun": _sun_loadout()}
 	for w: String in WORLDS:
 		var r: Dictionary = PLANET_LOADOUT.duplicate()
 		# Agriculture is sized per world rather than issued uniformly: a world of ten billion
@@ -143,6 +169,26 @@ static func _buildings() -> Dictionary:
 					r.erase(bname)
 		out[w] = r
 	return out
+
+## Everything that can stand in solar orbit, at the counts described on SUN_PER_LANE.
+static func _sun_loadout() -> Dictionary:
+	var out: Dictionary = {}
+	for b: Dictionary in BuildingData.all():
+		if not (b.get("allowed_types", []) as Array).has("star"):
+			continue
+		var nm: String = str(b["name"])
+		out[nm] = SUN_STELLAR_ENGINEERING if _is_stellar_lever(nm) else SUN_PER_LANE
+	return out
+
+
+## Whether a structure acts on the star itself rather than merely hanging beside it.  Matches on
+## the base name so the II and III tiers are recognised too.
+static func _is_stellar_lever(bname: String) -> bool:
+	for lever: String in STELLAR_LEVERS:
+		if bname.begins_with(lever):
+			return true
+	return false
+
 
 static func _allowed_in_belt(bname: String) -> bool:
 	for b: Dictionary in BuildingData.BUILDINGS:

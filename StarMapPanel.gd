@@ -368,8 +368,18 @@ static func _chunk_reach(reach: float) -> float:
 
 ## Tell the catalogue where Sol is and what year it is.  Called from Game on the year clock and
 ## whenever the star moves; a big enough move rebuilds the resolved list.
+## Years the clock may move before the sky is rebuilt for it.  Rebuilding on every year was
+## ~25 ms a frame in fast mode, for a sky that barely changes: new stars arrive on a formation
+## curve spread across decades of magnitude, so a 1 % change in the date is the soonest one can
+## plausibly show up.  Actual births in the home cell mark the list dirty themselves, so they are
+## never delayed by this.
+static func _sky_year_step(year: float) -> float:
+	return maxf(1.0, absf(year) * 0.01)
+
+
 static func set_sky_frame(sol_pos: Vector3, year: float) -> void:
-	if sol_pos.distance_to(_sol_pos) >= SKY_STEP_LY or absf(year - _sky_year) >= 1.0:
+	if sol_pos.distance_to(_sol_pos) >= SKY_STEP_LY \
+			or absf(year - _sky_year) >= _sky_year_step(year):
 		_sol_pos = sol_pos
 		_sky_year = year
 		_stars_dirty = true

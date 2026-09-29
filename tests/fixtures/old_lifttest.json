@@ -1,0 +1,621 @@
+{
+	"active_buildings": {},
+	"active_launches": [],
+	"alien_fired": {},
+	"alien_last_year": 1945.0,
+	"alien_since": {
+		"procedural1419": 1055.13012428035,
+		"procedural2030": 1499.12612737492,
+		"procedural3609": 1535.61434315433,
+		"procedural3631": 1498.55998394142,
+		"procedural4649": 1682.53403619804,
+		"procedural5509": 1427.69085648674
+	},
+	"arms_strain": 0.0,
+	"atmospheric_co2": {},
+	"automation_rules": [],
+	"build_queue": {},
+	"cluster_colonized": {},
+	"colonized_planets": [],
+	"colonized_stars": [],
+	"colonized_year": {
+		"earth": 1945
+	},
+	"colony_parent": {},
+	"colony_year": {},
+	"comm_relays": {},
+	"compound_inventory": {
+		"earth": {
+			"Beef": 1400000000000.0,
+			"Coal": 1100000000000000.0,
+			"Fish": 11000000000000.0,
+			"FuelOil": 300000000000000.0,
+			"Oil": 10000000000000.0,
+			"Rice": 130000000000000.0,
+			"Vegetables": 90000000000000.0,
+			"Wheat": 170000000000000.0
+		},
+		"sun": {
+			"H2": 496188679245283172839016642904064.0
+		}
+	},
+	"contact_doctrine": "tit_for_tat",
+	"day": 0,
+	"detected_aliens": {},
+	"deterrent_active": false,
+	"diplo_status": {},
+	"engulfed_planets": {},
+	"entropy_exported": 0.0,
+	"extraction_focus": {
+		"earth": {
+			"Al2O3": 0.0002,
+			"CaCO3": 0.001,
+			"Coal": 0.625,
+			"CuFeS2": 0.0003,
+			"Fe2O3": 0.002,
+			"FeS2": 0.0005,
+			"H2O": 0.02,
+			"Oil": 0.35,
+			"SiO2": 0.001
+		}
+	},
+	"galaxy_seed": 1415632269,
+	"grudges": {},
+	"incoming_attacks": [],
+	"infra_probed": {},
+	"interstellar_attacks": [],
+	"interstellar_missions": [],
+	"keep_limits": {},
+	"known_alignments": {},
+	"month": 0,
+	"next_impact_year": 324782,
+	"next_launch_id": 1,
+	"next_nuclear_year": 2042,
+	"next_pandemic_year": 4100,
+	"outgoing_messages": [],
+	"people_ever_lived": 85000000000.0,
+	"planet_buildings": {
+		"earth": {
+			"Biomass Burner": 2000,
+			"Coal Plant": 2000,
+			"Farm": 3000,
+			"Matter Depot": 2500,
+			"Mine": 2000,
+			"Oil Plant": 1500,
+			"Pumped Hydro Storage": 6,
+			"Ranch": 320,
+			"Research Lab": 1
+		},
+		"sun": {
+			"Star Lifter": 500
+		}
+	},
+	"policies": {
+		"ai_investment": 20.0,
+		"automation": false,
+		"civil_liberties": true,
+		"healthcare": 10.0,
+		"industrial_intensity": 50.0,
+		"military_spending": 10.0,
+		"natalism": 0.0,
+		"open_science": true,
+		"research_budget": 50.0,
+		"tax_rate": 30.0,
+		"welfare": 15.0
+	},
+	"population": 2300000000.0,
+	"probe_missions": [],
+	"production_jobs": [
+		{
+			"id": 1,
+			"planet": "earth",
+			"rate": 300000000.0,
+			"recipe": "Lime Production"
+		},
+		{
+			"id": 2,
+			"planet": "earth",
+			"rate": 250000000.0,
+			"recipe": "Concrete Production"
+		},
+		{
+			"id": 3,
+			"planet": "earth",
+			"rate": 300000000.0,
+			"recipe": "Iron Smelting"
+		},
+		{
+			"id": 4,
+			"planet": "earth",
+			"rate": 100000000.0,
+			"recipe": "Pyrite Smelting"
+		},
+		{
+			"id": 5,
+			"planet": "earth",
+			"rate": 250000000.0,
+			"recipe": "Steel Making"
+		},
+		{
+			"id": 6,
+			"planet": "earth",
+			"rate": 50000000.0,
+			"recipe": "Copper Smelting"
+		},
+		{
+			"id": 7,
+			"planet": "earth",
+			"rate": 100000000.0,
+			"recipe": "Oil Refining"
+		},
+		{
+			"id": 8,
+			"planet": "earth",
+			"rate": 3600000000000.0,
+			"recipe": "Wheat Cultivation"
+		},
+		{
+			"id": 9,
+			"planet": "earth",
+			"rate": 1800000000000.0,
+			"recipe": "Rice Cultivation"
+		},
+		{
+			"id": 10,
+			"planet": "earth",
+			"rate": 1200000000000.0,
+			"recipe": "Vegetable Cultivation"
+		},
+		{
+			"id": 11,
+			"planet": "earth",
+			"rate": 100000000000.0,
+			"recipe": "Poultry Farming"
+		},
+		{
+			"id": 12,
+			"planet": "earth",
+			"rate": 80000000000.0,
+			"recipe": "Aquaculture"
+		},
+		{
+			"id": 13,
+			"planet": "earth",
+			"rate": 50000000000.0,
+			"recipe": "Swine Husbandry"
+		},
+		{
+			"id": 14,
+			"planet": "earth",
+			"rate": 15000000000.0,
+			"recipe": "Cattle Raising"
+		}
+	],
+	"region_last_year": 1945.0,
+	"regions": {},
+	"research": {
+		"active_research": "",
+		"nodes": {
+			"additive_manufacturing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"advanced_alloys": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"advanced_biomedical_engineering": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"advanced_propulsion": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"advanced_reactor_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"antimatter_handling": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"automated_logistics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"automated_science_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"autonomous_factories": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"autonomous_industrial_coordination": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"bioinformatics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"brain_computer_interfaces": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"civilization_scale_coordination": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"closed_loop_ecosystems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"control_theory": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"deep_space_logistics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"digital_consciousness_frameworks": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"distributed_autonomous_economy": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"distributed_civilization_models": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"early_rocketry": {
+				"progress": 0.0,
+				"state": 1
+			},
+			"energy_storage": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"extreme_environment_materials": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"field_stabilized_materials": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"fusion_engineering": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"general_ai_assistance": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"genome_engineering": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"global_governance": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"grid_infrastructure": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"high_energy_density_power": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"high_energy_particle_engineering": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"high_energy_physics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"high_performance_computing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"high_performance_materials": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"human_adaptation_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"in_situ_resource_utilization": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"industrial_mechanization": {
+				"progress": 0.0,
+				"state": 1
+			},
+			"industrial_robotics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"information_theory": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"institutional_science": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"integrated_circuits": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"interstellar_preparation": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"longevity_engineering": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"machine_learning_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"mass_production_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"materials_physics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"medical_informatics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"megastructure_fabrication": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"megastructure_materials": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"metallurgy": {
+				"progress": 0.0,
+				"state": 1
+			},
+			"microprocessors": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"modern_medicine": {
+				"progress": 0.0,
+				"state": 1
+			},
+			"molecular_manufacturing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"multi_habitat_support_architecture": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"nanostructured_materials": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"networked_computing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"nuclear_power": {
+				"progress": 0.0,
+				"state": 1
+			},
+			"numerical_methods": {
+				"progress": 0.0,
+				"state": 1
+			},
+			"orbital_construction": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"orbital_mechanics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"planetary_simulation": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"plasma_physics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"post_biological_transition": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"post_relativistic_mission_design": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"precision_manufacturing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"precision_orbital_construction": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"predictive_modeling": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"quantum_computing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"quantum_information_theory": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"radiation_hardened_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"radio_astronomy": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"relativistic_navigation": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"relativistic_physics": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"reusable_launch_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"satellite_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"self_healing_megastructures": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"self_replicating_industry": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"semiconductor_manufacturing": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"space_habitation_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"space_power_infrastructure": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"star_lifting": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"statistical_modeling": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"stellar_energy_harvesting": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"stellar_scale_computation": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"superconducting_systems": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"synthetic_biology": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"synthetic_biosphere_engineering": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"terraforming": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"thermal_management": {
+				"progress": 0.0,
+				"state": 0
+			},
+			"transistors": {
+				"progress": 0.0,
+				"state": 1
+			}
+		},
+		"research_paused": false,
+		"research_queue": [],
+		"resources": {
+			"energy": 9999963475000002116371819153675549409280.0,
+			"minerals": 1812400062500000.0,
+			"science": 0.0
+		}
+	},
+	"resources": {
+		"energy": 9999963475000002116371819153675549409280.0,
+		"minerals": 1812400062500000.0,
+		"science": 0.0
+	},
+	"setup_climate": 1.0,
+	"setup_hostility": 1.0,
+	"solar_satellites_deployed": 0,
+	"split_thresholds": {
+		"earth": 614700
+	},
+	"star_factions": {
+		"procedural1419": "aggressive",
+		"procedural2030": "aggressive",
+		"procedural3609": "peaceful",
+		"procedural3631": "aggressive",
+		"procedural4649": "peaceful",
+		"procedural5509": "peaceful"
+	},
+	"star_lifted_msun": 0.249466404849318,
+	"star_mass_msun": 0.750533595150682,
+	"stats_history": {
+		"history": {
+			"colony_count": [
+				0.0
+			],
+			"compute_rate": [
+				303600000000000088751472640.0
+			],
+			"current_population": [
+				2300000000.0
+			],
+			"energy": [
+				20.0
+			],
+			"life_expectancy": [
+				47.5666666666667
+			],
+			"minerals": [
+				1812400062500000.0
+			],
+			"science": [
+				0.0
+			]
+		},
+		"years": [
+			1945
+		]
+	},
+	"variant_parent": {},
+	"vn_milestone_idx": 0,
+	"vn_orders": {},
+	"vn_seeds": [],
+	"world_pop": {
+		"earth": 2300000000.0
+	},
+	"year": 1945
+}

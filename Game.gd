@@ -989,7 +989,7 @@ func start_new_game() -> void:
 	# Earth's population starts diverging from the 1945 baseline immediately; after
 	# its random threshold it becomes "H. sapiens terran".
 	_colonized_year   = {"earth": year}
-	_split_thresholds = {"earth": int(randf_range(500_000.0, 1_000_000.0))}
+	_split_thresholds = {"earth": _roll_int("split_threshold", 500_000, 1_000_000, "earth".hash())}
 	_colony_parent    = {}
 	_variant_parent   = {}
 	compound_inventory = {}
@@ -1123,11 +1123,11 @@ func start_new_game() -> void:
 	_last_snapshot_year    = 1945
 	_people_ever_lived     = PEOPLE_EVER_LIVED_1945
 	_pending_event_notifications = []
-	_next_impact_year      = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
+	_next_impact_year      = year + _roll_int("impact_schedule", IMPACT_GAP_MIN, IMPACT_GAP_MAX, year)
 	_impact_cooldown_ms    = 0
-	_next_pandemic_year    = year + randi_range(PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX)
+	_next_pandemic_year    = year + _roll_int("pandemic_schedule", PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX, year)
 	_pandemic_cooldown_ms  = 0
-	_next_nuclear_year     = year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)
+	_next_nuclear_year     = year + _roll_int("nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX, year)
 	_nuclear_cooldown_ms   = 0
 	_arms_strain           = 0.0
 	_mark_prod_dirty()
@@ -1879,6 +1879,15 @@ func advance_day() -> void:
 			if timeline_panel and timeline_panel.visible:
 				timeline_panel.set_current_year(year)
 
+	_process_launch_arrivals()
+
+
+## Land any in-system flights whose arrival date has passed.
+##
+## Called from BOTH clocks.  advance_day() does not run in fast mode, so a craft that lived
+## only in that loop stayed in flight forever once the player passed 1000x - which is exactly
+## the speed they reach for after despatching a star lifter and waiting for the Sun to answer.
+func _process_launch_arrivals() -> void:
 	var today_abs := _to_abs_day(year, month, day)
 	var any_completed := false
 	for launch in active_launches:
@@ -1911,7 +1920,7 @@ func advance_day() -> void:
 					if target != "" and not colonized_planets.has(target):
 						colonized_planets.append(target)
 						_colonized_year[target]   = year
-						_split_thresholds[target] = int(randf_range(500_000.0, 1_000_000.0))
+						_split_thresholds[target] = _roll_int("split_threshold", 500_000, 1_000_000, target.hash())
 						_colony_parent[target]    = str(launch.get("origin", "earth"))
 						_establish_colony_base(target)
 						print("[Game] Colony established on %s from %s (split in ~%d yrs)" % [
@@ -1964,6 +1973,66 @@ func _init_building_cache() -> void:
 	_recipe_cache.clear()
 	for r: Dictionary in RecipeData.RECIPES:
 		_recipe_cache[r["name"]] = r
+
+# ── Repeatable rolls ──────────────────────────────────────────────────────────
+#
+# Anything the player could reload a save to re-roll is decided here rather than by the global
+# RNG, so that reloading gives them the same answer instead of a fresh try.
+#
+# A roll is a pure function of (galaxy_seed, a tag naming the DECISION, a salt naming the
+# OCCASION).  It is deliberately not a position in a random stream: a stream diverges the moment
+# the player does anything that draws a different number of values from it, so a saved stream
+# position would still hand them a different plague on the second attempt.  Derived this way, the
+# year 2180 pandemic roll is the same number however the player reached 2180, however much they
+# built on the way, and however many times they load that save.
+#
+# Salt with the YEAR for something that happens at a time, and with a NAME for something that is
+# a property of a thing — a world's split date, a civilisation's founding epoch — which then
+# never changes no matter when it is first asked for.  Two decisions taken on the same occasion
+# must use different tags, or they will be perfectly correlated: whether the plague arrives and
+# how hard it bites are separate rolls, not one number read twice.
+#
+# What is NOT here: galaxy_seed itself, which has to be unpredictable, and anything purely
+# cosmetic.  Re-rolling the visual jitter on a star field costs the player nothing.
+
+## Scratch generator for the rolls below.  One instance, re-seeded per roll — each roll sets the
+## seed and takes a single value, so there is no stream to keep in step and nothing to save.
+var _roll_rng := RandomNumberGenerator.new()
+
+
+## Seed for one decision on one occasion.  Mixes like Polities._seed_for does: the same
+## avalanche constants, so a one-bit change in the year or the tag moves the whole value.
+func _roll_seed(tag: String, salt: int, salt2: int) -> int:
+	var h: int = (galaxy_seed ^ tag.hash()) * 0x9E3779B1
+	h = (h ^ (salt * 0x85EBCA6B)) * 0xC2B2AE35
+	h = (h ^ (salt2 * 0x27D4EB2F)) * 0x165667B1
+	return absi(h) & 0x7FFFFFFF
+
+
+## A repeatable roll in [0, 1).
+func _roll(tag: String, salt: int = 0, salt2: int = 0) -> float:
+	_roll_rng.seed = _roll_seed(tag, salt, salt2)
+	return _roll_rng.randf()
+
+
+## A repeatable roll in [lo, hi).
+func _roll_range(tag: String, lo: float, hi: float, salt: int = 0, salt2: int = 0) -> float:
+	return lo + (hi - lo) * _roll(tag, salt, salt2)
+
+
+## A repeatable whole number in [lo, hi], inclusive at both ends like randi_range.
+func _roll_int(tag: String, lo: int, hi: int, salt: int = 0, salt2: int = 0) -> int:
+	if hi <= lo:
+		return lo
+	return lo + int(_roll(tag, salt, salt2) * float(hi - lo + 1)) % (hi - lo + 1)
+
+
+## A repeatable index into a list of `n` things.
+func _roll_pick(tag: String, n: int, salt: int = 0, salt2: int = 0) -> int:
+	if n <= 1:
+		return 0
+	return mini(n - 1, int(_roll(tag, salt, salt2) * float(n)))
+
 
 ## O(1) building-def lookup via pre-built cache.
 func _find_building_def(building_name: String) -> Dictionary:
@@ -2687,6 +2756,7 @@ func _on_years_advanced_fast(years_advanced: int) -> void:
 		_last_snapshot_year = year
 	_check_extinction_events()
 	if not game_over:
+		_process_launch_arrivals()   # in-system flights land on this clock too
 		_check_population_splits()
 		_check_interstellar_arrivals()
 		_check_interstellar_attacks()
@@ -5065,7 +5135,7 @@ func _update_regions() -> void:
 		if k > 1.0 and pop > 0.0:
 			reg["pop"] = k / (1.0 + (k / pop - 1.0) * decay)
 		# Diffuse to a neighbour with probability rising as the region fills.
-		if randf() < clampf(REGION_SPREAD_RATE * frac * dyears, 0.0, 0.5):
+		if _roll("region_spread", year, id.hash()) < clampf(REGION_SPREAD_RATE * frac * dyears, 0.0, 0.5):
 			to_seed.append(id)
 	for id: String in to_seed:
 		var nbid: String = _region_neighbour_id(id)
@@ -5080,7 +5150,7 @@ func _update_regions() -> void:
 ## A random adjacent cell id (one step in a random axis direction).
 func _region_neighbour_id(id: String) -> String:
 	var p: PackedStringArray = id.split(",")
-	var d: Vector2i = HEX_DIRS[randi() % HEX_DIRS.size()]
+	var d: Vector2i = HEX_DIRS[_roll_pick("region_dir", HEX_DIRS.size(), year, id.hash())]
 	return "%d,%d" % [int(p[0]) + d.x, int(p[1]) + d.y]
 
 ## Cosmic scale factor relative to the present (≥1): how much space has stretched since
@@ -5261,7 +5331,7 @@ func _seed_star_factions() -> void:
 				armed += 1
 		# Founded in the past, so its signal is already crossing to us — some may be
 		# detectable early with good optics, others still en route.
-		_alien_since[nm] = float(year) - _star_distance_ly(nm) - randf_range(0.0, 800.0)
+		_alien_since[nm] = float(year) - _star_distance_ly(nm) - _roll_range("alien_epoch", 0.0, 800.0, nm.hash())
 
 ## The share of polities that are hostile, as the setup screen set it.
 func _hostile_share() -> float:
@@ -5318,7 +5388,7 @@ func _seed_generated_factions() -> void:
 			continue
 		_settle_alien_star(nm, s["pos"] as Vector3)
 		# Founded long enough ago that its light is already on the way, as the original six are.
-		_alien_since[nm] = float(year) - _star_distance_ly(nm) - randf_range(0.0, 800.0)
+		_alien_since[nm] = float(year) - _star_distance_ly(nm) - _roll_range("alien_epoch", 0.0, 800.0, nm.hash())
 
 
 ## 3-D map position of a star (game units), or ZERO if unknown.
@@ -5466,7 +5536,7 @@ func _detect_alien_signatures(dyears: float) -> void:
 			continue
 		var p_year: float = clampf(ALIEN_DETECT_BASE * tel / maxf(dist, 1.0), 0.0, 0.9)
 		var p: float = 1.0 - pow(1.0 - p_year, minf(dyears, 1.0e6))
-		if randf() < p:
+		if _roll("alien_detect", year, star.hash()) < p:
 			_detected_aliens[star] = true
 			# Early on every signature is news.  Once the known sky is crowded the distant ones
 			# stop being: a civilisation three hundred light-years away, learned about after fifty
@@ -5496,7 +5566,7 @@ func _spread_aliens(dyears: float) -> void:
 	# allocating (and discarding) a several-thousand-entry array on almost every single year.
 	var expected: float = float(star_factions.size()) * ALIEN_SPREAD_RATE * dyears
 	var count: int = int(expected)
-	if randf() < (expected - float(count)):   # fractional remainder → probabilistic +1
+	if _roll("alien_spread_count", year) < (expected - float(count)):   # fractional remainder → +1
 		count += 1
 	if count <= 0:
 		return
@@ -5517,15 +5587,17 @@ func _spread_aliens(dyears: float) -> void:
 	for _i in range(count):
 		if targets.is_empty():
 			break
-		var src: String = str(sources[randi() % sources.size()])
+		var src: String = str(sources[_roll_pick("alien_spread_src", sources.size(), year, _i)])
 		var align: String = str(star_factions[src])
 		var spos: Vector3 = _star_pos(src)
 		# Nearest of a random sample, not of everything: the exhaustive scan was O(targets) per
 		# colonisation, which is minutes of work once a galaxy has filled.
-		var best: int = randi() % targets.size()
+		# Salt spaces kept apart: the opening pick takes _i * 1000 and the sample loop the
+		# thousand slots above it, so iteration 1's first pick is not iteration 0's first sample.
+		var best: int = _roll_pick("alien_spread_tgt", targets.size(), year, _i * 1000)
 		var best_d: float = spos.distance_to(_star_pos(str(targets[best])))
 		for _s in range(mini(ALIEN_SPREAD_SAMPLE, targets.size())):
-			var ti: int = randi() % targets.size()
+			var ti: int = _roll_pick("alien_spread_tgt", targets.size(), year, _i * 1000 + _s + 1)
 			var d: float = spos.distance_to(_star_pos(str(targets[ti])))
 			if d < best_d:
 				best_d = d
@@ -5575,7 +5647,7 @@ func _alien_wars(dyears: float) -> void:
 		return
 	var expected: float = float(aggressors.size()) * ALIEN_WAR_RATE * dyears * setup_hostility
 	var count: int = int(expected)
-	if randf() < (expected - float(count)):
+	if _roll("alien_war_count", year) < (expected - float(count)):
 		count += 1
 	count = mini(count, ALIEN_WAR_PER_CALL)
 	if count <= 0:
@@ -5583,7 +5655,7 @@ func _alien_wars(dyears: float) -> void:
 	var held: Array = star_polity.keys()
 	var announced: int = 0
 	for _i in range(count):
-		var src: String = str(aggressors[randi() % aggressors.size()])
+		var src: String = str(aggressors[_roll_pick("alien_war_src", aggressors.size(), year, _i)])
 		var src_pid: String = str(star_polity.get(src, ""))
 		if src_pid == "":
 			continue
@@ -5592,7 +5664,7 @@ func _alien_wars(dyears: float) -> void:
 		var tgt: String = ""
 		var tgt_d: float = INF
 		for _s in range(mini(ALIEN_SPREAD_SAMPLE, held.size())):
-			var cand: String = str(held[randi() % held.size()])
+			var cand: String = str(held[_roll_pick("alien_war_tgt", held.size(), year, _i * 1000 + _s)])
 			if str(star_polity.get(cand, "")) == src_pid:
 				continue                      # not its own systems
 			if _col_star_set.has(cand):
@@ -5609,7 +5681,7 @@ func _alien_wars(dyears: float) -> void:
 		var def: Dictionary = _alien_infra_at(tgt, float(year))
 		var atk_str: float = 1.0 + float(atk["lasers"]) + float(atk.get("missiles", 0))
 		var def_str: float = 1.0 + float(def["lasers"]) * 2.0   # defending emplacements count double
-		if randf() > atk_str / (atk_str + def_str):
+		if _roll("alien_war_outcome", year, _i) > atk_str / (atk_str + def_str):
 			continue                          # the raid is beaten off
 		var loser_pid: String = str(star_polity.get(tgt, ""))
 		var loser: Dictionary = _factions.get(loser_pid, {})
@@ -5686,14 +5758,14 @@ func _launch_alien_attacks(dyears: float) -> void:
 	if deterred:
 		expected *= _deterrence_mult(deter_strength)   # bigger arsenal → harder throttle (to a floor)
 	var count: int = int(expected)
-	if randf() < (expected - float(count)):
+	if _roll("rkkv_count", year) < (expected - float(count)):
 		count += 1
 	count = mini(count, RKKV_MAX_INFLIGHT - incoming_attacks.size())
 	if count <= 0:
 		return
 	for _i in range(count):
-		var src: String = str(hostiles[randi() % hostiles.size()])
-		var tgt: String = str(targets[randi() % targets.size()])
+		var src: String = str(hostiles[_roll_pick("rkkv_src", hostiles.size(), year, _i)])
+		var tgt: String = str(targets[_roll_pick("rkkv_tgt", targets.size(), year, _i)])
 		# In-system worlds (Earth/colonies) sit at Sol's distance; a colony star's distance is
 		# the separation between the two stars (STARS positions are already in light-years).
 		var dist: float = _star_distance_ly(src) if PLANET_TYPES.has(tgt) \
@@ -5710,7 +5782,7 @@ func _launch_alien_attacks(dyears: float) -> void:
 		if not (has_laser or has_missile or has_berserker):
 			continue   # out of ammunition and no laser — this hostile stays quiet this tick
 		var kind: String = ""
-		var roll: float = randf()
+		var roll: float = _roll("rkkv_kind", year, _i)
 		if has_laser and roll < 0.40:
 			kind = "laser"
 		elif has_berserker and roll < 0.55:
@@ -5819,11 +5891,13 @@ func _devastate_home() -> void:
 		return
 	var survivors: Array = []
 	var kept_burner: bool = false
+	var slot: int = 0
 	for b in built:
+		slot += 1
 		if b == "Biomass Burner" and not kept_burner:
 			survivors.append(b)   # keep one burner (soft-lock guard)
 			kept_burner = true
-		elif randf() < 0.65:      # ~35% of everything else is wiped out
+		elif _roll("rkkv_razing", year, slot) < 0.65:   # ~35% of everything else is wiped out
 			survivors.append(b)
 	planet_buildings["earth"] = survivors
 	_mark_prod_dirty()
@@ -6448,82 +6522,43 @@ func save_game(path: String = "") -> void:
 	if path == "":
 		path = "user://saves/default.json"
 
-	var data: Dictionary = {
-		"research":           ResearchTree.save_state(),
-		"galaxy_seed":        galaxy_seed,
-		"star_mass_msun":     SolarSystem.star_mass_msun,
-		"star_lifted_msun":   SolarSystem.star_lifted_msun,
-		"star_age_offset":    SolarSystem.star_age_offset_years,
-		"star_drift_ly":      [SolarSystem.star_drift_ly.x, SolarSystem.star_drift_ly.y,
-			SolarSystem.star_drift_ly.z],
-		"star_velocity_ms":   SolarSystem.star_velocity_ms,
-		"star_thrust_dir":    [SolarSystem.star_thrust_dir.x, SolarSystem.star_thrust_dir.y,
-			SolarSystem.star_thrust_dir.z],
-		"star_thrust_target": SolarSystem.star_thrust_target,
-		"year":               year,
-		"month":              month,
-		"day":                day,
-		"population":         stats.get("current_population", EARTH_NATURAL_K),
-		"people_ever_lived":  _people_ever_lived,
-		"production_jobs":    production_panel.get_jobs(),
-		"automation_rules":   _automation_rules,
-		"planet_buildings":   _buildings_to_counts(),
-		"build_queue":        build_queue,
-		"contact_doctrine":   contact_doctrine,
-		"setup_hostility":    setup_hostility,
-		"setup_climate":      setup_climate,
-		"comm_relays":        comm_relays,
-		"cluster_colonized":  cluster_colonized,
-		"vn_orders":          _vn_orders,
-		"vn_seeds":           _vn_seeds.keys(),
-		"grudges":            _grudges,
-		"extraction_focus":   extraction_focus,
-		"keep_limits":        keep_limits,
-		"active_buildings":   active_buildings,
-		"entropy_exported":   entropy_exported,
-		"resources":          ResearchTree.resources,
-		"active_launches":    active_launches,
-		"next_launch_id":     _next_launch_id,
-		"solar_satellites_deployed": solar_satellites_deployed,
-		"colonized_planets":  colonized_planets,
-		"colonized_stars":    colonized_stars,
-		"world_pop":          world_pop,
-		"engulfed_planets":   _engulfed_planets,
-		"interstellar_missions": interstellar_missions,
-		"colony_year":           _colony_year,
-		"vn_milestone_idx":      _vn_milestone_idx,
-		"regions":               _regions,
-		"region_last_year":      _region_last_year,
-		"cluster_last_year":     _cluster_last_year,
-		"interstellar_attacks":  interstellar_attacks,
-		"incoming_attacks":      incoming_attacks,
-		"outgoing_messages":     outgoing_messages,
-		"probe_missions":        probe_missions,
-		"diplo_status":          _diplo_status,
-		"infra_probed":          _infra_probed,
-		"star_factions":      star_factions,
-		"known_alignments":   _known_alignments,
-		"star_polity":        star_polity,
-		"factions":           _factions,
-		"races":              _races,
-		"alien_since":        _alien_since,
-		"detected_aliens":    _detected_aliens,
-		"alien_fired":        _alien_fired,
-		"alien_last_year":    _alien_last_year,
-		"deterrent_active":   _deterrent_active,
-		"colonized_year":     _colonized_year,
-		"split_thresholds":   _split_thresholds,
-		"colony_parent":      _colony_parent,
-		"variant_parent":     _variant_parent,
-		"policies":           policies,
-		"stats_history":      statistics_page.get_save_data(),
-		"compound_inventory": compound_inventory,
-		"atmospheric_co2":    atmospheric_co2,
-		"next_impact_year":   _next_impact_year,
-		"next_pandemic_year": _next_pandemic_year,
-		"next_nuclear_year":  _next_nuclear_year,
-		"arms_strain":        _arms_strain,
-	}
+	# Everything that is only a value lives in SaveSchema.FIELDS and is written from there, so a
+	# field cannot be saved here and forgotten in load_game(). What is left below is the handful
+	# that needs more than a copy: another object's own format, a running total, a derived count.
+	var data: Dictionary = SaveSchema.encode(self, SolarSystem)
+	data["save_version"] = SaveSchema.VERSION
+
+	data["research"]           = ResearchTree.save_state()
+	data["resources"]          = ResearchTree.resources
+	data["galaxy_seed"]        = galaxy_seed
+	data["star_mass_msun"]     = SolarSystem.star_mass_msun
+	data["star_lifted_msun"]   = SolarSystem.star_lifted_msun
+	data["contact_doctrine"]   = contact_doctrine
+	data["planet_buildings"]   = _buildings_to_counts()
+	data["compound_inventory"] = compound_inventory
+	data["production_jobs"]    = production_panel.get_jobs()
+	data["automation_rules"]   = _automation_rules
+	data["policies"]           = policies
+	data["stats_history"]      = statistics_page.get_save_data()
+	data["solar_satellites_deployed"] = solar_satellites_deployed
+	data["population"]         = stats.get("current_population", EARTH_NATURAL_K)
+	data["people_ever_lived"]  = _people_ever_lived
+	data["world_pop"]          = world_pop
+	data["colonized_stars"]    = colonized_stars
+	data["colonized_year"]     = _colonized_year
+	data["split_thresholds"]   = _split_thresholds
+	data["variant_parent"]     = _variant_parent
+	data["active_launches"]    = active_launches
+	data["next_launch_id"]     = _next_launch_id
+	# Stored as a list of names: the values are all `true` and carry nothing.
+	data["vn_seeds"]           = _vn_seeds.keys()
+	data["regions"]            = _regions
+	data["star_factions"]      = star_factions
+	data["alien_since"]        = _alien_since
+	data["alien_fired"]        = _alien_fired
+	data["next_impact_year"]   = _next_impact_year
+	data["next_pandemic_year"] = _next_pandemic_year
+	data["next_nuclear_year"]  = _next_nuclear_year
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file:
@@ -6562,18 +6597,12 @@ func load_game(path: String = "") -> void:
 	# The running total carries the slivers the mass itself is too coarse to hold.
 	SolarSystem.star_lifted_msun = maxf(SolarSystem.star_lifted_msun,
 		float(data.get("star_lifted_msun", 0.0)))
-	SolarSystem.star_age_offset_years = float(data.get("star_age_offset", 0.0))
-	var drift: Array = data.get("star_drift_ly", [])
-	SolarSystem.star_drift_ly = Vector3(float(drift[0]), float(drift[1]), float(drift[2])) \
-		if drift.size() == 3 else Vector3.ZERO
-	SolarSystem.star_velocity_ms = float(data.get("star_velocity_ms", 0.0))
-	var aim: Array = data.get("star_thrust_dir", [])
-	SolarSystem.star_thrust_dir = Vector3(float(aim[0]), float(aim[1]), float(aim[2])) \
-		if aim.size() == 3 else Vector3.ZERO
-	SolarSystem.star_thrust_target = str(data.get("star_thrust_target", ""))
-	# The shades follow the roster, which the load has just restored.
-	_sync_star_shades()
 	_star_index_size = -1
+
+	# Every field that is only a value, restored from the same table save_game() writes from.
+	# The clock comes first in that table, because the frontier and alien clocks below default
+	# to "the year we have just loaded" when an older save has no entry for them.
+	SaveSchema.decode(data, self, SolarSystem)
 
 	# Dyson-swarm size.  Set the base value first so the Orbital Array migration in
 	# the planet_buildings block below can add to it (older saves have no key → 0).
@@ -6583,9 +6612,6 @@ func load_game(path: String = "") -> void:
 	if data.has("research") and data["research"] is Dictionary:
 		ResearchTree.load_state(data["research"])
 
-	year  = int(data.get("year",  2026))
-	month = int(data.get("month", 0))
-	day   = int(data.get("day",   0))
 	stats["current_population"] = float(data.get("population", stats.get("current_population", EARTH_NATURAL_K)))
 	_people_ever_lived = float(data.get("people_ever_lived", PEOPLE_EVER_LIVED_1945))
 
@@ -6643,25 +6669,13 @@ func load_game(path: String = "") -> void:
 			_earth.append("Biomass Burner")
 			planet_buildings["earth"] = _earth
 
-	build_queue = data["build_queue"] if (data.has("build_queue") and data["build_queue"] is Dictionary) else {}
-	extraction_focus = data["extraction_focus"] if (data.has("extraction_focus") and data["extraction_focus"] is Dictionary) else {}
+	# Now that the Sun's roster is real, the shades can follow it.  This used to run two hundred
+	# lines earlier, against whatever roster happened to be in memory from before the load.
+	_sync_star_shades()
+
 	# Standing storage limits.  Values are re-floated because JSON restores them as untyped
 	# numbers, and _enforce_keep_limits compares them against gram floats every tick.
-	setup_hostility = float(data.get("setup_hostility", 1.0))
-	setup_climate = float(data.get("setup_climate", 1.0))
 	contact_doctrine = str(data.get("contact_doctrine", DoctrineData.DEFAULT_ID))
-	cluster_colonized = {}
-	if data.has("cluster_colonized") and data["cluster_colonized"] is Dictionary:
-		for k: String in data["cluster_colonized"]:
-			cluster_colonized[k] = float(data["cluster_colonized"][k])
-	comm_relays = {}
-	if data.has("comm_relays") and data["comm_relays"] is Dictionary:
-		for k: String in data["comm_relays"]:
-			comm_relays[k] = true
-	_vn_orders = {}
-	if data.has("vn_orders") and data["vn_orders"] is Dictionary:
-		for k: String in data["vn_orders"]:
-			_vn_orders[k] = (data["vn_orders"][k] as Dictionary).duplicate()
 	_vn_seeds = {}
 	_vn_resume_idx = 0
 	_vn_resume_year = -1.0e18
@@ -6674,22 +6688,8 @@ func load_game(path: String = "") -> void:
 		# _vn_replicate simply finds them nothing to do.
 		for k: String in _vn_orders:
 			_vn_seeds[k] = true
-	_grudges = {}
-	if data.has("grudges") and data["grudges"] is Dictionary:
-		for k: String in data["grudges"]:
-			_grudges[k] = int(data["grudges"][k])
 	if sidebar and sidebar.automation_panel:
 		sidebar.automation_panel.set_doctrine(contact_doctrine)
-	keep_limits = {}
-	if data.has("keep_limits") and data["keep_limits"] is Dictionary:
-		for planet: String in data["keep_limits"]:
-			var lim: Dictionary = {}
-			for compound: String in data["keep_limits"][planet]:
-				lim[compound] = float(data["keep_limits"][planet][compound])
-			if not lim.is_empty():
-				keep_limits[planet] = lim
-	active_buildings = data["active_buildings"] if (data.has("active_buildings") and data["active_buildings"] is Dictionary) else {}
-	entropy_exported = float(data.get("entropy_exported", 0.0))
 	_heat_alerted = false
 	_labor_alerted = false
 
@@ -6712,11 +6712,6 @@ func load_game(path: String = "") -> void:
 	else:
 		_next_launch_id = active_launches.size() + 1
 
-	if data.has("colonized_planets") and data["colonized_planets"] is Array:
-		colonized_planets = data["colonized_planets"]
-	else:
-		colonized_planets = []
-
 	colonized_stars = []
 	if data.has("colonized_stars") and data["colonized_stars"] is Array:
 		for sname in data["colonized_stars"]:
@@ -6737,18 +6732,6 @@ func load_game(path: String = "") -> void:
 	if not world_pop.has("earth"):
 		world_pop["earth"] = MIN_POPULATION
 	stats["current_population"] = _total_population()
-	_engulfed_planets = {}
-	if data.has("engulfed_planets") and data["engulfed_planets"] is Dictionary:
-		for k: String in data["engulfed_planets"]:
-			_engulfed_planets[k] = true
-	interstellar_missions = []
-	if data.has("interstellar_missions") and data["interstellar_missions"] is Array:
-		for m in data["interstellar_missions"]:
-			interstellar_missions.append((m as Dictionary).duplicate())
-	_colony_year = {}
-	if data.has("colony_year") and data["colony_year"] is Dictionary:
-		for k: String in data["colony_year"]:
-			_colony_year[k] = int(data["colony_year"][k])
 	_regions = {}
 	if data.has("regions") and data["regions"] is Dictionary:
 		for k: String in data["regions"]:
@@ -6758,56 +6741,12 @@ func load_game(path: String = "") -> void:
 				"pop":         float(rec.get("pop", 0.0)),
 				"colonizable": float(rec.get("colonizable", 0.0)),
 			}
-	_region_last_year = float(data.get("region_last_year", float(year)))
-	_cluster_last_year = float(data.get("cluster_last_year", float(year)))
-	_vn_milestone_idx = int(data.get("vn_milestone_idx", 0))
-	interstellar_attacks = []
-	if data.has("interstellar_attacks") and data["interstellar_attacks"] is Array:
-		for a in data["interstellar_attacks"]:
-			interstellar_attacks.append((a as Dictionary).duplicate())
-	incoming_attacks = []
-	if data.has("incoming_attacks") and data["incoming_attacks"] is Array:
-		for a in data["incoming_attacks"]:
-			incoming_attacks.append((a as Dictionary).duplicate())
-	outgoing_messages = []
-	if data.has("outgoing_messages") and data["outgoing_messages"] is Array:
-		for a in data["outgoing_messages"]:
-			outgoing_messages.append((a as Dictionary).duplicate())
-	probe_missions = []
-	if data.has("probe_missions") and data["probe_missions"] is Array:
-		for a in data["probe_missions"]:
-			probe_missions.append((a as Dictionary).duplicate())
-	_diplo_status = {}
-	if data.has("diplo_status") and data["diplo_status"] is Dictionary:
-		for k: String in data["diplo_status"]:
-			_diplo_status[k] = str(data["diplo_status"][k])
-	_infra_probed = {}
-	if data.has("infra_probed") and data["infra_probed"] is Dictionary:
-		for k: String in data["infra_probed"]:
-			_infra_probed[k] = true
 	star_factions = {}
 	if data.has("star_factions") and data["star_factions"] is Dictionary:
 		for k: String in data["star_factions"]:
 			star_factions[k] = str(data["star_factions"][k])
 	else:
 		_seed_star_factions()   # older save: assign fresh alien presence
-	_known_alignments = {}
-	star_polity = {}
-	_factions = {}
-	_races = {}
-	if data.has("star_polity") and data["star_polity"] is Dictionary:
-		for k: String in data["star_polity"]:
-			star_polity[k] = str(data["star_polity"][k])
-	if data.has("factions") and data["factions"] is Dictionary:
-		for k: String in data["factions"]:
-			_factions[k] = data["factions"][k]
-	if data.has("races") and data["races"] is Dictionary:
-		for k: String in data["races"]:
-			_races[k] = data["races"][k]
-
-	if data.has("known_alignments") and data["known_alignments"] is Dictionary:
-		for k: String in data["known_alignments"]:
-			_known_alignments[k] = true
 	# Alien detection/expansion state.  Older saves (star_factions but no signature epochs)
 	# fall back to fresh epochs so their signals are still en route.
 	_alien_since = {}
@@ -6816,11 +6755,7 @@ func load_game(path: String = "") -> void:
 			_alien_since[k] = float(data["alien_since"][k])
 	else:
 		for k: String in star_factions:
-			_alien_since[k] = float(year) - _star_distance_ly(k) - randf_range(0.0, 800.0)
-	_detected_aliens = {}
-	if data.has("detected_aliens") and data["detected_aliens"] is Dictionary:
-		for k: String in data["detected_aliens"]:
-			_detected_aliens[k] = true
+			_alien_since[k] = float(year) - _star_distance_ly(k) - _roll_range("alien_epoch", 0.0, 800.0, k.hash())
 	_alien_fired = {}
 	if data.has("alien_fired") and data["alien_fired"] is Dictionary:
 		for k: String in data["alien_fired"]:
@@ -6829,31 +6764,25 @@ func load_game(path: String = "") -> void:
 				"missiles":   int(rec.get("missiles", 0)),
 				"berserkers": int(rec.get("berserkers", 0)),
 			}
-	_alien_last_year = float(data.get("alien_last_year", float(year)))
-	_deterrent_active = bool(data.get("deterrent_active", false))
 
 	_colonized_year   = {}
 	_split_thresholds = {}
-	_colony_parent    = {}
 	if data.has("colonized_year") and data["colonized_year"] is Dictionary:
 		for k: String in data["colonized_year"]:
 			_colonized_year[k] = int(data["colonized_year"][k])
 	if data.has("split_thresholds") and data["split_thresholds"] is Dictionary:
 		for k: String in data["split_thresholds"]:
 			_split_thresholds[k] = int(data["split_thresholds"][k])
-	if data.has("colony_parent") and data["colony_parent"] is Dictionary:
-		for k: String in data["colony_parent"]:
-			_colony_parent[k] = str(data["colony_parent"][k])
 	# Earth's lineage clock starts at the 1945 game epoch.
 	if not _colonized_year.has("earth"):
 		_colonized_year["earth"]   = 1945
-		_split_thresholds["earth"] = int(randf_range(500_000.0, 1_000_000.0))
+		_split_thresholds["earth"] = _roll_int("split_threshold", 500_000, 1_000_000, "earth".hash())
 	# Back-fill colonies that pre-date this save format — treat them as
 	# freshly colonised so the split will fire after a further 500k–1M years.
 	for planet_name: String in colonized_planets:
 		if not _colonized_year.has(planet_name):
 			_colonized_year[planet_name]   = year
-			_split_thresholds[planet_name] = int(randf_range(500_000.0, 1_000_000.0))
+			_split_thresholds[planet_name] = _roll_int("split_threshold", 500_000, 1_000_000, planet_name.hash())
 
 	# Restore which bodies have been surveyed (planet-bar unlocks).
 
@@ -6904,11 +6833,6 @@ func load_game(path: String = "") -> void:
 				earth_inv[compound] = float(saved_inv[compound])
 			compound_inventory["earth"] = earth_inv
 
-	atmospheric_co2 = {}
-	if data.has("atmospheric_co2") and data["atmospheric_co2"] is Dictionary:
-		for key: String in data["atmospheric_co2"]:
-			atmospheric_co2[key] = float(data["atmospheric_co2"][key])
-
 	if data.has("production_jobs") and data["production_jobs"] is Array:
 		_production_jobs = data["production_jobs"].duplicate(true)
 		production_panel.load_jobs(_production_jobs)
@@ -6925,18 +6849,23 @@ func load_game(path: String = "") -> void:
 
 	# Asteroid-impact schedule (old saves: schedule a fresh one from the current year).
 	_next_impact_year = int(data.get("next_impact_year",
-		year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)))
+		year + _roll_int("impact_schedule", IMPACT_GAP_MIN, IMPACT_GAP_MAX, year)))
 	_impact_cooldown_ms = 0
 	_next_pandemic_year = int(data.get("next_pandemic_year",
-		year + randi_range(PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX)))
+		year + _roll_int("pandemic_schedule", PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX, year)))
 	_pandemic_cooldown_ms = 0
 	_next_nuclear_year = int(data.get("next_nuclear_year",
-		year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)))
+		year + _roll_int("nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX, year)))
 	_nuclear_cooldown_ms = 0
-	_arms_strain = float(data.get("arms_strain", 0.0))
 	_pending_event_notifications = []
 
 	_mark_prod_dirty()
+	# Rebuild the roster-derived caches NOW rather than waiting for the first unpaused frame.
+	# A load leaves the game paused, and _process returns early while paused, so anything that
+	# only refreshes on the production pass stayed at its default until the player pressed play —
+	# the star's shade and mirror coverage among them, which left a loaded thruster inert and its
+	# aiming button hidden.
+	_recompute_production_cache()
 	# Pre-compute storage caps from loaded buildings so the first _process tick
 	# doesn't clamp resources below what the player's infrastructure supports.
 	_cached_storage_caps = _compute_storage_caps()
@@ -7178,7 +7107,7 @@ func _check_asteroid_impact() -> void:
 		return
 	if Time.get_ticks_msec() < _impact_cooldown_ms:
 		return   # too soon since the last strike (deep fast-forward guard)
-	_next_impact_year   = year + randi_range(IMPACT_GAP_MIN, IMPACT_GAP_MAX)
+	_next_impact_year   = year + _roll_int("impact_schedule", IMPACT_GAP_MIN, IMPACT_GAP_MAX, year)
 	_impact_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 	_raise_asteroid_threat()
 
@@ -7286,9 +7215,11 @@ func _raise_asteroid_threat() -> void:
 	var inhabited: Array = _impact_targets()
 	if inhabited.is_empty():
 		return
-	var target: String = str(inhabited[randi() % inhabited.size()])
+	# Repeatable in the year it strikes: reloading to dodge the rock, or to be told a smaller
+	# number, gives the same rock and the same number.
+	var target: String = str(inhabited[_roll_pick("impact_target", inhabited.size(), year)])
 	# Rolled now, not at impact, so the warning and the aftermath agree about the toll.
-	var kill_frac: float = randf_range(0.50, 0.85) / float(inhabited.size())
+	var kill_frac: float = _roll_range("impact_kill", 0.50, 0.85, year) / float(inhabited.size())
 	_pending_threat = {"kind": "asteroid", "target": target, "kill_frac": kill_frac}
 	_impact_prev_ui_pause = SolarSystem.ui_paused
 	if not SolarSystem.ui_paused:
@@ -7436,7 +7367,7 @@ func _resume_after_threat() -> void:
 func _trigger_asteroid_impact(target: String = "", kill_frac: float = -1.0) -> void:
 	var inhabited: Array = _impact_targets()
 	if target == "" or not inhabited.has(target):
-		target = str(inhabited[randi() % inhabited.size()])
+		target = str(inhabited[_roll_pick("impact_target", inhabited.size(), year)])
 
 	# Kill much of the struck WORLD's population.  The toll is still divided across inhabited
 	# worlds, so a species with colonies loses a smaller share of the target too.  Anyone the
@@ -7447,7 +7378,7 @@ func _trigger_asteroid_impact(target: String = "", kill_frac: float = -1.0) -> v
 	# so impacts reported deaths that never happened.
 	var pop: float = float(world_pop.get(target, 0.0))
 	if kill_frac < 0.0:
-		kill_frac = randf_range(0.50, 0.85) / float(inhabited.size())
+		kill_frac = _roll_range("impact_kill", 0.50, 0.85, year) / float(inhabited.size())
 	var shelter: float = minf(_shelter_capacity(target), pop)
 	var survivors: float = _sheltered_survivors(target, pop, kill_frac)
 	var lost: float = maxf(0.0, pop - survivors)
@@ -7487,7 +7418,7 @@ func _check_pandemic() -> void:
 		return
 	if Time.get_ticks_msec() < _pandemic_cooldown_ms:
 		return
-	_next_pandemic_year   = year + randi_range(PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX)
+	_next_pandemic_year   = year + _roll_int("pandemic_schedule", PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX, year)
 	_pandemic_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 
 	# No engineered-pandemic risk before the bioengineering capability exists.
@@ -7508,7 +7439,10 @@ func _check_pandemic() -> void:
 		* (1.0 + 2.0 * ai) \
 		* (2.0 / (1.0 + float(inhabited))) \
 		* clampf(BASE_LIFE_EXPECTANCY / le, 0.5, 3.0)
-	if randf() < clampf(prob, 0.0, 0.95):
+	# Whether the plague comes this year is fixed for the year.  The ODDS still move with what
+	# the player has done — bioengineering, AI autonomy, how many worlds they hold — so the
+	# decision is theirs; what they cannot do is ask the same year twice for a kinder answer.
+	if _roll("pandemic_fires", year) < clampf(prob, 0.0, 0.95):
 		_trigger_pandemic()
 
 ## A synthetic plague kills much of the population — divided across inhabited worlds,
@@ -7528,7 +7462,7 @@ func _trigger_pandemic() -> void:
 			pop += float(world_pop[str(w)])
 	if pop <= 0.0:
 		return
-	var kill_frac: float = randf_range(0.70, 0.95) / float(inhabited)
+	var kill_frac: float = _roll_range("pandemic_kill", 0.70, 0.95, year) / float(inhabited)
 	# Same MIN_POPULATION floor as before, applied to the affected population as a whole.
 	var keep: float = clampf(maxf(1.0 - kill_frac, MIN_POPULATION / pop), 0.0, 1.0)
 	var after: float = 0.0
@@ -7590,7 +7524,7 @@ func _check_nuclear_war() -> void:
 		return
 	if Time.get_ticks_msec() < _nuclear_cooldown_ms:
 		return
-	_next_nuclear_year   = year + randi_range(NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX)
+	_next_nuclear_year   = year + _roll_int("nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX, year)
 	_nuclear_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 
 	var tension: float = _geopolitical_tension()
@@ -7606,7 +7540,7 @@ func _check_nuclear_war() -> void:
 		return   # no arsenal at all, or nothing left to fight over
 
 	var prob: float = NUCLEAR_BASE * pressure * (1.0 + _arms_strain)
-	if randf() < clampf(prob, 0.0, 0.9):
+	if _roll("nuclear_fires", year) < clampf(prob, 0.0, 0.9):
 		_trigger_nuclear_war()
 
 ## A strategic exchange devastates Earth's population and industry.  Off-world colonies
@@ -7620,7 +7554,7 @@ func _trigger_nuclear_war() -> void:
 	if pop <= 0.0:
 		return   # nobody left on Earth to fight it
 	var inhabited: int = 1 + colonized_planets.size()
-	var kill_frac: float = randf_range(0.55, 0.90) / float(inhabited)
+	var kill_frac: float = _roll_range("nuclear_kill", 0.55, 0.90, year) / float(inhabited)
 	# Whoever Earth's bunkers can hold survives the exchange no matter how bad it gets.
 	var shelter: float = minf(_shelter_capacity("earth"), pop)
 	var survivors: float = _sheltered_survivors("earth", pop, kill_frac)
@@ -7633,8 +7567,11 @@ func _trigger_nuclear_war() -> void:
 	# against exactly this, so they always come through.
 	if planet_buildings.has("earth"):
 		var kept: Array = []
+		var slot: int = 0
 		for b: String in planet_buildings["earth"]:
-			if randf() > 0.5 or float((_bdef_cache.get(b, {}) as Dictionary).get("shelter", 0.0)) > 0.0:
+			slot += 1
+			if _roll("nuclear_razing", year, slot) > 0.5 \
+					or float((_bdef_cache.get(b, {}) as Dictionary).get("shelter", 0.0)) > 0.0:
 				kept.append(b)
 		if not kept.has("Biomass Burner"):
 			kept.append("Biomass Burner")
