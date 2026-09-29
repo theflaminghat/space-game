@@ -57,6 +57,12 @@ material: do not regenerate them, or the thing they test is gone.
 | `verify_station.gd` | The Orbital Construction Station, its capacity off-world, and the two carriers |
 | `verify_delivery.gd` | A structure carrier charges its bill at the origin and is refused elsewhere |
 | `verify_path.gd` | The carrier flies to its lane berth and never through the star |
+| `verify_forecast.gd` | Compute buys foresight on a squared-cost curve, and what it predicts is what the simulation then actually does — target, year and severity |
+| `verify_orbit_blur.gd` | Above 100× the bodies hide and their orbits draw as blurred rings; slowing down or pausing brings them back; the year alone no longer decides |
+| `verify_starmap_panel.gd` | The star map's action panel stays bound 10 px in from the right edge at any map width, and wide content moves its left edge out rather than pushing its right edge off-screen |
+| `verify_salvo.gd` | A salvo is one track on the map carrying its count, and lands as one event reporting that count truthfully; separate launches and weapons stay separate, and stacked labels stay legible |
+| `verify_timeline_focus.gd` | A "Signature detected" card carries its star, invites a click, and takes the player to that star on the map — landing it on screen, clear of Sol |
+| `verify_vn.gd` | Von Neumann probes propagate outward through the stars instead of saturating the bubble Earth's telescopes can resolve |
 | `verify_sandbox.gd` | The generated sandbox save: full Dyson swarm, every star-capable structure present and research-open, and it settles instead of sliding |
 | `verify_determinism.gd` | Reloading a save cannot re-roll a catastrophe: the rolls, and the death toll through the real event path, are identical across a differently-played replay |
 | `audit_saveload.gd` | Save → wipe → load round trip across every mutated field |

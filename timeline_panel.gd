@@ -2,6 +2,9 @@
 ## Add this script to a bare Control node in the scene.
 extends Control
 
+## Forwarded from the cards: a click on an event that names a star.
+signal star_focus_requested(star_name: String)
+
 var _canvas: TimelineCanvas
 var _year_label: Label
 
@@ -89,6 +92,7 @@ func _ready() -> void:
 	ruler.canvas = _canvas
 	ruler.scroll = scroll
 	_canvas.layout_changed.connect(ruler.queue_redraw)
+	_canvas.star_focus_requested.connect(func(s: String) -> void: star_focus_requested.emit(s))
 	# Refit whenever the panel changes size.  The vertical scrollbar's width is always held back,
 	# so the scale doesn't jump when enough cards stack up for the bar to appear.
 	scroll.resized.connect(func() -> void:
@@ -103,6 +107,11 @@ func set_current_year(year: int) -> void:
 		_year_label.text = "Year: %d" % year
 	if _canvas:
 		_canvas.set_current_year(year)
+
+## Replace the projected events shown ahead of the present marker.
+func set_forecast_events(events: Array) -> void:
+	if _canvas:
+		_canvas.set_forecast_events(events)
 
 ## Add a live game event card to the timeline canvas.
 ## The dict should contain "year", "title", "desc", and "category".

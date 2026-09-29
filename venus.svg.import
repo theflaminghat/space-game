@@ -3,20 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bogytfnjxcf45"
-path="res://.godot/imported/venus.svg-ba049f67bbf04d2bf22d48e3a0e8c4e2.ctex"
+path.bptc="res://.godot/imported/venus.svg-ba049f67bbf04d2bf22d48e3a0e8c4e2.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://venus.svg"
-dest_files=["res://.godot/imported/venus.svg-ba049f67bbf04d2bf22d48e3a0e8c4e2.ctex"]
+dest_files=["res://.godot/imported/venus.svg-ba049f67bbf04d2bf22d48e3a0e8c4e2.bptc.ctex"]
 
 [params]
 
-compress/mode=0
-compress/high_quality=false
+compress/mode=2
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
@@ -38,6 +39,6 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=2.0
+svg/scale=4.0
 editor/scale_with_editor_scale=false
 editor/convert_colors_with_editor_theme=false

@@ -4,6 +4,19 @@ class_name BuildingData
 ##   Game unit: minerals = grams (g), energy cost = Joules (J), power = Watts (W),
 ##              compute = FLOP/s (c/s in shorthand below)
 ##
+## COMPUTE SCALE.  A civilisation's compute is population x COMPUTE_PER_INDIVIDUAL (1e17 FLOP/s
+## a head, the brain-as-computer estimate), so even a modest world thinks at ~1e26 FLOP/s.  The
+## compute entries below were authored at the scale of ONE server room — a Data Center at 20
+## FLOP/s — which put them twenty-four orders of magnitude under the people using them: ten
+## thousand AI Research Hubs moved the civilisation's compute by 0.0000000007%, so the entire
+## category was unbuildable in any sense that mattered.
+##
+## They are now authored at the scale everything else here is: one entry is the planetary
+## NETWORK, not the building, the same way one swarm panel is 2e10 collectors.  The anchor is
+## that a determined build-out should roughly MATCH the population's own thinking rather than
+## dwarf it — ninety AI Research Hubs against ten billion people comes out at about 0.9x, so
+## machines are a real second source of compute and never a replacement for being numerous.
+##
 ## Building costs are *bills of materials*: instead of a generic "minerals" lump,
 ## each structure consumes the specific crafted goods it is really made of
 ## (produced by the manufacturing recipes in recipes.gd) plus an energy cost.
@@ -243,20 +256,20 @@ const DESCRIPTIONS: Dictionary = {
 	"Atmospheric Condenser": "Refrigerated intake towers that liquefy and fractionate the air. Yield is divided across the atmosphere of the body it stands on, following the Extraction allocation for any atmospheric compound it names and atmospheric abundance otherwise. The only source of volatiles the crust does not hold, and the only extraction possible on a gas giant. A body with no atmosphere yields nothing.",
 	"Workshop": "Assembly halls and machine tools. Adds factory capacity to its world: the manufacturing work that recipes and construction draw on each day.",
 	"Nuclear Plant": "Pressurised-water reactor. Burns enriched uranium from Uranium Enrichment or Thorium Activation and emits no CO₂. Each reactor counts toward latent weapons capability, which raises the probability of nuclear war while humanity is concentrated on few worlds.",
-	"Research Lab": "Instrumented laboratories. Adds fixed compute on top of the population's own.",
+	"Research Lab": "A world's instrumented laboratories. Adds fixed compute on top of the population's own thinking.",
 	"Observatory": "Optical survey telescope. Adds signature-detection power, which sets how quickly alien civilisations are resolved once their light has reached Sol. Detection power is zero until Radio Astronomy is researched.",
 	"Radio Telescope Array": "Radio dishes and a correlator. Adds signature-detection power.",
 	"Space Telescope": "Observatory in orbit, above atmospheric absorption and noise. Adds signature-detection power.",
 	"Automated Mine": "Robotic excavators and conveyors. Yield is divided across the crust exactly as a Mine's is.",
 	"Factory": "Production lines with automated tooling. Adds factory capacity to its world.",
-	"Data Center": "Server racks with liquid cooling. Adds fixed compute.",
+	"Data Center": "A planetary network of liquid-cooled server halls. Adds fixed compute — about twice a Research Lab.",
 	"Orbital Habitat": "Spun cylinder holding its own air, gravity and farmland. Houses people independently of the body it orbits and adds farm capacity. The only habitation that can be built in solar orbit. Draws power from the energy reserve every day.",
 	"Colony Dome": "Pressurised surface habitation. No world but Earth has a biosphere, so a colony's population ceiling is the habitat built for it; on a colony in the Sol system that ceiling is further scaled by how much power the world's own grid generates. Every colony ship lands with one. Draws power from the energy reserve every day.",
 	"Bunker": "Deep, hardened, stocked shelter network. In an asteroid impact or nuclear exchange on its world, at least this many people survive. Bunkers are the only structures that come through those events standing.",
 	"Fusion Reactor": "Superconducting tokamak plant. Burns helium-3, which cannot be manufactured: it is condensed from gas-giant atmospheres or mined from moon regolith. Emits no CO₂.",
 	"Automated Factory": "Lights-out robotic plant; the densest source of factory capacity.",
 	"Orbital Laser": "Directed-energy array. With one standing on any world, the star map can fire light-speed pulses at other star systems, and inbound asteroids, relativistic missiles and berserker swarms can be destroyed on approach at the cost of one shot from the energy reserve. Laser strikes against human worlds cannot be intercepted.",
-	"AI Research Hub": "Warehouse-scale compute cluster with immersion cooling. Adds fixed compute.",
+	"AI Research Hub": "Warehouse-scale immersion-cooled clusters across the whole world. The densest compute a surface can carry; enough of them rival the population's own thinking.",
 	"Thermal Radiator": "Field of high-emissivity panels that sheds waste heat to space. Raises radiating capacity; power drawn beyond radiating capacity is curtailed.",
 	"Farm": "Open fields. Adds farm capacity; the crop is chosen as a recipe in the Production tab. Requires weather, so rocky bodies only.",
 	"Ranch": "Pens, pasture and handling. Adds ranch capacity, which livestock recipes draw on; the animal is chosen as a recipe.",
@@ -473,7 +486,7 @@ const BUILDINGS := [
 		"category": "science",
 		"allowed_types": ["rocky", "belt"],
 		"cost": {"Concrete": 3_000, "Glass": 3_000, "Cu": 1_500, "energy": 20_000},
-		"production": {"compute": 10.0}},
+		"production": {"compute": 1.25e24}},
 
 	# ── Signature detection (finding alien civilisations) ─────────────────────
 	# "detection" raises the per-year chance of resolving an alien system's signature
@@ -524,7 +537,7 @@ const BUILDINGS := [
 		"category": "science",
 		"allowed_types": ["rocky", "belt"],
 		"cost": {"Microchip": 3_000, "Steel": 3_000, "Cu": 2_000, "Plastic": 1_000, "energy": 50_000},
-		"production": {"compute": 20.0}},
+		"production": {"compute": 2.5e24}},
 
 	# Colony Dome — titanium pressure hull + life support + ISRU systems.
 	# Orbital Habitat — a spun cylinder holding its own air, gravity and farmland.  It needs
@@ -622,7 +635,7 @@ const BUILDINGS := [
 		"category": "science",
 		"allowed_types": ["rocky", "belt"],
 		"cost": {"Microchip": 20_000, "Steel": 12_000, "Cu": 10_000, "Plastic": 5_000, "energy": 250_000},
-		"production": {"compute": 80.0}},
+		"production": {"compute": 1.0e25}},
 
 	# Thermal Radiator — a field of high-emissivity panels that dumps the civilisation's
 	# waste heat to space.  "radiator_capacity" (W) adds to how much power the grid can draw

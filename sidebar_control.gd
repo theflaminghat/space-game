@@ -132,6 +132,19 @@ func _on_politics_pressed() -> void:
 	_toggle_panel(politics_page)
 
 
+## Open the star map outright, rather than toggling it.  Used when something else — a timeline
+## card, a notification — is taking the player there: arriving at a panel that closed again
+## because it happened to be open already is not what they asked for.
+func show_star_map() -> void:
+	hide_all()
+	if star_map == null:
+		return
+	star_map.show()
+	var game := get_tree().current_scene
+	if game and game.has_method("refresh_star_map"):
+		game.refresh_star_map()
+
+
 func _on_starmap_pressed() -> void:
 	if _toggle_panel(star_map):
 		var game := get_tree().current_scene

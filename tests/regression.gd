@@ -1,5 +1,5 @@
 extends SceneTree
-## Consolidated regression for the stellar-engineering work and the selected-body texture LOD.
+## Consolidated regression for the stellar-engineering work and the bodies' surface maps.
 ## The sun figures are the values captured from the ORIGINAL fixed-curve implementation, before
 ## any of it existed: a pristine star must still reproduce them exactly.
 var fails := 0
@@ -87,18 +87,29 @@ func _run() -> void:
 		if str(m.get("structure", "")) != "": carriers += 1
 	check(carriers == 2, "both carriers exist")
 
-	# ── 5. Selected-body texture LOD ──
+	# ── 5. Surface maps ──
+	# Every body carries the same 4096x2048 BPTC map all the time.  There used to be a runtime
+	# LOD swap that rasterised the SELECTED body at twice its imported size; once the imports
+	# themselves went to 4096 and VRAM compression, that swap was rasterising 8192x4096 and
+	# handing the renderer 171 MB of UNCOMPRESSED texture per click — more than every map in
+	# the game costs together — so it was removed rather than retuned.
 	g.planet_buildings["sun"] = []
 	g._mark_prod_dirty()
 	g.select_planet("earth")
 	for _i in range(120): await process_frame
 	var earth: MeshInstance3D = g.get_node("WorldRoot/Planets/earth")
 	var tex = (earth.material_override as ShaderMaterial).get_shader_parameter("albedo_tex")
-	check(tex.get_width() == 4096, "the selected body doubles: %d" % tex.get_width())
+	check(tex.get_width() == 4096, "the map is 4096 wide: %d" % tex.get_width())
+	check(tex.get_image().get_format() == Image.FORMAT_BPTC_RGBA,
+		"and VRAM-compressed: format %d" % tex.get_image().get_format())
+	# Selecting must not swap it for anything.
 	g.select_planet("mars")
 	for _i in range(120): await process_frame
-	tex = (earth.material_override as ShaderMaterial).get_shader_parameter("albedo_tex")
-	check(tex.get_width() == 2048, "and the previous one is restored")
+	var after = (earth.material_override as ShaderMaterial).get_shader_parameter("albedo_tex")
+	check(after == tex, "selection does not swap the map any more")
+	var mars_tex = ((g.get_node("WorldRoot/Planets/mars") as MeshInstance3D).material_override \
+		as ShaderMaterial).get_shader_parameter("albedo_tex")
+	check(mars_tex.get_width() == 4096, "the newly selected body is 4096 too: %d" % mars_tex.get_width())
 	ss.reset_star()
 	print("FAILS: ", fails)
 	quit()

@@ -4,7 +4,9 @@ extends Node
 ## Real seconds per in-game day at 1×.  Time itself runs at this one rate for the whole run: the
 ## game never decides the speed for the player.  How fast a run moves is the player's to choose
 ## from the top bar, and the faster settings are earned by getting there.
-const TIMESCALE_BASE:  float = 0.25
+## The base clock rate lives on SolarSystem, which owns the clock and the blur threshold that
+## is expressed against it.  Kept here as a name so the speed ladder below reads normally.
+const TIMESCALE_BASE:  float = SolarSystem.TIMESCALE_BASE
 ## Below this threshold switch from day-by-day to year-based fast mode.
 const FAST_THRESHOLD:  float = 5e-4
 
@@ -168,7 +170,11 @@ var solar_satellites_deployed: int = 0
 ## lane, innermost first; each lane fits as many panels as its circumference allows.
 const SWARM_LANES:    int   = 18
 const SWARM_INNER_AU: float = 0.10   # lanes hug the Sun, inside Mercury's orbit
-const SWARM_OUTER_AU: float = 0.26
+## Halved span, so the gap between adjacent lanes is half what it was: the swarm reads as one
+## dense shell rather than a set of separated rings.  The inner lane stays put — it is the one
+## with physical meaning (as close to the Sun as the collectors can sit) — so the lanes pack
+## inward from the outside.
+const SWARM_OUTER_AU: float = 0.18
 const SWARM_ORBIT_MULT: float = 32.0   # log-radius scale (mirror init_planets ORBIT_RADIUS_MULT)
 const SWARM_PANEL_ARC:  float = 0.30 * 1.4   # arc length per panel (PANEL_W × 1.4)
 ## Solar Satellites launched toward the swarm but not yet arrived — so each new launch
@@ -314,7 +320,30 @@ var _vn_milestone_idx: int = 0
 ## confirmation that anything had happened at all, through a transit that can run centuries.  One
 ## card the first time it works closes the loop; the rest stay quiet.
 const VN_MILESTONES: Array = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000]
-const VN_MAX_INFLIGHT:   int   = 12          # cap probes in flight (bounds work + growth rate)
+## How many replications the simulation PROCESSES in one year.
+##
+## Not a limit on how many probes may exist or how many a civilisation may send — there is no
+## such limit, and there should not be: a machine that copies itself without bound is the whole
+## idea.  This bounds only how much of the queue is worked through per tick; a lineage that does
+## not get its turn keeps it and goes next year.  Growth stays exponential, the frame cost does
+## not.
+##
+## There WAS a population cap (VN_MAX_INFLIGHT, twelve probes) and it was the bug: twelve was the
+## entire throughput of the swarm however large it grew, so expansion ran at a flat — in fact
+## decaying, as flights lengthened — few hundred stars per thousand years instead of compounding,
+## and any colony that happened to arrive while those twelve were out launched nothing at all and
+## was never revisited.  Three hundred and sixty-nine colonies had never seeded anything after
+## fifteen thousand years.
+## A TIME budget, in milliseconds of one year-tick, not a count.
+##
+## What a replication costs swings by more than twenty times with how settled the neighbourhood
+## is: under a millisecond for a frontier colony with empty sky around it, fifteen for one deep
+## inside the bubble whose search has to look everywhere to conclude there is nowhere to go.  A
+## fixed count is therefore either far too slow in the late game or pointlessly small in the
+## early one, whereas a time budget spends the same and gets through as many as it can.
+const VN_LAUNCH_MS: float = 8.0
+## Never fewer than this per tick, however slow they are, so the queue always advances.
+const VN_LAUNCH_MIN: int = 2
 ## There is no cap on colonies.  Every star a probe reaches inside the detailed radius becomes a
 ## world the simulation runs individually, however many that ends up being — the frontier is the
 ## point of the game and it does not stop because a counter said so.
@@ -324,6 +353,11 @@ const VN_MAX_INFLIGHT:   int   = 12          # cap probes in flight (bounds work
 ## from a set (see _col_star_set) the cost is linear and small, and the step runs once a frame
 ## rather than once a simulated year.
 const VN_REPLICATE_COUNT: int  = 2           # probes launched per successful arrival
+## How far a colony surveys its OWN neighbourhood before sending the next generation.
+## A probe that has landed is THERE: it can see the stars around it, which is the whole premise
+## of an autonomous swarm.  Sized to hold a few hundred sampled stars at the modelled density,
+## so a hop is always available without generating chunks the swarm will never look at.
+const VN_SURVEY_LY: float = 150.0
 ## How many established lineages are revisited per year by _vn_resume.  Small: the in-flight cap
 ## is the real throttle, and this only decides how quickly a stalled frontier notices it can move
 ## again.  Three a year clears a hundred lineages in a human lifetime.
@@ -491,6 +525,11 @@ var _vn_orders: Dictionary = {}
 ## inhabited), and saved, because without it a reloaded game would have a frontier that never
 ## moved again.
 var _vn_seeds: Dictionary = {}
+## Lineages that want to send the next generation and have not been worked through yet.  A
+## queue, not a refusal: everything in it launches, just not necessarily this year.
+var _vn_pending: Array[String] = []
+## How far into _vn_pending has been worked through.  See _vn_work_queue.
+var _vn_head: int = 0
 ## Round-robin cursor over _vn_seeds, so revisiting lineages costs the same however many there are.
 var _vn_resume_idx: int = 0
 ## Game year the last resume pass ran, so the scan is spaced out rather than run every tick.
@@ -566,9 +605,6 @@ var _cached_storage_caps: Dictionary = {"minerals": 100_000.0, "energy": 100_000
 var game_over: bool = false
 ## Set to true (by future interstellar mission logic) to survive the red-giant event.
 var has_left_solar_system: bool = false
-## Sharpens the selected body's surface map (see body_texture_hires.gd).
-var _body_hires: BodyTextureHires = null
-
 ## What the core mixing arrays actually drew last tick, in watts.
 var _husbandry_rate_w: float = 0.0
 
@@ -1070,6 +1106,8 @@ func start_new_game() -> void:
 	_vn_orders = {}
 	_vn_seeds = {}
 	_vn_resume_idx = 0
+	_vn_pending.clear()
+	_vn_head = 0
 	_vn_resume_year = -1.0e18
 	cluster_colonized = {}
 	keep_limits = {}        # no standing storage limits until the player sets one
@@ -1157,10 +1195,6 @@ func _ready() -> void:
 	add_child(wiki)
 	wiki.setup(self)
 
-	# Surface maps at double resolution for whichever body the player has selected.
-	_body_hires = BodyTextureHires.new()
-	add_child(_body_hires)
-
 	# Trade proposal window, opened from the star map's Trade button.
 	_trade_panel = TradePanel.new()
 	add_child(_trade_panel)
@@ -1187,6 +1221,8 @@ func _ready() -> void:
 		sidebar.automation_panel.set_body_kinds(body_kinds())
 		sidebar.automation_panel.automation_changed.connect(_on_automation_changed)
 		sidebar.automation_panel.doctrine_changed.connect(_on_doctrine_changed)
+	if timeline_panel:
+		timeline_panel.star_focus_requested.connect(_on_timeline_star_focus)
 	if sidebar and sidebar.star_map:
 		sidebar.star_map.colonize_requested.connect(_on_colonize_requested)
 		sidebar.star_map.laser_requested.connect(_on_laser_requested)
@@ -1216,7 +1252,7 @@ func _ready() -> void:
 		start_new_game()
 
 	politics_page.load_policies(policies)
-	_check_extinction_events()   # hides planets immediately if year ≥ ORBIT_FREEZE_YEAR
+	_check_extinction_events()
 	_check_population_splits()
 	production_panel.refresh_recipes(_completed_research_map())
 	_refresh_launch_access()   # hide Launches until Early Rocketry is researched
@@ -1830,6 +1866,11 @@ func _process(delta: float) -> void:
 				_extraction_page.set_extraction(current_planet, extraction_data(current_planet))
 			elif production_panel and production_panel.visible:
 				production_panel.set_planet(current_planet)   # no-op if the body didn't change
+		# What the civilisation can see coming, on the timeline it is already looking at.
+		# Here rather than on the year tick: the horizon moves with COMPUTE, which changes when
+		# something is built, not when a year turns.
+		if timeline_panel and timeline_panel.visible:
+			timeline_panel.set_forecast_events(forecast_events())
 		if launch_panel.visible:
 			# The panel's live data — the date, where the planets are, what is in the hold and
 			# what is in flight.  This used to sit in advance_day(), so in fast mode (where the
@@ -1973,6 +2014,127 @@ func _init_building_cache() -> void:
 	_recipe_cache.clear()
 	for r: Dictionary in RecipeData.RECIPES:
 		_recipe_cache[r["name"]] = r
+
+# ── Forecasting ───────────────────────────────────────────────────────────────
+#
+# Compute buys FORESIGHT: how many years ahead the civilisation can say what is coming.
+#
+# It is worth anything at all only because the catastrophe schedule is deterministic (see
+# "Repeatable rolls" below).  Every scheduled year, every target and every severity is a pure
+# function of (galaxy_seed, tag, year), so a forecast is not a guess dressed up as one — it is
+# the same arithmetic the year itself will do, run early.  Before the rolls were made
+# repeatable this could not have been built honestly at all: the answer did not exist yet.
+#
+# The cost of horizon rises as its SQUARE.  Chaos is the reason: prediction error grows
+# exponentially, so each further year demands disproportionately more precision, and past the
+# system's Lyapunov time no amount of computing helps at all — which is where the hard cap
+# below comes from rather than from a balance decision.
+#
+# The exponent is 2 rather than something steeper because of the range it has to span.  A
+# civilisation's compute runs from about 1e26 FLOP/s at the opening to perhaps 1e31 once the
+# galaxy is settled — five orders of magnitude.  Cost exponential in the horizon would make the
+# horizon LINEAR in the logarithm of compute, which across five orders means it arrives almost
+# complete at the start or not until the very end; squared cost keeps it growing steadily the
+# whole way, and keeps a deliberate investment in compute buildings worth making.
+
+## What the civilisation has to know before it can forecast anything.  An existing node, not a
+## new one: rigorous forecasting of complex systems is exactly what it describes.
+const FORECAST_RESEARCH: String = "predictive_modeling"
+## Compute at which the horizon is FORECAST_REF_YEARS — about what a 1945 civilisation thinks.
+const FORECAST_REF_FLOPS: float = 3.0e26
+## Horizon at that reference compute.  Enough to see the next nuclear crisis and nothing else.
+const FORECAST_REF_YEARS: float = 50.0
+## How the cost of horizon grows: compute goes as horizon to this power.
+const FORECAST_COST_EXPONENT: float = 2.0
+## Where foresight stops no matter what is spent — the system's Lyapunov time.  Beyond this the
+## trajectories have diverged past recovering and the arithmetic is worthless.
+const FORECAST_LYAPUNOV_YEARS: float = 5.0e6
+## Stop walking a track after this many predicted events, so a long horizon over a short cadence
+## cannot build an unbounded list.
+const FORECAST_MAX_EVENTS: int = 24
+
+
+## How many years ahead the civilisation can currently see.
+func forecast_horizon_years() -> float:
+	if not ResearchTree.is_unlocked(FORECAST_RESEARCH):
+		return 0.0
+	var c: float = _get_compute_rate()
+	if c <= 0.0:
+		return 0.0
+	var h: float = FORECAST_REF_YEARS * pow(c / FORECAST_REF_FLOPS, 1.0 / FORECAST_COST_EXPONENT)
+	return minf(h, FORECAST_LYAPUNOV_YEARS)
+
+
+## The compute it would take to see `years` ahead — the inverse, for the readout.
+func forecast_cost_flops(years: float) -> float:
+	return FORECAST_REF_FLOPS * pow(maxf(years, 0.0) / FORECAST_REF_YEARS, FORECAST_COST_EXPONENT)
+
+
+## What is coming, within the horizon.  [{ year, kind, title, desc, certain }], soonest first.
+##
+## The asteroid track is CERTAIN: its schedule and its consequences are settled arithmetic.  The
+## plague and the war are not — their scheduled years are settled, but whether they actually
+## happen is a roll against odds that move with what the player does.  Those are reported at
+## today's odds and flagged, because a forecast that showed them as fate would be telling the
+## player their own choices do not matter, which is the opposite of true.
+func forecast_events() -> Array:
+	var out: Array = []
+	var horizon: float = forecast_horizon_years()
+	if horizon <= 0.0:
+		return out
+	var until: int = year + int(horizon)
+
+	# ── Asteroids: scheduled, and they always land ──
+	var y: int = _next_impact_year
+	var guard: int = 0
+	while y <= until and guard < FORECAST_MAX_EVENTS:
+		guard += 1
+		var targets: Array = _impact_targets()
+		if targets.is_empty():
+			break
+		var tgt: String = str(targets[_roll_pick("impact_target", targets.size(), y)])
+		var kill: float = _roll_range("impact_kill", 0.50, 0.85, y) / float(targets.size())
+		out.append({
+			"year": y, "kind": "asteroid", "certain": true,
+			"id": "forecast_asteroid_%d" % y, "forecast": true, "category": "warning",
+			# The figures as data, not only as prose: a caller checking the forecast against what
+			# the year actually does has to be able to read what was claimed.
+			"target": tgt, "kill_frac": kill,
+			"title": "Projected impact: %s" % _body_display_name(tgt),
+			"desc": "A mountain-sized body is on course for %s in year %s — %s from now. Projected loss %d%% of that world. Time enough to build an Orbital Laser, or to move." % [
+				_body_display_name(tgt), TimelineCanvas.fmt_year(float(y)),
+				Units.format_si(float(y - year), "yr"), int(round(kill * 100.0))],
+		})
+		y += _roll_int("impact_schedule", IMPACT_GAP_MIN, IMPACT_GAP_MAX, y)
+
+	# ── Plague and war: scheduled, but only a chance each time ──
+	for spec: Array in [
+			["pandemic", "pandemic_fires", "pandemic_schedule", PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX,
+				_next_pandemic_year, pandemic_probability(), "Projected outbreak",
+				"An engineered plague is due in year %s (%s from now), and at today's odds (%d%%) this one breaks out. Less bioengineering, less AI autonomy, or more worlds held would change that."],
+			["nuclear", "nuclear_fires", "nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX,
+				_next_nuclear_year, nuclear_probability(), "Projected exchange",
+				"A strategic exchange is due in year %s (%s from now), and at today's odds (%d%%) it happens. Military spending, the reactor fleet and the standing tension all move that number."]]:
+		var py: int = int(spec[5])
+		var prob: float = float(spec[6])
+		var pguard: int = 0
+		while py <= until and pguard < FORECAST_MAX_EVENTS:
+			pguard += 1
+			if prob > 0.0 and _roll(str(spec[1]), py) < prob:
+				out.append({
+					"year": py, "kind": str(spec[0]), "certain": false,
+					"id": "forecast_%s_%d" % [str(spec[0]), py],
+					"forecast": true, "category": "warning", "probability": prob,
+					"title": str(spec[7]),
+					"desc": str(spec[8]) % [TimelineCanvas.fmt_year(float(py)),
+						Units.format_si(float(py - year), "yr"), int(round(prob * 100.0))],
+				})
+			py += _roll_int(str(spec[2]), int(spec[3]), int(spec[4]), py)
+
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a["year"]) < int(b["year"]))
+	return out
+
 
 # ── Repeatable rolls ──────────────────────────────────────────────────────────
 #
@@ -2635,10 +2797,6 @@ func sun_nebula_year() -> int:
 func _check_extinction_events() -> void:
 	if game_over:
 		return
-
-	# ── Orbital freeze ────────────────────────────────────────────────────────
-	if year >= SolarSystem.ORBIT_FREEZE_YEAR:
-		SolarSystem.set_solar_system_active(false)
 
 	# The Sun's photosphere physically swallows any planet inside its radius — destroy them
 	# (and their moons/infrastructure) whether or not humanity is still there.
@@ -3860,9 +4018,6 @@ func select_planet(planet_name: String) -> void:
 	if not _is_body_selectable(planet_name):
 		return
 	current_planet = planet_name
-	# The selected body is the one filling the screen, so it gets the sharper map.
-	if _body_hires:
-		_body_hires.select(_body_node(planet_name))
 	sidebar.hide_all()
 	# Populate every tab up front, then reveal the merged panel (tabs switch between them).
 	planet_info_page.set_planet_info(get_planet_data(planet_name))
@@ -4531,7 +4686,11 @@ func _on_colonize_requested(star_name: String, gamma_max: float, accel: float) -
 func _check_interstellar_arrivals() -> void:
 	if interstellar_missions.is_empty():
 		# An empty sky is precisely when a stalled lineage most needs its next chance, so the
-		# resume pass happens before this returns rather than after it.
+		# queue and the resume pass both happen before this returns rather than after it.
+		# Working the queue only on the way out of the arrival loop meant that a swarm with
+		# nothing currently in flight never sent anything again — it had no arrival to trigger
+		# the launch, and no launch to produce the next arrival.  Dead stop, permanently.
+		_vn_work_queue()
 		_vn_resume()
 		return
 	var still: Array = []
@@ -4624,8 +4783,9 @@ func _check_interstellar_arrivals() -> void:
 	for t in newly_vn:
 		# Orders are copied along with the machine — that is what makes it von Neumann.
 		_vn_seeds[str(t)] = true
-		_vn_replicate(str(t), _vn_orders_for(str(t)))
+		_vn_pending.append(str(t))
 	# Everything already out there tries again, whether or not anything arrived this year.
+	_vn_work_queue()
 	_vn_resume()
 	_vn_check_milestone()
 	refresh_star_map()
@@ -4641,24 +4801,58 @@ func _check_interstellar_arrivals() -> void:
 ## Round-robin over a handful of lineages a year, because _nearest_uncolonised walks the
 ## catalogue.  Hundreds of colonies all searching every tick would cost more than the rest of the
 ## simulation put together, and the frontier is not in a hurry — it has until heat death.
+## Send the next generation from every lineage waiting to, up to this year's work budget.
+##
+## The en-route set is built ONCE here and threaded through the launches, rather than each launch
+## rescanning the mission list for itself.  With the population cap gone there can be tens of
+## thousands of probes in flight, and a per-launch scan of them made the whole thing quadratic.
+func _vn_work_queue() -> void:
+	if _vn_head >= _vn_pending.size() or not _vn_unlocked():
+		return
+	var enroute: Dictionary = _enroute_targets()
+	var done: int = 0
+	var deadline: int = Time.get_ticks_usec() + int(VN_LAUNCH_MS * 1000.0)
+	# Walked with a cursor, not pop_front(): an Array's pop_front shifts every element behind it,
+	# and this queue is meant to reach tens of thousands of lineages.  The consumed head is
+	# dropped in one slice when it has grown worth dropping.
+	while _vn_head < _vn_pending.size() \
+			and (done < VN_LAUNCH_MIN or Time.get_ticks_usec() < deadline):
+		var from_star: String = _vn_pending[_vn_head]
+		_vn_head += 1
+		if _vn_replicate(from_star, _vn_orders_for(from_star), enroute) == 0:
+			# Nothing within reach that is not already ours.  Colonisation never reverses, so a
+			# lineage in that position will never have anywhere to go again: retiring it is what
+			# stops the interior of a settled bubble being re-searched forever.  The frontier is
+			# unaffected — it is the lineages with somewhere to go, and they keep their place.
+			_vn_seeds.erase(from_star)
+		done += 1
+	if _vn_head > 4096 or _vn_head >= _vn_pending.size():
+		_vn_pending = _vn_pending.slice(_vn_head)
+		_vn_head = 0
+
+
+## Targets already being flown to, as a set.  O(missions) once, instead of per launch.
+func _enroute_targets() -> Dictionary:
+	var out: Dictionary = {}
+	for m in interstellar_missions:
+		out[str(m.get("target", ""))] = true
+	return out
+
+
 func _vn_resume() -> void:
 	if _vn_seeds.is_empty() or not _vn_unlocked():
 		return
-	# Every few decades is often enough: the in-flight cap is what actually paces the swarm, and
-	# a frontier that has stalled is not made whole any faster by being asked every single year.
+	# Every few decades is often enough: a lineage whose neighbourhood was full last time is not
+	# helped by being asked again immediately, and the queue is what actually paces the swarm now.
 	if float(year) - _vn_resume_year < VN_RESUME_INTERVAL:
 		return
 	_vn_resume_year = float(year)
-	# Nothing to launch into, or nothing left to launch: both resolve themselves in time, so this
-	# just costs a comparison until they do.
-	if _vn_inflight() >= VN_MAX_INFLIGHT:
-		return                         # no room to launch into; the colony cap is _vn_replicate's
+	# Put a few established lineages back in the queue.  This is the anti-stall net, not the
+	# growth mechanism: growth comes from arrivals, which queue themselves.
 	var seeds: Array = _vn_seeds.keys()
 	for _i in range(mini(VN_RESUME_PER_YEAR, seeds.size())):
 		_vn_resume_idx = (_vn_resume_idx + 1) % seeds.size()
-		_vn_replicate(str(seeds[_vn_resume_idx]), _vn_orders_for(str(seeds[_vn_resume_idx])))
-		if _vn_inflight() >= VN_MAX_INFLIGHT:
-			break                      # the cap is the throttle; the rest wait their turn
+		_vn_pending.append(str(seeds[_vn_resume_idx]))
 
 ## Announce only when the grand total of settled systems + colonised regions crosses a milestone —
 ## keeps the autonomous swarm's progress on the timeline without an entry per colony.
@@ -4671,7 +4865,7 @@ func _vn_check_milestone() -> void:
 			"Human colonisation now spans %d star systems and galactic regions." % settled,
 			"vn_milestone_%d" % m)
 
-## Number of von Neumann probes currently in flight.
+## Number of von Neumann probes currently in flight.  A READOUT — nothing gates on it any more.
 func _vn_inflight() -> int:
 	var n: int = 0
 	for m in interstellar_missions:
@@ -4688,15 +4882,15 @@ func _vn_unlocked() -> bool:
 ## already colonised/en-route, the in-flight cap allows it, and the energy is affordable.
 ## Returns true on launch.  The energy cost is a light fraction of a colony ship's — expansion is
 ## still throttled by the shared energy pool, so a broke civilisation stops spreading.
+## `enroute` is the set of targets already being flown to; the caller owns it and this adds to
+## it, so a batch of launches never sends two probes to the same star and never has to rescan
+## the mission list to find that out.
 func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
-		from_star: String = "") -> bool:
+		from_star: String = "", enroute: Dictionary = {}) -> bool:
 	if not _vn_unlocked() or target_star == "" or _col_star_set.has(target_star):
 		return false
-	if _vn_inflight() >= VN_MAX_INFLIGHT:
-		return false
-	for m in interstellar_missions:
-		if str(m.get("target", "")) == target_star:
-			return false   # already en route
+	if enroute.has(target_star):
+		return false   # already en route
 	var dist: float = maxf(from_pos.distance_to(_star_pos(target_star)), 0.01)
 	var plan: Dictionary = StarMapPanel.plan_flight(dist, VN_GAMMA, VN_ACCEL)
 	var mission: String = str(orders.get("mission", "colonize"))
@@ -4705,6 +4899,7 @@ func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
 		return false
 	ResearchTree.resources["energy"] = maxf(0.0,
 		float(ResearchTree.resources.get("energy", 0.0)) - cost)
+	enroute[target_star] = true
 	interstellar_missions.append({
 		"target": target_star, "vn": true,
 		# Where it actually departed from.  A replicated probe leaves the colony that built it,
@@ -4721,13 +4916,18 @@ func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
 
 ## A colony founded by a probe sends the next generation to the nearest uncolonised stars it can
 ## resolve (no tight distance cap — the galaxy is sparse, so a probe hops as far as it must).
-func _vn_replicate(from_star: String, orders: Dictionary = {}) -> void:
+## Returns how many probes actually went — 0 means the lineage is enclosed.
+func _vn_replicate(from_star: String, orders: Dictionary = {}, enroute: Dictionary = {}) -> int:
 	var mission: String = str(orders.get("mission", "colonize"))
 	var origin: Vector3 = _star_pos(from_star)
 	# A surveyor or a relay may target an inhabited system; only a coloniser may not.
 	var claims: bool = DoctrineData.mission_claims(mission)
-	for tgt in _nearest_uncolonised(origin, VN_REPLICATE_COUNT, INF, not claims):
-		_vn_launch(str(tgt), origin, orders, from_star)
+	var set_: Dictionary = enroute if not enroute.is_empty() else _enroute_targets()
+	var sent: int = 0
+	for tgt in _nearest_uncolonised(origin, VN_REPLICATE_COUNT, INF, not claims, set_):
+		if _vn_launch(str(tgt), origin, orders, from_star, set_):
+			sent += 1
+	return sent
 
 ## The orders a lineage at `star` is operating under, defaulting to colonisation for probes
 ## launched before orders existed (older saves).
@@ -4736,37 +4936,107 @@ func _vn_orders_for(star: String) -> Dictionary:
 
 ## The nearest uncolonised, not-en-route stars within `max_ly` of `origin` (up to `max_n`).
 func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
-		allow_inhabited: bool = false) -> Array:
+		allow_inhabited: bool = false, enroute_in: Dictionary = {}) -> Array:
 	# Only a couple of names are ever wanted, so candidates are kept in a short sorted buffer
 	# rather than collected and sorted wholesale — a sort of six thousand entries to read the
 	# front two off it was most of the cost of this function, and it runs on every probe arrival
 	# and every resume pass.  `taken` is the same idea one level down: colonized_stars is an
 	# Array, and probing it per star was two hundred comparisons apiece.
 	var cand: Array = []   # [dist, name], nearest first, at most max_n long
-	var enroute: Dictionary = {}
-	for m in interstellar_missions:
-		enroute[str(m.get("target", ""))] = true
-	var taken: Dictionary = {}
-	for cs in colonized_stars:
-		taken[str(cs)] = true
-	for s: Dictionary in StarMapPanel.all_stars():
-		var nm: String = str(s["name"])
-		if taken.has(nm) or enroute.has(nm):
+	# The caller's set when it has one — with thousands of probes aloft, rebuilding this per
+	# call was most of the cost of picking a target.
+	var enroute: Dictionary = enroute_in if not enroute_in.is_empty() else _enroute_targets()
+	# _col_star_set is the same thing, already maintained by _colonize_star / _uncolonize_star.
+	# Rebuilding it here cost one dictionary insert per colonised star PER CALL, which at
+	# sixteen thousand colonies and sixteen searches a year was a quarter of a million inserts
+	# a tick — most of the swarm's whole running cost.
+	var taken: Dictionary = _col_star_set
+	# What the swarm can see from WHERE IT IS, not only what the player can resolve from home.
+	#
+	# This used to search StarMapPanel.all_stars() alone, which is the sky as resolved from Sol —
+	# bounded by the telescopes and trimmed to the nearest MAX_RESOLVED to Sol.  A colony four
+	# hundred light-years out could therefore only send probes to stars visible from Earth, so
+	# the swarm filled in the bubble around home and stopped at its edge instead of propagating
+	# outward: in testing the frontier sat at 434 ly (against a 467 ly observation range) for
+	# fourteen thousand years while it ground through all six thousand resolved stars.
+	#
+	# The catalogue and the home field still come from all_stars(); the neighbourhood around the
+	# colony is generated on demand, skipping the home cell, which the field already owns — the
+	# two must never both populate the same volume.
+	# The colony's OWN neighbourhood first, generated around where it actually is.  Their names
+	# are remembered so the Sol-resolved pass below does not weigh the same star twice — a short
+	# dict of the few hundred stars within VN_SURVEY_LY, not a copy of the whole sky.
+	# Squared distances throughout the reject, so the common case costs no square root.  `worst`
+	# is the buffer's last entry once it is full: max_n is two, so after the first two stars
+	# almost everything considered stops on this one comparison.  Keeping that test INLINE
+	# matters — routing thousands of stars a call through a helper costs more in GDScript call
+	# overhead than the test it is wrapping.
+	var max_ly2: float = max_ly * max_ly if max_ly < INF else INF
+	var worst: float = INF
+	var local: Dictionary = {}
+	# Inside the home cell there is nothing for the generator to add: that volume belongs to the
+	# procedural field, which all_stars() already carries, so every star the survey produced was
+	# tested against in_sol_cell and thrown away — a thousand rejections to learn what one test
+	# on the colony's own position says.
+	var survey: Array = [] if StarMapPanel.in_sol_cell(origin, origin.length()) \
+		else StarChunks.stars_near(origin, VN_SURVEY_LY, galaxy_seed, float(year))
+	for s: Dictionary in survey:
+		var lp: Vector3 = s["pos"]
+		# Near the boundary the survey still reaches into the home cell; those stars are the
+		# field's, and the two must never both fill one volume.
+		if StarMapPanel.in_sol_cell(lp, lp.length()):
 			continue
-		# A replicating swarm surveys before it commits, so a COLONISING lineage never wastes a
-		# probe on a system that is already someone's home — and never starts a war on its own
-		# initiative.  A surveyor or relay lineage is welcome to look.
-		if _star_occupied(nm) and not allow_inhabited:
+		local[str(s["name"])] = true
+		var d2: float = origin.distance_squared_to(lp)
+		if d2 > max_ly2 or d2 <= 0.0001 or d2 >= worst:
 			continue
-		var spos: Vector3 = s["pos"]
-		# A far star folds into a region, and a region only needs seeding ONCE — after that it
-		# spreads on its own, and sending more probes at its neighbours would be sending them
-		# nowhere.  Stars inside the detailed radius are always worth a probe: each is a world.
-		if spos.length() > DETAILED_RADIUS_LY and _region_taken(spos):
-			continue
-		var d: float = origin.distance_to(spos)
-		if d <= max_ly and d > 0.01:
-			_keep_nearest(cand, d, nm, max_n)
+		if _consider_target(cand, s, lp, sqrt(d2), max_n, taken, enroute, allow_inhabited) \
+				and cand.size() >= max_n:
+			worst = float((cand[max_n - 1] as Array)[0]) * float((cand[max_n - 1] as Array)[0])
+	# Then the sky as resolved from Sol: the real catalogue and the home field.
+	#
+	# Every star in that list lies within observation_range() of Sol, so the closest any of them
+	# could possibly be to this colony is (its distance to Sol - that reach).  Once the local
+	# survey above has found something nearer than that, the whole list is out of contention and
+	# six thousand distance tests can be skipped outright — which is most of a frontier colony's
+	# life, since it spends it far from home.
+	var nearest_possible: float = maxf(0.0,
+		origin.distance_to(SolarSystem.sol_position()) - StarMapPanel.observation_range())
+	if worst == INF or nearest_possible * nearest_possible < worst:
+		# Walked through a spatial index rather than end to end.  A colony NEAR Sol cannot use
+		# the cheap distance rejection above — the whole resolved list is plausibly close to it —
+		# so every replication was scanning all six thousand entries, which at tens of
+		# replications a year is a third of a second per tick.  The grid visits only the cells
+		# that could hold something nearer than what is already held.
+		var all_: Array = StarMapPanel.all_stars()
+		_rebuild_star_grid(all_)
+		var home: Vector3i = _grid_cell(origin)
+		for ring in range(STAR_GRID_MAX_RING):
+			# Once the buffer is full, a ring whose nearest possible point is further than the
+			# worst candidate cannot improve on it, and nor can any ring beyond it.
+			if cand.size() >= max_n:
+				var ring_min: float = float(ring - 1) * STAR_GRID_LY
+				if ring_min > 0.0 and ring_min * ring_min >= worst:
+					break
+			var found_any: bool = false
+			for cell: Vector3i in _grid_shell(home, ring):
+				for idx: int in (_star_grid.get(cell, []) as Array):
+					found_any = true
+					var s: Dictionary = all_[idx]
+					var sp: Vector3 = s["pos"]
+					var sd2: float = origin.distance_squared_to(sp)
+					if sd2 > max_ly2 or sd2 <= 0.0001 or sd2 >= worst:
+						continue
+					if local.has(str(s["name"])):
+						continue
+					if _consider_target(cand, s, sp, sqrt(sd2), max_n, taken,
+							enroute, allow_inhabited) and cand.size() >= max_n:
+						worst = float((cand[max_n - 1] as Array)[0]) \
+							* float((cand[max_n - 1] as Array)[0])
+			# Nothing anywhere in this shell and nothing held yet: the list is sparse here, so
+			# keep widening rather than giving up at the first empty ring.
+			if not found_any and cand.size() >= max_n:
+				break
 	# Clusters are colonisation targets too — a whole cluster is what a probe reaches once it is
 	# past the range where individual stars can be resolved.  One that has already had a probe is
 	# NOT a candidate, however little of it is settled so far: it is filling itself, and a second
@@ -4786,6 +5056,89 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
 	for e: Array in cand:
 		out.append(str(e[1]))
 	return out
+
+## Side of one cell of the star index, in light-years.  Near enough to VN_SURVEY_LY that a
+## colony's own neighbourhood is a handful of cells.
+const STAR_GRID_LY: float = 100.0
+## How far out the ring search goes before giving up, in cells.  Eight is eight hundred
+## light-years — far further than a probe would sensibly hop, and the point of the limit is the
+## SATURATED case: once everything nearby is settled the search finds nothing however far it
+## looks, and walking twenty-four shells to learn that cost eighty milliseconds a lineage.
+const STAR_GRID_MAX_RING: int = 8
+
+## Buckets of indices into StarMapPanel.all_stars(), keyed by cell.  Rebuilt only when that list
+## changes, which is the same trigger _star_lookup's name index uses.
+var _star_grid: Dictionary = {}
+var _star_grid_size: int = -1
+
+
+func _grid_cell(p: Vector3) -> Vector3i:
+	return Vector3i(floori(p.x / STAR_GRID_LY), floori(p.y / STAR_GRID_LY),
+		floori(p.z / STAR_GRID_LY))
+
+
+## The cells exactly `ring` steps from `home` — the surface of the cube, not its volume.
+##
+## Enumerated directly.  Walking the whole (2r+1)^3 block and skipping the interior is cubic in
+## the ring for a quadratic amount of work, which at ring ten is nine thousand iterations to
+## visit five hundred cells, and it was the cost of searching from anywhere the nearest stars
+## were not immediately to hand.
+func _grid_shell(home: Vector3i, ring: int) -> Array:
+	var out: Array = []
+	if ring == 0:
+		out.append(home)
+		return out
+	for dx in range(-ring, ring + 1):
+		var face_x: bool = absi(dx) == ring
+		for dy in range(-ring, ring + 1):
+			var face_y: bool = absi(dy) == ring
+			if face_x or face_y:
+				# A whole row of the shell.
+				for dz in range(-ring, ring + 1):
+					out.append(Vector3i(home.x + dx, home.y + dy, home.z + dz))
+			else:
+				# Interior of this column: only the two caps are on the surface.
+				out.append(Vector3i(home.x + dx, home.y + dy, home.z - ring))
+				out.append(Vector3i(home.x + dx, home.y + dy, home.z + ring))
+	return out
+
+
+func _rebuild_star_grid(all_: Array) -> void:
+	if all_.size() == _star_grid_size:
+		return
+	_star_grid.clear()
+	for i in range(all_.size()):
+		var c: Vector3i = _grid_cell((all_[i] as Dictionary)["pos"])
+		if not _star_grid.has(c):
+			_star_grid[c] = []
+		(_star_grid[c] as Array).append(i)
+	_star_grid_size = all_.size()
+
+
+## Weigh one star as a target and keep it if it is among the nearest so far.
+##
+## `d` is the already-computed distance, and the caller has already rejected anything too far to
+## be in contention — so what is left here is the expensive part, _star_occupied and _region_taken,
+## running only for the handful of stars that could actually be chosen.  Returns whether the star
+## was kept, which tells the caller its cutoff may have tightened.
+func _consider_target(cand: Array, s: Dictionary, spos: Vector3, d: float, max_n: int,
+		taken: Dictionary, enroute: Dictionary, allow_inhabited: bool) -> bool:
+	var nm: String = str(s["name"])
+	if taken.has(nm) or enroute.has(nm):
+		return false
+	# A replicating swarm surveys before it commits, so a COLONISING lineage never wastes a probe
+	# on a system that is already someone's home — and never starts a war on its own initiative.
+	# A surveyor or relay lineage is welcome to look.
+	if _star_occupied(nm) and not allow_inhabited:
+		return false
+	# A far star folds into a region, and a region only needs seeding ONCE — after that it
+	# spreads on its own, and sending more probes at its neighbours would be sending them
+	# nowhere.  Stars inside the detailed radius are always worth a probe: each is a world.
+	if spos.length() > DETAILED_RADIUS_LY and _region_taken(spos):
+		return false
+	_keep_nearest(cand, d, nm, max_n)
+	return true
+
 
 ## Insert [d, name] into `buf` — kept sorted nearest-first and never longer than `max_n`.
 static func _keep_nearest(buf: Array, d: float, nm: String, max_n: int) -> void:
@@ -5206,26 +5559,51 @@ func refresh_star_map() -> void:
 		sidebar.galaxy_debug.set_cluster_progress(cluster_colonized)
 	sidebar.star_map.set_star_factions(_displayed_factions())
 	# In-flight weapon strikes (laser pulses + berserker swarms) with their progress.
+	#
+	# A salvo is ONE track.  Every round in it left the same year for the same star on the same
+	# flight plan, so each drew at exactly the same place — ten missiles were ten identical
+	# strokes on the same pixels, visible only as overdraw, and ten times the work to produce
+	# one line.  They are grouped here by what defines a salvo (where, what, launched when,
+	# arriving when) and the map draws the group once with its count.
 	var atk: Array = []
+	var salvo: Dictionary = {}          # salvo key → index into atk
 	for a in interstellar_attacks:
 		var sy: float = float(a.get("start_year", year))
 		var ey: float = float(a.get("end_year", year))
+		var tgt: String = str(a.get("target", ""))
+		var kind: String = str(a.get("kind", "laser"))
+		var key: String = "%s|%s|%.6f|%.6f" % [tgt, kind, sy, ey]
+		if salvo.has(key):
+			var e: Dictionary = atk[int(salvo[key])]
+			e["count"] = int(e["count"]) + 1
+			continue
 		var p: float = 0.0 if ey <= sy else clampf((float(year) - sy) / (ey - sy), 0.0, 1.0)
-		atk.append({"target": str(a.get("target", "")), "progress": p,
-			"kind": str(a.get("kind", "laser")), "power": float(a.get("power", 1.0))})
+		salvo[key] = atk.size()
+		atk.append({"target": tgt, "progress": p, "kind": kind,
+			"power": float(a.get("power", 1.0)), "count": 1})
 	sidebar.star_map.set_attacks(atk)
 	# Incoming relativistic missiles: a red streak from the hostile source toward the target.
+	# Grouped the same way: a hostile volley on the same track is one track with a count.
 	var inc: Array = []
+	var volley: Dictionary = {}
 	for a in incoming_attacks:
 		var sy: float = float(a.get("start_year", year))
 		var ey: float = float(a.get("end_year", year))
-		var p: float = 0.0 if ey <= sy else clampf((float(year) - sy) / (ey - sy), 0.0, 1.0)
 		# In-system worlds (Earth, colonies) all render toward Sol at the map centre; only
 		# interstellar-colony targets point at their own star.
 		var atgt: String = str(a.get("target", "earth"))
 		var render_tgt: String = "sol" if PLANET_TYPES.has(atgt) else atgt
-		inc.append({"source": str(a.get("source", "")), "target": render_tgt,
-			"progress": p, "kind": str(a.get("kind", "missile"))})
+		var src: String = str(a.get("source", ""))
+		var ikind: String = str(a.get("kind", "missile"))
+		var ikey: String = "%s|%s|%s|%.6f|%.6f" % [src, render_tgt, ikind, sy, ey]
+		if volley.has(ikey):
+			var ie: Dictionary = inc[int(volley[ikey])]
+			ie["count"] = int(ie["count"]) + 1
+			continue
+		var p: float = 0.0 if ey <= sy else clampf((float(year) - sy) / (ey - sy), 0.0, 1.0)
+		volley[ikey] = inc.size()
+		inc.append({"source": src, "target": render_tgt,
+			"progress": p, "kind": ikind, "count": 1})
 	sidebar.star_map.set_incoming(inc)
 	sidebar.star_map.set_alien_intel(_alien_intel())
 	sidebar.star_map.set_weapon_caps(_has_orbital_laser(), _has_berserkers(), _has_player_missiles())
@@ -5553,7 +5931,8 @@ func _detect_alien_signatures(dyears: float) -> void:
 				_announce("Signature detected",
 					"A non-thermal electromagnetic signature resolves at %s (%.1f ly). Emission predates detection by ≥%d yr (light-travel time)." % [
 						star, dist, int(dist)],
-					"detect_%s_%d" % [star, year])
+					"detect_%s_%d" % [star, year],
+					{"star": star})
 
 ## Alien civilisations expand: each occupied system has a per-year chance to found a colony
 ## at the nearest unoccupied star (their "resources" scale with how many systems they hold,
@@ -6467,42 +6846,101 @@ func _attack_in_flight(star_name: String) -> bool:
 func _check_interstellar_attacks() -> void:
 	if interstellar_attacks.is_empty():
 		return
+	# A salvo lands as one event, the way it is drawn as one track.
+	#
+	# Resolving round by round told the wrong story: the first arrival erased the system, so
+	# every other round in the same salvo reported striking EMPTY SPACE — ten missiles read as
+	# one hit and nine misses, and since the popup queue keeps the most recent few, the cards
+	# the player actually saw were the misses.  What happened is that ten missiles hit a
+	# defended system, so that is what is said, once, with the number.
 	var still: Array = []
+	var landed: Array = []              # arrivals this tick, in order of first appearance
+	var group: Dictionary = {}          # "target|kind" → index into landed
 	for a in interstellar_attacks:
-		if float(year) >= float(a.get("end_year", INF)):
-			var target: String = str(a.get("target", ""))
-			var kind: String = str(a.get("kind", "laser"))
-			var had: bool = star_factions.has(target)
-			star_factions.erase(target)   # the force there is wiped out
-			_diplo_status.erase(target)
-			_infra_probed.erase(target)
-			var outcome: String = "The force there is obliterated." if had else "It strikes empty space."
-			if kind == "berserker":
-				_announce("Berserker Strike",
-					"The berserker swarm reaches %s and devours the system. %s" % [target,
-						"The hostile force is annihilated." if had else "Nothing organised remained."],
-					"berserker_hit_%s_%d" % [target, year])
-			elif kind == "missile":
-				_announce("Relativistic Impact",
-					"The relativistic missile shatters %s. %s" % [target, outcome],
-					"pmissile_hit_%s_%d" % [target, year])
-			else:
-				_announce("Laser Strike",
-					"The laser pulse lances %s. %s" % [target, outcome],
-					"laser_hit_%s_%d" % [target, year])
-		else:
+		if float(year) < float(a.get("end_year", INF)):
 			still.append(a)
+			continue
+		var target: String = str(a.get("target", ""))
+		var kind: String = str(a.get("kind", "laser"))
+		var key: String = "%s|%s" % [target, kind]
+		if group.has(key):
+			var g: Dictionary = landed[int(group[key])]
+			g["count"] = int(g["count"]) + 1
+			continue
+		group[key] = landed.size()
+		landed.append({"target": target, "kind": kind, "count": 1})
 	interstellar_attacks = still
+	if landed.is_empty():
+		return
+
+	# Whether anything was there is answered BEFORE anything is erased, so every weapon group
+	# arriving at one system this year tells the same truth about what it found.
+	var defended: Dictionary = {}
+	for g: Dictionary in landed:
+		var t: String = str(g["target"])
+		if not defended.has(t):
+			defended[t] = star_factions.has(t)
+	for t: String in defended:
+		star_factions.erase(t)        # the force there is wiped out
+		_diplo_status.erase(t)
+		_infra_probed.erase(t)
+
+	for g: Dictionary in landed:
+		var target: String = str(g["target"])
+		var kind: String = str(g["kind"])
+		var n: int = int(g["count"])
+		var had: bool = bool(defended.get(target, false))
+		var many: bool = n > 1
+		var outcome: String = "The force there is obliterated." if had \
+			else ("They strike empty space." if many else "It strikes empty space.")
+		if kind == "berserker":
+			_announce("Berserker Strike",
+				"%s %s %s and devour%s the system. %s" % [
+					("%d berserker swarms" % n) if many else "The berserker swarm",
+					"reach" if many else "reaches", target, "" if many else "s",
+					"The hostile force is annihilated." if had else "Nothing organised remained."],
+				"berserker_hit_%s_%d" % [target, year])
+		elif kind == "missile":
+			_announce("Relativistic Impact",
+				"%s %s %s. %s" % [
+					("%d relativistic missiles" % n) if many else "The relativistic missile",
+					"shatter" if many else "shatters", target, outcome],
+				"pmissile_hit_%s_%d" % [target, year])
+		else:
+			_announce("Laser Strike",
+				"%s %s %s. %s" % [
+					("%d laser pulses" % n) if many else "The laser pulse",
+					"lance" if many else "lances", target, outcome],
+				"laser_hit_%s_%d" % [target, year])
 	refresh_star_map()
 
 ## Queue a timeline notification (shared helper for interstellar events).
-func _announce(title: String, desc: String, id: String) -> void:
+## Put an event on the timeline and in the notification queue.
+##
+## `extra` carries anything the card should be able to act on — a "star" key makes the card
+## clickable and takes the player to that star on the map, which is the only thing a detection
+## three hundred light-years away actually invites them to do.
+func _announce(title: String, desc: String, id: String, extra: Dictionary = {}) -> void:
 	var notif: Dictionary = {
 		"id": id, "year": year, "title": title, "desc": desc, "category": "civilization",
 	}
+	for k: String in extra:
+		notif[k] = extra[k]
 	_pending_event_notifications.append(notif)
 	if timeline_panel:
 		timeline_panel.add_live_event(notif)
+
+## A timeline card naming a star was clicked: open the star map and go to it.
+##
+## The map opens either way.  A star the map cannot currently resolve — one outside the rendered
+## sky — still leaves the player looking at the right panel rather than at nothing happening,
+## which is a better answer to the click than refusing it.
+func _on_timeline_star_focus(star_name: String) -> void:
+	if sidebar == null or sidebar.star_map == null:
+		return
+	sidebar.show_star_map()
+	sidebar.star_map.focus_star(star_name)
+
 
 ## Snapshot of every launchable planet's current orbital angle (radians), so the
 ## LaunchPanel can compute the actual-path (launch-window) energy cost.
@@ -6606,7 +7044,13 @@ func load_game(path: String = "") -> void:
 
 	# Dyson-swarm size.  Set the base value first so the Orbital Array migration in
 	# the planet_buildings block below can add to it (older saves have no key → 0).
-	solar_satellites_deployed = int(data.get("solar_satellites_deployed", 0))
+	#
+	# Clamped to what the lanes can actually hold: the lane geometry is a constant, and when it
+	# changes a save written under the old one can name more collectors than there are slots.
+	# The renderer already clamps what it draws, so without this the count simply read as more
+	# than the maximum for the rest of the run.
+	solar_satellites_deployed = clampi(
+		int(data.get("solar_satellites_deployed", 0)), 0, _swarm_max())
 
 	ResearchTree.load_tree(ResearchTreeData.build())
 	if data.has("research") and data["research"] is Dictionary:
@@ -6678,6 +7122,8 @@ func load_game(path: String = "") -> void:
 	contact_doctrine = str(data.get("contact_doctrine", DoctrineData.DEFAULT_ID))
 	_vn_seeds = {}
 	_vn_resume_idx = 0
+	_vn_pending.clear()
+	_vn_head = 0
 	_vn_resume_year = -1.0e18
 	if data.has("vn_seeds") and data["vn_seeds"] is Array:
 		for k in data["vn_seeds"]:
@@ -7421,14 +7867,26 @@ func _check_pandemic() -> void:
 	_next_pandemic_year   = year + _roll_int("pandemic_schedule", PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX, year)
 	_pandemic_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 
-	# No engineered-pandemic risk before the bioengineering capability exists.
+	# Whether the plague comes this year is fixed for the year.  The ODDS still move with what
+	# the player has done — bioengineering, AI autonomy, how many worlds they hold — so the
+	# decision is theirs; what they cannot do is ask the same year twice for a kinder answer.
+	if _roll("pandemic_fires", year) < pandemic_probability():
+		_trigger_pandemic()
+
+
+## Chance an engineered plague breaks out in a year it is scheduled for, under CURRENT
+## conditions.  Zero before the bioengineering capability exists at all.
+##
+## Read by the check above and by the forecast, which is the point of it being a function: a
+## forecast computed from its own copy of this arithmetic would quietly start lying the first
+## time the real one was tuned.
+func pandemic_probability() -> float:
 	var biotech: int = 0
 	for node_id: String in PANDEMIC_BIOTECH:
 		if ResearchTree.is_unlocked(node_id):
 			biotech += 1
 	if biotech == 0:
-		return
-
+		return 0.0
 	var inhabited: int = 1 + colonized_planets.size()
 	var ai: float = PoliticsData.ai_autonomy(policies)
 	var le: float = _life_expectancy()
@@ -7439,11 +7897,7 @@ func _check_pandemic() -> void:
 		* (1.0 + 2.0 * ai) \
 		* (2.0 / (1.0 + float(inhabited))) \
 		* clampf(BASE_LIFE_EXPECTANCY / le, 0.5, 3.0)
-	# Whether the plague comes this year is fixed for the year.  The ODDS still move with what
-	# the player has done — bioengineering, AI autonomy, how many worlds they hold — so the
-	# decision is theirs; what they cannot do is ask the same year twice for a kinder answer.
-	if _roll("pandemic_fires", year) < clampf(prob, 0.0, 0.95):
-		_trigger_pandemic()
+	return clampf(prob, 0.0, 0.95)
 
 ## A synthetic plague kills much of the population — divided across inhabited worlds,
 ## so colonies blunt it.  Survivable by design unless the species is already fragile.
@@ -7539,9 +7993,21 @@ func _check_nuclear_war() -> void:
 	if means <= 0.0 or tension < 0.05:
 		return   # no arsenal at all, or nothing left to fight over
 
-	var prob: float = NUCLEAR_BASE * pressure * (1.0 + _arms_strain)
-	if _roll("nuclear_fires", year) < clampf(prob, 0.0, 0.9):
+	if _roll("nuclear_fires", year) < nuclear_probability():
 		_trigger_nuclear_war()
+
+
+## Chance a strategic exchange happens in a year it is scheduled for, under CURRENT conditions.
+##
+## Deliberately does NOT touch _arms_strain: the standoff ratchets in _check_nuclear_war, which
+## is the simulation.  Asking the forecast what the odds are must not make them worse.
+func nuclear_probability() -> float:
+	var tension: float = _geopolitical_tension()
+	var military: float = clampf(float(policies.get("military_spending", 10.0)) / 50.0, 0.0, 1.0)
+	var means: float = clampf(military + _nuclear_proliferation(), 0.0, 1.0)
+	if means <= 0.0 or tension < 0.05:
+		return 0.0
+	return clampf(NUCLEAR_BASE * tension * means * (1.0 + _arms_strain), 0.0, 0.9)
 
 ## A strategic exchange devastates Earth's population and industry.  Off-world colonies
 ## are spared (the conflict is between Earth powers), so spreading out blunts it.

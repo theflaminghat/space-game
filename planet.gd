@@ -193,7 +193,7 @@ var _long_periapsis_rad: float = 0.0
 var _mean_anomaly_rad: float = 0.0
 
 ## Mean anomaly at the game epoch (1945-01-01), kept so we can recompute the true
-## position for any year when motion is frozen (past ORBIT_FREEZE_YEAR).
+## position for any year when motion is frozen (above SolarSystem.ORBIT_BLUR_ABOVE_MULT).
 var _mean_anomaly_epoch: float = 0.0
 
 ## Mean motion n = 2π / T  (radians per game-day).

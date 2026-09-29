@@ -98,11 +98,71 @@ Left random on purpose: `galaxy_seed` itself, which has to be unpredictable, and
 randomness (ring colours, moon phases, rubble placement), where re-rolling costs nothing.
 Everything under §6 already had its own seeded generator keyed on `galaxy_seed`.
 
+### Forecasting
+
+Compute buys **foresight**: `Game.forecast_horizon_years()` is how many years ahead the
+civilisation can say what is coming, and `forecast_events()` is what it sees. Gated on
+`predictive_modeling`; shown as dimmed red cards ahead of the present marker on the timeline.
+
+It is honest only because the catastrophe schedule is deterministic (see "Repeatable rolls").
+Every scheduled year, target and severity is a pure function of (galaxy_seed, tag, year), so a
+forecast is the same arithmetic the year itself will do, run early. Before the rolls were made
+repeatable this could not have been built honestly at all — the answer did not exist yet.
+
+**Cost goes as the square of the horizon**, so horizon goes as the square root of compute.
+Chaos is the justification: prediction error grows exponentially, and past the system's
+Lyapunov time (`FORECAST_LYAPUNOV_YEARS`, 5 Myr) no amount of computing helps — which is where
+the hard cap comes from rather than from a balance decision.
+
+The exponent is **2** and not something steeper because of the range it must span. Compute runs
+from ~10²⁶ FLOP/s at the opening to perhaps 10³¹ once the galaxy is settled. Cost *exponential*
+in the horizon would make horizon linear in log(compute), which across five orders of magnitude
+arrives either almost complete at the start or not until the very end; squared cost keeps it
+growing the whole way.
+
+Asteroids are reported as **certain** — schedule and consequences are settled arithmetic.
+Plagues and wars are not: their years are settled but whether they fire is a roll against odds
+that move with what the player does, so they are reported at today's odds and flagged. A forecast
+that showed them as fate would be telling the player their choices do not matter.
+
+`pandemic_probability()` and `nuclear_probability()` exist so the check and the forecast read one
+formula; a forecast with its own copy would start lying the first time the real one was tuned.
+`nuclear_probability()` deliberately does not ratchet `_arms_strain` — asking what the odds are
+must not make them worse.
+
+### Compute
+
+`compute = population × COMPUTE_PER_INDIVIDUAL (1e17 FLOP/s) + buildings`, so even a modest world
+thinks at ~10²⁶ FLOP/s. The compute buildings were authored at the scale of one server room — a
+Data Center at 20 FLOP/s — which put them twenty-four orders of magnitude under the people using
+them: ten thousand AI Research Hubs moved civilisation compute by 0.0000000007%. They are now
+authored at the scale everything else is, one entry being the planetary network rather than the
+building, anchored so a determined build-out roughly *matches* the population's own thinking
+(~47% of the total at the sandbox's build) rather than dwarfing it.
+
 ### Time and speed
 
-`SolarSystem.seconds_per_day` is the one dial. `TIMESCALE_BASE` (0.25 s per game-day) never
-changes; the player picks a multiplier from `Game.SPEED_TIERS`, ten rungs from 1× to 10⁹×, each
-unlocked by reaching a year. Below `FAST_THRESHOLD` the game stops simulating days at all.
+`SolarSystem.seconds_per_day` is the one dial. `SolarSystem.TIMESCALE_BASE` (0.25 s per game-day)
+never changes; the player picks a multiplier from `Game.SPEED_TIERS`, ten rungs from 1× to 10⁹×,
+each unlocked by reaching a year. Below `FAST_THRESHOLD` the game stops simulating days at all.
+
+**Above `ORBIT_BLUR_ABOVE_MULT` (100×) the solar system stops being drawn body by body.** A planet
+crosses its whole year between two frames at that speed, so the dot the player sees sits at an
+essentially random point on its orbit. Past the threshold the bodies hide and each draws a
+translucent ring (`Planet._blur_torus`) — the honest picture of something moving too fast to
+resolve. Pausing, or slowing down, brings them straight back.
+
+Three things make this reliable, and all three were bugs first:
+
+- `seconds_per_day` has a setter that re-derives `solar_system_active`, so the state cannot drift
+  from the speed however the speed was set — including code that assigns it directly rather than
+  going through the speed ladder.
+- `paused` and `ui_paused` have setters that emit `paused_changed`. Thirteen places wrote them
+  directly and only five emitted, which left bodies holding whatever visibility they had when the
+  last signal happened to fire.
+- The cutoff was a **year** (`ORBIT_FREEZE_YEAR`, 1 000 000), from when the timescale was a fixed
+  super-linear function of the date so "late" and "fast" were the same thing. It was also one-way:
+  once a run passed the year, the bodies never came back however far it slowed down.
 
 ---
 
@@ -163,10 +223,21 @@ roster. `asteroid_belt.gd` extends it. `init_planets.gd` draws the Dyson swarm.
 `space_power_infrastructure` is researched. Its orbital lanes hold the swarm's support structures
 and everything in §5.
 
-**Textures** are SVG, rasterised at import to 2048×1024. `planet_polar_blur.gdshader` computes
-each pixel's map coordinates from its direction rather than the mesh's UVs — which is what stops
-the pole of a sphere mesh smearing — and softens texel crowding near the poles.
-`body_texture_hires.gd` re-rasterises the *selected* body at 4096×2048 on a worker thread.
+**Textures** are SVG, rasterised at import to 4096×2048 and VRAM-compressed to BPTC (BC7).
+`planet_polar_blur.gdshader` computes each pixel's map coordinates from its direction rather than
+the mesh's UVs — which is what stops the pole of a sphere mesh smearing — and softens texel
+crowding near the poles.
+
+All thirteen maps together cost **139 MB** of texture memory. They were previously 2048×1024 and
+*uncompressed* (12 of 13 at `compress/mode=0`, i.e. RGBA8 at 4 bytes a pixel), which cost 129 MB —
+so quadrupling the pixels cost 9 MB, because the compression more than paid for it. BC7 error on
+this content is under 1/255 mean even on the gas giants, where block artefacts would show worst.
+
+There used to be a runtime LOD swap (`body_texture_hires.gd`) that re-rasterised the *selected*
+body at twice its imported size on a worker thread, to avoid paying for every body at 2× at once.
+With the imports at 4096 that swap was producing 8192×4096 **uncompressed** textures — 171 MB per
+click, more than every map in the game costs together — so it was removed. If a per-body LOD is
+ever wanted again, it has to compress what it produces.
 
 ---
 
@@ -253,6 +324,89 @@ polity, and a government past `POLITY_SPLIT_SYSTEMS` = 40 spawns a breakaway sta
 
 Expansion and war both sample candidates (`ALIEN_SPREAD_SAMPLE` = 32) rather than scanning
 everything, and cap work per call. Without that, a filled galaxy costs seconds per tick.
+
+### Salvos
+
+Firing N missiles appends N records to `interstellar_attacks` — they are N real rounds, each
+resolving on arrival. For *drawing*, `refresh_star_map` groups them by what defines a salvo
+(target, kind, launch year, arrival year) into one display entry with a `count`, and the map draws
+one track labelled `xN`. Ungrouped, every round drew at exactly the same place, so ten missiles
+were ten identical strokes on identical pixels — visible only as overdraw, and ten times the work
+for one line. `incoming_attacks` is grouped the same way.
+
+Labels step clear of one another (`_salvo_label_pos`, reset each `_draw`): salvos sent a year
+apart on a century-long flight sit almost on top of each other, and their counts ran together into
+one unreadable number.
+
+`_check_interstellar_attacks` groups arrivals the same way — by target and weapon — applies the
+effect once and announces once with the count. Resolving round by round told the wrong story: the
+first arrival erased the system, so every round after it reported striking *empty space*. Ten
+missiles read as one hit and nine misses, and since the popup queue keeps the most recent few
+(`_process` trims to 5), the cards the player actually saw were the misses. Whether anything was
+there is now answered for a target **before** anything is erased, so every weapon group arriving
+that year tells the same truth. `incoming_attacks` already accumulated into one event and was left
+alone.
+
+### Events that are places
+
+`Game._announce()` takes an optional `extra` dictionary merged into the notification. A `"star"`
+key makes the timeline card clickable: `TimelineCanvas` wires the card's `gui_input`, the click
+travels up through `TimelinePanel.star_focus_requested` to `Game._on_timeline_star_focus`, which
+opens the star map via `SidebarControl.show_star_map()` (an outright open, not the sidebar
+button's toggle) and calls `StarMapPanel.focus_star()`.
+
+`focus_star()` selects the object and brings it into view. The map is a Sol-centred log-radial
+orrery with no pan, so that means setting `_zoom` to put the object's log radius at
+`FOCUS_VIEW_FRAC` of the view radius, and turning `_yaw` so it sits out along screen-right rather
+than behind Sol's glyph at the centre. Pitch is left alone — it is how the player has chosen to
+look at the galactic plane.
+
+Timeline cards are not saved, so this only applies to events raised in the current session.
+
+### The autonomous swarm
+
+Once `relativistic_navigation` and `self_replicating_industry` are researched, probes replicate on
+their own: each arrival founds a colony, is added to `_vn_seeds`, and launches `VN_REPLICATE_COUNT`
+more from where it landed. `_vn_resume()` revisits existing lineages round-robin so a branch that
+hit the in-flight cap is not finished for good.
+
+**A colony surveys from where it is.** `_nearest_uncolonised()` searches the neighbourhood
+generated around the colony (`VN_SURVEY_LY`, via `StarChunks.stars_near`) *as well as* the
+Sol-resolved list. Searching only the latter — which is bounded by the player's telescopes and
+trimmed to the nearest `MAX_RESOLVED` to **Sol** — meant a colony could only target stars visible
+from Earth, so the swarm saturated the observation range and stopped: 434 ly against a 467 ly
+range, held for fourteen thousand years. The two sources must not double-count the home cell,
+which the procedural field owns, so generated stars inside it are skipped.
+
+Beyond `DETAILED_RADIUS_LY` (2500 ly) arrivals stop becoming individual worlds and fold into
+statistical regions instead, which then spread on their own.
+
+**There is no cap on how many probes may be in flight.** There was — `VN_MAX_INFLIGHT`, twelve —
+and it was the whole throughput of the swarm however large it grew, so expansion ran flat (in
+fact decaying, as flights lengthened) at a few hundred stars per thousand years instead of
+compounding; and a colony that happened to arrive while those twelve were out launched nothing at
+all and was never revisited. After fifteen thousand years, 369 colonies had never seeded anything.
+
+What is bounded now is *work*, not population: `_vn_pending` is a queue of lineages waiting to
+replicate, worked through under a **time** budget (`VN_LAUNCH_MS`). A lineage that does not get
+its turn keeps it. The budget is time rather than a count because a replication costs anywhere
+from under a millisecond (frontier colony, empty sky) to fifteen (deep inside the bubble, where
+the search must look everywhere to conclude there is nowhere to go).
+
+Four things make it affordable at tens of thousands of colonies, each of which was a bug first:
+
+- The queue is worked **before** the arrival loop's early return. Working it only on the way out
+  meant a swarm with nothing currently aloft never launched again — no arrival to trigger a
+  launch, no launch to produce an arrival. A permanent dead stop.
+- A lineage that finds nowhere to go is **retired** from `_vn_seeds`. Colonisation never
+  reverses, so it will never have anywhere to go again; without this, the settled interior was
+  re-searched forever.
+- `_nearest_uncolonised` walks a spatial grid (`_star_grid`) rather than the whole resolved list,
+  takes the caller's en-route set rather than rebuilding it per call, and uses the maintained
+  `_col_star_set` rather than rebuilding `taken` from `colonized_stars` — that last one alone was
+  a quarter of a million dictionary inserts per tick at sixteen thousand colonies.
+- The local chunk survey is skipped when the colony is inside the home cell, where the procedural
+  field already owns the volume and every generated star would be rejected anyway.
 
 ### Reaching it
 

@@ -72,8 +72,8 @@ const STELLAR_LEVERS: Array = [
 
 ## Collectors in the Dyson swarm.  The swarm's real cap is Game._swarm_max(), which is lane
 ## geometry rather than a constant, so it cannot be read from here — tests/verify_sandbox.gd
-## asserts this still matches it.
-const SWARM_COLLECTORS: int = 1409
+## asserts this still matches it.  It was 1409 until the lane spacing was halved.
+const SWARM_COLLECTORS: int = 1116
 
 ## Write the sandbox save to disk (creating user://saves/ if needed).
 static func write(path: String = SAVE_PATH) -> void:

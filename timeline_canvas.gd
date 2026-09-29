@@ -17,6 +17,8 @@ extends Control
 
 ## Emitted whenever the card layout or the scale changes, so the ruler can redraw.
 signal layout_changed
+## A card carrying a "star" was clicked: the player wants to be taken to it on the star map.
+signal star_focus_requested(star_name: String)
 
 # ── Scale ──────────────────────────────────────────────────────────────────────
 ## The run's first year (the game starts on 1 January 1945): the left edge of the axis.
@@ -57,6 +59,10 @@ var _current_year: int = START_YEAR
 ## Game events added at runtime.  Bounded so a deep-time flood of alerts can't grow the rebuild
 ## cost without limit — the oldest live events fall off; the fixed history events never do.
 var _live_events: Array = []
+## Events the civilisation can SEE COMING, replaced wholesale on every refresh rather than
+## accumulated: a forecast is a current statement about the future, not a record of the past, so
+## yesterday's projection must not linger beside today's.
+var _forecast_events: Array = []
 var _live_ids: Dictionary = {}     # id → true, for O(1) duplicate rejection
 var _layout_dirty: bool = false
 var _rebuild_accum: float = 0.0
@@ -188,11 +194,12 @@ static func cat_color(ev: Dictionary) -> Color:
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
-## Every event, fixed history and live, oldest first.
+## Every event, fixed history, live, and projected, oldest first.
 func _all_events() -> Array:
 	var combined: Array = []
 	combined.append_array(TimelineEvents.EVENTS)
 	combined.append_array(_live_events)
+	combined.append_array(_forecast_events)
 	combined.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return float(a["year"]) < float(b["year"]))
 	return combined
@@ -331,11 +338,27 @@ func _make_card(ev: Dictionary, cx: float, cy: float, ch: float) -> void:
 	# PASS, not STOP: the card shows its tooltip, but the wheel still reaches the canvas and pans.
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	panel.tooltip_text = "%s — %s\n\n%s" % [fmt_year(float(ev["year"])), str(ev.get("title", "")), str(ev.get("desc", ""))]
+	# An event that names a star is a place, not just a notice: clicking the card goes there.
+	var star: String = str(ev.get("star", ""))
+	if star != "":
+		panel.tooltip_text += "\n\nClick to show %s on the star map." % star
+		panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		panel.gui_input.connect(func(e: InputEvent) -> void:
+			if e is InputEventMouseButton and (e as InputEventMouseButton).pressed \
+					and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+				star_focus_requested.emit(star)
+				accept_event())
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.12, 0.12, 0.17)
 	style.border_color = col
 	style.set_border_width_all(int(BORDER))
 	style.set_corner_radius_all(4)
+	# A projection is not a record.  Drawn hollow and dimmed so a glance down the axis separates
+	# what happened from what is merely expected, without having to read the dates.
+	if bool(ev.get("forecast", false)):
+		style.bg_color = Color(0.09, 0.09, 0.13, 0.85)
+		style.border_color = Color(col.r, col.g, col.b, 0.55)
+		panel.modulate = Color(1.0, 1.0, 1.0, 0.82)
 	panel.add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
@@ -460,6 +483,21 @@ func add_event(ev: Dictionary) -> void:
 		var did: String = dropped.get("id", "")
 		if did != "":
 			_live_ids.erase(did)
+	_layout_dirty = true
+
+
+## Replace what the civilisation can see coming.  Nothing is added if the list is unchanged, so
+## a forecast that has not moved does not rebuild the card tree every refresh.
+func set_forecast_events(events: Array) -> void:
+	if _forecast_events.size() == events.size():
+		var same: bool = true
+		for i in range(events.size()):
+			if str(events[i].get("id", "")) != str(_forecast_events[i].get("id", "")):
+				same = false
+				break
+		if same:
+			return
+	_forecast_events = events
 	_layout_dirty = true
 
 

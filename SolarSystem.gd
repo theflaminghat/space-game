@@ -1,14 +1,47 @@
 extends Node
 
-## In-game year at which orbital motion stops and all non-star bodies are hidden.
-## Past this threshold the game runs at extreme fast-forward; individual planet
-## positions are meaningless and the simulation saves the CPU by not computing them.
-## Planets reappear whenever the game is paused so the player can still interact.
-const ORBIT_FREEZE_YEAR: int = 1_000_000
+## Real seconds per game-day at 1x.  The one fixed rate the whole clock is built on; the speed
+## ladder multiplies it.  Lives here rather than in Game because it is a property of the clock,
+## and because the blur threshold below is expressed against it.
+const TIMESCALE_BASE: float = 0.25
 
-var seconds_per_day: float = 0.1
-var paused: bool = false
-var ui_paused: bool = false
+## Fastest speed at which individual orbital positions are still drawn.
+##
+## Above this the bodies whip round their orbits far faster than a frame can show — a planet
+## crosses its whole year between one frame and the next, so the dot the player sees is at an
+## essentially random point on its orbit and reads as noise.  Past it the bodies are hidden and
+## each draws a translucent ring instead (Planet._blur_torus): the honest picture of something
+## moving too fast to resolve.  They come back the moment the player pauses, or slows down.
+##
+## This used to be a YEAR — ORBIT_FREEZE_YEAR, 1 000 000 — from when the timescale was a fixed
+## super-linear function of the date, so "late" and "fast" were the same thing.  They are not any
+## more: the player chooses the speed, so the cutoff has to be the speed.  It was also one-way,
+## and never restored the bodies when the run slowed back down.
+const ORBIT_BLUR_ABOVE_MULT: float = 100.0
+
+## Real seconds per game-day.  Assigning it re-derives whether orbits are still worth drawing,
+## so no caller has to remember to — including one that sets it directly rather than through the
+## speed ladder.
+var seconds_per_day: float = 0.1:
+	set(v):
+		seconds_per_day = v
+		_refresh_orbit_rendering()
+## The two pause flags.  Both emit paused_changed when they actually change, so a caller cannot
+## pause or unpause without the bodies hearing about it: thirteen places wrote these directly and
+## only five remembered to emit, which left planets holding whatever visibility they had when the
+## last signal happened to fire.
+var paused: bool = false:
+	set(v):
+		if paused == v:
+			return
+		paused = v
+		paused_changed.emit()
+var ui_paused: bool = false:
+	set(v):
+		if ui_paused == v:
+			return
+		ui_paused = v
+		paused_changed.emit()
 
 ## Current in-game year — written by Game.gd each year tick so any node can
 ## read it without depending on Game directly.
@@ -20,7 +53,8 @@ var current_year: int = 1945
 ## time).  See Planet._snap_to_year / Planet.compute_anchor_year.
 var snap_year: float = 1945.0
 
-## False once the year passes ORBIT_FREEZE_YEAR.  Planets watch this via signals.
+## False while the run is faster than ORBIT_BLUR_ABOVE_MULT, i.e. while individual orbital
+## positions are not worth drawing.  Planets watch this via signals.
 var solar_system_active: bool = true
 
 ## Emitted when solar_system_active flips.
@@ -275,13 +309,11 @@ func insolation_at_earth(year: float = NAN) -> float:
 
 
 func toggle_pause() -> void:
-	paused = !paused
-	paused_changed.emit()
+	paused = !paused      # the setter emits paused_changed
 
 
 func toggle_ui_pause() -> void:
 	ui_paused = !ui_paused
-	paused_changed.emit()
 
 
 ## Call this instead of writing solar_system_active directly so the signal fires.
@@ -290,3 +322,21 @@ func set_solar_system_active(v: bool) -> void:
 		return
 	solar_system_active = v
 	active_changed.emit()
+
+
+## The current speed as a multiple of the base rate: 1, 100, 1e9.
+func speed_multiplier() -> float:
+	return TIMESCALE_BASE / maxf(seconds_per_day, 1.0e-12)
+
+
+## Whether individual orbital positions are still worth drawing at the current speed.
+## ORBIT_BLUR_ABOVE_MULT itself still draws; anything faster does not.  The small margin absorbs
+## the float division above, so the rung that IS 100x is never judged to be 100.000001x.
+func orbits_resolvable() -> bool:
+	return speed_multiplier() <= ORBIT_BLUR_ABOVE_MULT * 1.001
+
+
+## Re-derive the orbit rendering state from the current speed.  Fires active_changed when it
+## flips, which is what the bodies listen to.
+func _refresh_orbit_rendering() -> void:
+	set_solar_system_active(orbits_resolvable())

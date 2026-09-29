@@ -23,7 +23,7 @@ const EARTH_ORBIT_DAYS:   float = 365.25
 ## one lane, and once a lane is full new arrivals spill into the next lane.
 const SWARM_LANES:    int   = 18    # more lanes, each packed with as many panels as fit
 const SWARM_INNER_AU: float = 0.10   # hugs the Sun, inside Mercury's orbit
-const SWARM_OUTER_AU: float = 0.26
+const SWARM_OUTER_AU: float = 0.18   # KEEP IN SYNC with Game.SWARM_OUTER_AU
 const PANEL_W:    float = 0.30   # collector panel width (game units)
 const PANEL_THIN: float = 0.04   # panel thickness
 ## Arc length each panel occupies on its ring (panel width + a clear gap), so a lane fits

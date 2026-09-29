@@ -36,6 +36,16 @@ func _run() -> void:
 	check(g.solar_satellites_deployed == g._swarm_max(),
 		"the swarm loads full: %d of %d" % [g.solar_satellites_deployed, g._swarm_max()])
 
+	# The lane geometry is written out twice — Game computes the capacity, init_planets.gd draws
+	# the lanes — and the two constants are kept in sync by hand.  If they drift, Game hands out
+	# slots the renderer has nowhere to put.
+	# init_planets.gd is the script ON WorldRoot/Planets, not a child of it.
+	var swarm_node: Node = g.get_node("WorldRoot/Planets")
+	check(swarm_node.has_method("get_swarm_max"), "the swarm renderer is where it is expected")
+	check(int(swarm_node.get_swarm_max()) == g._swarm_max(),
+		"Game and the renderer agree on the swarm cap: %d vs %d" % [
+			int(swarm_node.get_swarm_max()), g._swarm_max()])
+
 	# ── Everything that can stand in solar orbit is standing there ──
 	var U = load("res://unlocks.gd")
 	var missing: Array = []

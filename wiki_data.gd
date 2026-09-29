@@ -687,7 +687,7 @@ static func _mechanics_page(key: String, game: Node) -> String:
 				t += _li("[b]%s[/b] — %s, %s." % [
 					str(tier["label"]), g.speed_pace_text(float(tier["mult"])), when])
 			t += _li("Below %s s per day the simulation advances whole years per frame and the calendar shows years only." % _n(g.FAST_THRESHOLD))
-			t += _li("Past year %s planetary orbits freeze and the bodies are hidden while time runs; pausing shows them again." % _n(float(SolarSystem.ORBIT_FREEZE_YEAR)))
+			t += _li("Above %sx the planets cross their orbits faster than a frame can show, so the bodies are hidden and each orbit is drawn as a blurred ring instead. Pausing — or slowing back down — brings them back." % _n(SolarSystem.ORBIT_BLUR_ABOVE_MULT))
 			t += _li("Every flow — production, burn, growth, decay — is integrated on game-days, so results are the same at any speed.")
 		"energy":
 			t += _p("Generation is measured in watts and added to one civilisation-wide reserve every game-day, so the stored unit is the watt-day (displayed as J). Building costs, launches, laser shots, transmissions and interstellar flights are paid from the reserve; it cannot go below zero.")

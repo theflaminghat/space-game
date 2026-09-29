@@ -752,10 +752,15 @@ const ZOOM_STEP: float = 1.12
 const ZOOM_MIN:  float = 0.4
 const ZOOM_MAX:  float = 80.0    # deep zoom needed: the scale spans ~10 decades of ly
 const PICK_PX:   float = 16.0    # click tolerance for selecting a star
-## How far the launch panel sits above the bottom edge of the star map.  Small — the panel is
-## pinned near the bottom and everything it gains extends upward from there.
-const LAUNCH_UI_BOTTOM_GAP: float = 18.0
-## Fixed width, so the wrapping info text cannot resize the panel horizontally.
+## How far the launch panel is inset from the bottom and right edges of the star map.
+##
+## One constant for both, so the corner stays even and the two cannot drift apart.  The panel is
+## bound to those two edges and grows up and to the left, so this is the only position it has —
+## everything it gains extends away from the corner.
+const LAUNCH_UI_GAP: float = 10.0
+## Minimum width.  The wrapping info text is held to this so it cannot squeeze the panel thin,
+## but a button whose label is longer — "Fire missiles…  (999 999 987 in stock)" — pushes the
+## left edge further out rather than being cut off.
 const LAUNCH_UI_WIDTH: float = 384.0
 
 const FRAME_PICK_PX: float = 26.0   # right-click tolerance for landmark/galaxy reference frames
@@ -1546,16 +1551,19 @@ func _build_launch_ui() -> void:
 	# empty one.  Anchoring top and bottom together at the bottom edge and growing toward BEGIN
 	# lets the layout push the top edge up by exactly the content's height.
 	_launch_ui.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	# Fixed width so the info text (which wraps) can't resize the panel horizontally.
+	# LAUNCH_UI_WIDTH is now a FLOOR, not a cap: pinning both horizontal offsets fixed the panel
+	# at exactly that width however long its buttons were, so a stock count ran off the edge.
 	_launch_ui.custom_minimum_size = Vector2(LAUNCH_UI_WIDTH, 0)
-	# Inset from the right edge by the SAME margin it sits above the bottom, so the panel is
-	# tucked into the corner evenly instead of hanging 156 px in from one side and 18 from the
-	# other.  Both edges are driven from LAUNCH_UI_BOTTOM_GAP, so they cannot drift apart.
-	_launch_ui.offset_right = -LAUNCH_UI_BOTTOM_GAP
-	_launch_ui.offset_left = -LAUNCH_UI_BOTTOM_GAP - LAUNCH_UI_WIDTH
+	# Bound to the right edge and grown leftward, the same trick the vertical axis uses below:
+	# both offsets meet at one point and the grow direction decides which edge the content moves.
+	# The panel's right edge is therefore always LAUNCH_UI_GAP in from the map's, whatever is in
+	# it, and everything it gains extends away from that edge.
+	_launch_ui.offset_right = -LAUNCH_UI_GAP
+	_launch_ui.offset_left = -LAUNCH_UI_GAP
+	_launch_ui.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	# Zero height at the bottom margin; grow_vertical expands the TOP edge to fit the content.
-	_launch_ui.offset_top = -LAUNCH_UI_BOTTOM_GAP
-	_launch_ui.offset_bottom = -LAUNCH_UI_BOTTOM_GAP
+	_launch_ui.offset_top = -LAUNCH_UI_GAP
+	_launch_ui.offset_bottom = -LAUNCH_UI_GAP
 	_launch_ui.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_launch_ui.hide()
 	add_child(_launch_ui)
@@ -2371,6 +2379,56 @@ func _fmt_years(y: float) -> String:
 		return "%d yr" % int(round(y))
 	return "<1 yr"
 
+## Bring a star (or a cluster) into view and select it, as if the player had clicked it.
+##
+## The map is a Sol-centred orrery on a log-radial scale with no pan, so "go there" means two
+## things: zoom out or in until the object's log radius sits comfortably inside the view, and
+## turn the view so it is not hiding behind Sol at the centre.  Returns false for a name the map
+## cannot resolve — a star outside what is currently rendered — and changes nothing in that case.
+func focus_star(star_name: String) -> bool:
+	if star_name == "":
+		return false
+	var target := Vector3.ZERO
+	var idx: int = _star_index(star_name)
+	if idx >= 0:
+		_selected = idx
+		_selected_cluster = -1
+		target = _rel(all_stars()[idx]["pos"])
+	else:
+		var clusters: Array = star_clusters()
+		var found: int = -1
+		for ci in range(clusters.size()):
+			if str(clusters[ci]["name"]) == star_name:
+				found = ci
+				break
+		if found < 0:
+			return false
+		_selected = -1
+		_selected_cluster = found
+		target = _rel(clusters[found]["pos"])
+
+	var radius: float = target.length()
+	if radius > 1.0e-6:
+		# Turn only in yaw, leaving the player's chosen tilt alone: the pitch is how they have
+		# decided to look at the galactic plane, and wrenching it flat to centre one star would
+		# throw away the view they set up.  This yaw puts the object out along screen-right,
+		# which is as far from Sol's glyph at the centre as the object can be placed.
+		var u: Vector3 = target / radius
+		if absf(u.x) > 1.0e-9 or absf(u.y) > 1.0e-9:
+			_yaw = atan2(-u.x, u.y)
+		# Sit it at roughly two thirds of the way out from the centre: comfortably clear of Sol,
+		# comfortably inside the edge, and with its neighbourhood on screen around it.
+		_zoom = clampf(_max_display_radius() / (radius / FOCUS_VIEW_FRAC), ZOOM_MIN, ZOOM_MAX)
+	_update_launch_ui()
+	queue_redraw()
+	star_selected.emit(selected_star())
+	return true
+
+
+## Where a focused object is placed, as a fraction of the view radius.
+const FOCUS_VIEW_FRAC: float = 0.66
+
+
 ## Index of a star by name (-1 if not found).
 func _star_index(name: String) -> int:
 	all_stars()   # ensures the catalogue and its index are current
@@ -2608,7 +2666,8 @@ func _star_screen_radius(lp: Vector3, b: Basis, star_maxdr: float, st: Dictionar
 
 ## A laser firing: a faint white beam-trail with a bright white rectangular pulse racing
 ## to the target.  The pulse grows with the energy (`power`) channelled into the shot.
-func _draw_laser_pulse(from: Vector2, to: Vector2, progress: float, power: float) -> void:
+func _draw_laser_pulse(from: Vector2, to: Vector2, progress: float, power: float,
+		count: int = 1) -> void:
 	var d := to - from
 	var total := d.length()
 	if total < 1.0:
@@ -2634,9 +2693,11 @@ func _draw_laser_pulse(from: Vector2, to: Vector2, progress: float, power: float
 	])
 	draw_colored_polygon(glow, Color(1.0, 1.0, 1.0, 0.25))
 	draw_colored_polygon(rect, Color(1.0, 1.0, 1.0, 0.98))
+	_draw_salvo_count(head, dir, count, Color(1.0, 1.0, 0.85))
 
 ## A von Neumann berserker swarm: a red dashed trail with a menacing red marker.
-func _draw_berserker_swarm(from: Vector2, to: Vector2, progress: float) -> void:
+
+func _draw_berserker_swarm(from: Vector2, to: Vector2, progress: float, count: int = 1) -> void:
 	var d := to - from
 	var total := d.length()
 	if total < 1.0:
@@ -2653,10 +2714,11 @@ func _draw_berserker_swarm(from: Vector2, to: Vector2, progress: float) -> void:
 	var head := from + dir * (total * clampf(progress, 0.0, 1.0))
 	draw_circle(head, 6.0, Color(1.0, 0.30, 0.30, 0.25))
 	draw_circle(head, 3.5, Color(1.0, 0.45, 0.35, 0.95))
+	_draw_salvo_count(head, dir, count, Color(1.0, 0.55, 0.45))
 
 ## Incoming relativistic missile: a faint red trajectory from the hostile source to the
 ## target, with a sharp bright head and a short trailing streak at the missile's progress.
-func _draw_incoming_missile(from: Vector2, to: Vector2, progress: float) -> void:
+func _draw_incoming_missile(from: Vector2, to: Vector2, progress: float, count: int = 1) -> void:
 	var d := to - from
 	var total := d.length()
 	if total < 1.0:
@@ -2671,8 +2733,49 @@ func _draw_incoming_missile(from: Vector2, to: Vector2, progress: float) -> void
 	draw_line(tail, head, Color(1.0, 0.35, 0.28, 0.95), 2.5, true)
 	draw_circle(head, 4.5, Color(1.0, 0.55, 0.35, 0.30))
 	draw_circle(head, 2.4, Color(1.0, 0.85, 0.60, 1.0))
+	_draw_salvo_count(head, dir, count, Color(1.0, 0.75, 0.55))
 
 # ── Projection ────────────────────────────────────────────────────────────────
+
+
+## Where salvo labels have already been placed this frame, so a later one can step clear of
+## them.  Cleared at the top of _draw.
+var _salvo_label_pos: Array[Vector2] = []
+
+
+## "x N" beside a salvo's head when it is more than one round.
+##
+## A salvo is drawn as a single track: every round in it shares one flight plan, so drawing each
+## separately put identical strokes on identical pixels and the player could not tell ten from
+## one.  The number is what actually carries that information, so it is written where they are
+## already looking — just off the head, square to the track so it never sits on the line.
+func _draw_salvo_count(head: Vector2, dir: Vector2, count: int, col: Color) -> void:
+	if count <= 1:
+		return
+	var perp := Vector2(-dir.y, dir.x)
+	# Always place the label on the upper side, whichever way the track runs, so a screenful of
+	# salvos reads consistently instead of flipping with the heading.
+	if perp.y > 0.0:
+		perp = -perp
+	var at: Vector2 = head + perp * 9.0 + dir * 4.0
+	# Salvos sent a year apart on a century-long flight sit almost on top of one another, and
+	# their labels ran together into one unreadable number.  Step a colliding label further out
+	# along the track's perpendicular until it is clear of the ones already placed.
+	for _try in range(6):
+		var clash: bool = false
+		for placed: Vector2 in _salvo_label_pos:
+			if absf(placed.x - at.x) < 22.0 and absf(placed.y - at.y) < 11.0:
+				clash = true
+				break
+		if not clash:
+			break
+		at += perp * 11.0
+	_salvo_label_pos.append(at)
+	var text: String = "x%d" % count
+	# A dark backing so the digits stay readable over a crowded star field.
+	draw_string(_font, at + Vector2(1.0, 1.0), text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.0, 0.0, 0.0, 0.75))
+	draw_string(_font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
 
 ## Orbit-camera basis from azimuth (_yaw) and elevation (_pitch), with the star
 ## coordinate Z axis as "up".  Dragging horizontally spins the map about that
@@ -2824,6 +2927,7 @@ func _depth(p: Vector3, b: Basis) -> float:
 # ── Drawing ───────────────────────────────────────────────────────────────────
 
 func _draw() -> void:
+	_salvo_label_pos.clear()
 	var full := Rect2(Vector2.ZERO, size)
 	draw_rect(full, BG_COLOR)
 	draw_rect(full, Color(0.4, 0.5, 0.7, 0.25), false, 1.0)
@@ -3185,13 +3289,14 @@ func _draw() -> void:
 			continue
 		var adst := _project(_rel(apos[0]), b, center, scale)
 		var ap := float(atk.get("progress", 0.0))
+		var an: int = int(atk.get("count", 1))
 		match str(atk.get("kind", "")):
 			"laser":
-				_draw_laser_pulse(sol_px, adst, ap, float(atk.get("power", 1.0)))
+				_draw_laser_pulse(sol_px, adst, ap, float(atk.get("power", 1.0)), an)
 			"missile":
-				_draw_incoming_missile(sol_px, adst, ap)   # relativistic kinetic missile
+				_draw_incoming_missile(sol_px, adst, ap, an)   # relativistic kinetic missile
 			_:
-				_draw_berserker_swarm(sol_px, adst, ap)
+				_draw_berserker_swarm(sol_px, adst, ap, an)
 
 	# Incoming relativistic missiles: a red streak from the hostile source toward the target
 	# (Sol, or one of our colonies), with a bright head at the missile's progress.
@@ -3207,13 +3312,14 @@ func _draw() -> void:
 			if _target_pos(tgt_name, itg):
 				tgt_px = _project(_rel(itg[0]), b, center, scale)
 		var ip := float(inc.get("progress", 0.0))
+		var inn: int = int(inc.get("count", 1))
 		match str(inc.get("kind", "missile")):
 			"berserker":
-				_draw_berserker_swarm(src_px, tgt_px, ip)   # slow red self-replicating swarm
+				_draw_berserker_swarm(src_px, tgt_px, ip, inn)   # slow red replicating swarm
 			"laser":
-				_draw_laser_pulse(src_px, tgt_px, ip, 1.0)   # white light-speed pulse
+				_draw_laser_pulse(src_px, tgt_px, ip, 1.0, inn)   # white light-speed pulse
 			_:
-				_draw_incoming_missile(src_px, tgt_px, ip)   # relativistic kinetic missile
+				_draw_incoming_missile(src_px, tgt_px, ip, inn)   # relativistic kinetic missile
 
 	# The Sun — rendered exactly like every other star (its live evolved state), at its position
 	# in the current reference frame (map centre only while the frame IS Sol).  A G2V, ~4.6 Gyr
