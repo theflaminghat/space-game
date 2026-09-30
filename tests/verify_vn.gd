@@ -127,5 +127,54 @@ func _run() -> void:
 		"an enclosed lineage is retired, not retried forever")
 	print("enclosed lineage %s retired: %s" % [subject, str(not g._vn_seeds.has(subject))])
 
+	# ── A cleared system goes to the colony nearest it ──
+	# Occupation reverses even though colonisation does not: our own weapons empty a system, and
+	# it becomes colonisable again.  Every colony near it retired long before that, back when the
+	# system was somebody else's and there was nowhere else to go — so without waking one, the
+	# nearest lineage still awake was out on the frontier and it flew hundreds of light-years
+	# past closer colonies to take it.
+	var victim := ""
+	var vd := INF
+	for st in g.star_factions.keys():
+		var d: float = g._star_pos(str(st)).length()
+		if d < vd:
+			vd = d
+			victim = str(st)
+	if victim != "":
+		var vpos: Vector3 = g._star_pos(victim)
+		var nearest := ""
+		var nd := INF
+		for cs in g.colonized_stars:
+			var d2: float = g._star_pos(str(cs)).distance_to(vpos)
+			if d2 < nd:
+				nd = d2
+				nearest = str(cs)
+		check(nearest != "", "there is a colony near the system we are about to clear")
+		# Clear it exactly as a strike does.
+		g.star_factions.erase(victim)
+		g._vn_freed.clear()
+		g._vn_freed.append(victim)
+		g.year += 1
+		g._check_interstellar_arrivals()
+		var claimer := ""
+		for m2 in g.interstellar_missions:
+			if str(m2.get("target", "")) == victim:
+				claimer = str(m2.get("origin", ""))
+				break
+		check(claimer != "", "the cleared system is claimed at once")
+		check(claimer == nearest,
+			"and by the colony nearest it (%s at %.1f ly), not one across the map (got %s)" % [
+				nearest, nd, claimer])
+		# NOT "and stays awake".  Having taken the freed system it usually has nowhere else to
+		# go — it is in the settled interior, which is why it was asleep — so the work queue
+		# retires it again in the same tick, correctly.  Expansion continues from the system it
+		# just claimed, once the probe arrives there; the probe is already in flight and does not
+		# depend on its sender staying awake.
+		var in_flight := false
+		for m3 in g.interstellar_missions:
+			if str(m3.get("target", "")) == victim and str(m3.get("origin", "")) == nearest:
+				in_flight = true
+		check(in_flight, "and the probe is genuinely under way from it")
+
 	print("FAILS: %d" % fails)
 	quit()

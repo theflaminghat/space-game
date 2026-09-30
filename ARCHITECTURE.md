@@ -104,6 +104,14 @@ Compute buys **foresight**: `Game.forecast_horizon_years()` is how many years ah
 civilisation can say what is coming, and `forecast_events()` is what it sees. Gated on
 `predictive_modeling`; shown as dimmed red cards ahead of the present marker on the timeline.
 
+**The player divides the compute.** `ComputePanel` (sidebar, "compute") sets
+`compute_forecast_share`; the horizon reads that share, and science reads
+`research_compute_share()` — the same FLOP cannot do both, so seeing further means researching
+slower. The share is inert until `predictive_modeling` is known, so it can never tax science in
+exchange for nothing, and it is capped at `FORECAST_MAX_SHARE` (90%) so research never stops
+entirely. It is saved. Without this the forecast was free and automatic: a readout of total
+compute with no decision attached.
+
 It is honest only because the catastrophe schedule is deterministic (see "Repeatable rolls").
 Every scheduled year, target and severity is a pure function of (galaxy_seed, tag, year), so a
 forecast is the same arithmetic the year itself will do, run early. Before the rolls were made
@@ -218,6 +226,17 @@ branch on, which defaults alone can never express.
 `planet.gd` draws and moves each body: Kepler orbits, cosmetic moons, rings, orbit lines, and
 `INFRA_LANES` — one ring per orbital structure type, with the instance count polled from the
 roster. `asteroid_belt.gd` extends it. `init_planets.gd` draws the Dyson swarm.
+
+**Everything in solar orbit sits inside Mercury's.** The lanes span 3.01 to 7.99 world units
+against a solar surface at 2.35 and Mercury's **perihelion** at 8.58 — perihelion, not the 10.47
+mean, because Mercury is eccentric enough (0.21) that a band sized to the mean would be swallowed
+once a year. The Dyson swarm shares the band at 3.05–5.30.
+
+Tightened that far, consecutive lanes are closer in radius than the structures are wide, so what
+keeps them clear of one another is the angle between their orbital **planes**, stepped by the
+golden angle (`INFRA_PLANE_ANGLE`) so no two consecutive lanes are alike. They were previously a
+narrow random ±0.3 rad, which only worked because the lanes were a quarter of a unit apart. This
+is the same trick the swarm uses to be a shell rather than a disk.
 
 **The Sun is a build site**, not a world: `_is_body_buildable("sun")` is true once
 `space_power_infrastructure` is researched. Its orbital lanes hold the swarm's support structures
@@ -370,6 +389,23 @@ their own: each arrival founds a colony, is added to `_vn_seeds`, and launches `
 more from where it landed. `_vn_resume()` revisits existing lineages round-robin so a branch that
 hit the in-flight cap is not finished for good.
 
+**Target choice is greedy, and deliberately left that way.** Each colony takes its own nearest
+unclaimed star and marks it en route, first-come-first-served by queue position — so a colony
+processed earlier can claim a star that a nearer one, not yet reached, would have been better
+placed to take. Measured over a 2 800-colony swarm: median probe flies 58 ly to a star another
+colony sits 26 ly from.
+
+Handing the claim to the nearer colony was tried and reverted. Deferral only pays if the colony
+deferred to actually goes, and here it usually does not — most "nearer" colonies are interior
+lineages that will not come up for thousands of years, so the star waits while the deferring
+lineage burns a slot in the time budget for nothing, and the flights that do happen get *longer*.
+Colonies 2808 → 1307, p99 flight 183 → 321 ly; restricting deferral to colonies queued to act the
+same tick recovered 118 of the 1501 lost. Fixing it properly needs global assignment — matching
+stars to colonies rather than letting colonies grab — which is a different algorithm with a real
+per-tick cost. `VN_HOP_LIMIT_LY` (250 ly) caps a single hop to an individual star as a guard rail;
+it measured as neutral on colonies and frontier, and **clusters are exempt**, since a cluster is
+the destination a swarm reaches precisely because nothing nearer is left.
+
 **A colony surveys from where it is.** `_nearest_uncolonised()` searches the neighbourhood
 generated around the colony (`VN_SURVEY_LY`, via `StarChunks.stars_near`) *as well as* the
 Sol-resolved list. Searching only the latter — which is bounded by the player's telescopes and
@@ -407,6 +443,30 @@ Four things make it affordable at tens of thousands of colonies, each of which w
   a quarter of a million dictionary inserts per tick at sixteen thousand colonies.
 - The local chunk survey is skipped when the colony is inside the home cell, where the procedural
   field already owns the volume and every generated star would be rejected anyway.
+
+### Clusters are not stars
+
+A cluster is a Voronoi territory of the home tile holding thousands of stars, too far to resolve
+one by one. It is settled a share at a time (`cluster_colonized`) and **inhabited** a share at a
+time (`cluster_aliens`) — the share seeded from the canon civilisation density over the cluster's
+own volume, scaled by how crowded the setup screen asked the galaxy to be (`alien_density_scale()`
+— "Alone" puts nobody in any cluster). `Game.is_cluster()` tells one from a star.
+
+**No diplomacy with a volume of space.** Trade and alliance are refused outright: there is no
+counterparty, only many. (They were already unavailable because a cluster never enters `_intel`;
+what would have enabled them is populating clusters with aliens, so the refusal is now explicit
+and carries a tooltip saying why.)
+
+Weapons work, because they hit a *share* rather than a system — `_resolve_cluster_strike()`:
+
+- **Relativistic missiles** each pick systems at random out of thousands. Most of a cluster is
+  empty rock, so most salvos find nobody, and the card says so. This is the honest answer at
+  cluster scale rather than a softened one: missiles are a system weapon.
+- **Berserkers** spread rather than strike, so what they take scales with how much there is to
+  eat (`cluster_alien_share` + `cluster_colonized`), a roll, and the number sent — with
+  diminishing returns, so more always takes more but never all: 1 seed ≈ 2%, 20 ≈ 35%, 100 ≈ 83%.
+  They are indiscriminate: the player's own share of that cluster burns with the rest.
+- **Lasers** are one beam at one point, and say so.
 
 ### Reaching it
 

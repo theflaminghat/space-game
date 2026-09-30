@@ -58,37 +58,41 @@ const MOON_TEXTURES := {
 ## lane around a gas giant, where there is no ground to stand on and everything built is hanging
 ## in vacuum by definition.  The Matter Depot has no lane at all — silos and bunkers are not
 ## orbital infrastructure anywhere, and solar orbit stores its matter in Orbital Vaults.
+## Golden angle (rad).  Stepping each successive lane's orbital plane by this spreads the planes
+## evenly over the sphere however many lanes there are, with no two consecutive ones alike.
+const INFRA_PLANE_ANGLE: float = 2.399963229728653
+
 const INFRA_LANES := [
-	{"type": "Orbital Laser",         "radius": 0.95, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
-	{"type": "Space Telescope",       "radius": 1.20, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
-	{"type": "Thermal Radiator",      "radius": 1.45, "color": Color(0.95, 0.75, 0.40), "mesh": "flat",
+	{"type": "Orbital Laser",         "radius": 0.721, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
+	{"type": "Space Telescope",       "radius": 0.786, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
+	{"type": "Thermal Radiator",      "radius": 0.851, "color": Color(0.95, 0.75, 0.40), "mesh": "flat",
 		"ground": true},
-	{"type": "Orbital Vault",         "radius": 1.70, "color": Color(0.72, 0.74, 0.80), "mesh": "box"},
-	{"type": "Orbital Battery",       "radius": 1.95, "color": Color(0.50, 0.95, 0.62), "mesh": "box"},
+	{"type": "Orbital Vault",         "radius": 0.917, "color": Color(0.72, 0.74, 0.80), "mesh": "box"},
+	{"type": "Orbital Battery",       "radius": 0.982, "color": Color(0.50, 0.95, 0.62), "mesh": "box"},
 	# Power link: receiving and transmitting apertures.
-	{"type": "Microwave Uplink",      "radius": 2.20, "color": Color(0.55, 0.80, 0.95), "mesh": "dish"},
-	{"type": "Orbital Rectenna",      "radius": 2.45, "color": Color(0.45, 0.75, 1.00), "mesh": "dish"},
-	{"type": "Power Relay Satellite", "radius": 2.70, "color": Color(0.70, 0.70, 1.00), "mesh": "dish"},
-	{"type": "Orbital Power Grid",    "radius": 2.95, "color": Color(0.60, 0.72, 1.00), "mesh": "flat"},
-	{"type": "Stellar Rectenna Grid", "radius": 3.20, "color": Color(0.40, 0.68, 1.00), "mesh": "flat"},
-	{"type": "Swarm Relay Network",   "radius": 3.45, "color": Color(0.78, 0.68, 1.00), "mesh": "dish"},
+	{"type": "Microwave Uplink",      "radius": 1.047, "color": Color(0.55, 0.80, 0.95), "mesh": "dish"},
+	{"type": "Orbital Rectenna",      "radius": 1.113, "color": Color(0.45, 0.75, 1.00), "mesh": "dish"},
+	{"type": "Power Relay Satellite", "radius": 1.178, "color": Color(0.70, 0.70, 1.00), "mesh": "dish"},
+	{"type": "Orbital Power Grid",    "radius": 1.243, "color": Color(0.60, 0.72, 1.00), "mesh": "flat"},
+	{"type": "Stellar Rectenna Grid", "radius": 1.308, "color": Color(0.40, 0.68, 1.00), "mesh": "flat"},
+	{"type": "Swarm Relay Network",   "radius": 1.374, "color": Color(0.78, 0.68, 1.00), "mesh": "dish"},
 	# Heat: the other half of any large power economy.
-	{"type": "Orbital Radiator Array","radius": 3.70, "color": Color(1.00, 0.70, 0.35), "mesh": "flat"},
-	{"type": "Radiator Swarm",        "radius": 3.95, "color": Color(1.00, 0.62, 0.30), "mesh": "flat"},
+	{"type": "Orbital Radiator Array","radius": 1.439, "color": Color(1.00, 0.70, 0.35), "mesh": "flat"},
+	{"type": "Radiator Swarm",        "radius": 1.504, "color": Color(1.00, 0.62, 0.30), "mesh": "flat"},
 	# Storage.
-	{"type": "Superconducting Storage Ring", "radius": 4.20, "color": Color(0.62, 0.90, 0.80),
+	{"type": "Superconducting Storage Ring", "radius": 1.569, "color": Color(0.62, 0.90, 0.80),
 		"mesh": "ring", "ground": true},
-	{"type": "Orbital Ring Store",    "radius": 4.45, "color": Color(0.55, 0.85, 0.78), "mesh": "ring"},
+	{"type": "Orbital Ring Store",    "radius": 1.635, "color": Color(0.55, 0.85, 0.78), "mesh": "ring"},
 	# People.
-	{"type": "Orbital Habitat",       "radius": 4.70, "color": Color(0.70, 0.95, 0.65), "mesh": "ring"},
+	{"type": "Orbital Habitat",       "radius": 1.700, "color": Color(0.70, 0.95, 0.65), "mesh": "ring"},
 	# Industry and its stores, flown out to a build site that has no ground.
-	{"type": "Orbital Construction Station", "radius": 1.08, "color": Color(0.85, 0.88, 0.95),
+	{"type": "Orbital Construction Station", "radius": 0.755, "color": Color(0.85, 0.88, 0.95),
 		"mesh": "box"},
 	# Stellar engineering: the lifters hang closest of anything here, because they have to.
-	{"type": "Star Lifter",           "radius": 0.80, "color": Color(1.00, 0.85, 0.45), "mesh": "dish"},
-	{"type": "Sunshade Constellation","radius": 0.88, "color": Color(0.70, 0.78, 0.95), "mesh": "flat"},
-	{"type": "Core Mixing Array",     "radius": 0.72, "color": Color(0.95, 0.60, 0.95), "mesh": "ring"},
-	{"type": "Shkadov Mirror",        "radius": 0.64, "color": Color(0.95, 0.95, 1.00), "mesh": "flat"},
+	{"type": "Star Lifter",           "radius": 0.682, "color": Color(1.00, 0.85, 0.45), "mesh": "dish"},
+	{"type": "Sunshade Constellation","radius": 0.703, "color": Color(0.70, 0.78, 0.95), "mesh": "flat"},
+	{"type": "Core Mixing Array",     "radius": 0.661, "color": Color(0.95, 0.60, 0.95), "mesh": "ring"},
+	{"type": "Shkadov Mirror",        "radius": 0.640, "color": Color(0.95, 0.95, 1.00), "mesh": "flat"},
 ]
 const INFRA_MAX_PER_LANE: int = 64   # cap per lane (MultiMesh instance budget)
 
@@ -797,7 +801,14 @@ func _create_infra_lanes() -> void:
 			"radius": float(spec["radius"]),
 			"phase":  rng.randf() * TAU,
 			"motion": rng.randf_range(0.15, 0.5) * (1.0 if rng.randf() < 0.5 else -1.0),
-			"incl":   rng.randf_range(-0.30, 0.30),
+			# Orbital planes spread over the WHOLE sphere, by the golden angle so consecutive
+			# lanes land nowhere near each other.  They used to sit in a narrow random band of
+			# +-0.3 rad, which was fine when the lanes were a quarter of a unit apart in radius
+			# and could not touch.  Tightened inside Mercury they are a sixteenth of a unit
+			# apart, closer than the structures themselves are wide, so what keeps them clear of
+			# one another is the angle between their planes rather than the gap between their
+			# radii — the same trick the Dyson swarm uses to be a shell instead of a disk.
+			"incl":   fposmod(float(_infra.size()) * INFRA_PLANE_ANGLE, PI),
 		})
 	_update_infra(0.0)
 

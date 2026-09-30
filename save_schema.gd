@@ -101,6 +101,7 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "automation_rules",   "custom": true},   # lives in the automation panel
 	{"key": "policies",           "custom": true},   # retired policies are dropped
 	{"key": "entropy_exported",   "kind": FLOAT, "default": 0.0},
+	{"key": "compute_forecast_share", "kind": FLOAT, "default": 0.0},
 	{"key": "atmospheric_co2",    "kind": DICT_FLOAT, "default": null},
 	{"key": "solar_satellites_deployed", "custom": true},  # migrated arrays add to it
 
@@ -137,6 +138,7 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "cluster_last_year", "prop": "_cluster_last_year", "kind": FLOAT,
 		"default": DEFAULT_YEAR},
 	{"key": "cluster_colonized", "kind": DICT_FLOAT, "default": null},
+	{"key": "cluster_aliens",    "kind": DICT_FLOAT, "default": null},
 	{"key": "infra_probed",      "prop": "_infra_probed", "kind": DICT_TRUE, "default": null},
 
 	# ── Neighbours ──

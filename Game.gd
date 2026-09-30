@@ -353,6 +353,21 @@ const VN_LAUNCH_MIN: int = 2
 ## from a set (see _col_star_set) the cost is linear and small, and the step runs once a frame
 ## rather than once a simulated year.
 const VN_REPLICATE_COUNT: int  = 2           # probes launched per successful arrival
+## Furthest a probe will be sent to an individual STAR.
+##
+## Without one, target choice was greedy and unbounded: a colony took its own nearest unclaimed
+## star at any range and marked it en route, locking out a colony that was genuinely closer and
+## had simply not been reached in the queue yet.  Measured over six thousand colonies, 29% of
+## probes in flight had been sent from substantially further than a colony that was already
+## nearer, and the mean flight ran a third longer than it needed to.
+##
+## CLUSTERS are exempt (see _finish_targets).  A cluster is what a probe reaches when individual
+## stars have run out — it is a destination of last resort by design, and capping the hop to one
+## would strand the swarm at the edge of the resolved sky with nowhere legal to go.
+var vn_hop_limit_ly: float = VN_HOP_LIMIT_LY
+## The shipped cap.  A var above rather than a bare const so the comparison harness can sweep it.
+const VN_HOP_LIMIT_LY: float = 250.0
+
 ## How far a colony surveys its OWN neighbourhood before sending the next generation.
 ## A probe that has landed is THERE: it can see the stars around it, which is the whole premise
 ## of an autonomous swarm.  Sized to hold a few hundred sampled stars at the modelled density,
@@ -525,6 +540,13 @@ var _vn_orders: Dictionary = {}
 ## inhabited), and saved, because without it a reloaded game would have a frontier that never
 ## moved again.
 var _vn_seeds: Dictionary = {}
+## Stars that stopped being somebody else's — destroyed by our weapons — and are now worth
+## colonising.  Drained a couple at a time by _vn_wake_near_freed.
+var _vn_freed: Array[String] = []
+## How many freed systems are matched to a colony per tick.  Each costs a scan of our holdings,
+## so it is deliberately small; freed systems are rare and none of them is in a hurry.
+const VN_WAKE_PER_TICK: int = 2
+
 ## Lineages that want to send the next generation and have not been worked through yet.  A
 ## queue, not a refusal: everything in it launches, just not necessarily this year.
 var _vn_pending: Array[String] = []
@@ -1108,6 +1130,7 @@ func start_new_game() -> void:
 	_vn_resume_idx = 0
 	_vn_pending.clear()
 	_vn_head = 0
+	_vn_freed.clear()
 	_vn_resume_year = -1.0e18
 	cluster_colonized = {}
 	keep_limits = {}        # no standing storage limits until the player sets one
@@ -1223,6 +1246,8 @@ func _ready() -> void:
 		sidebar.automation_panel.doctrine_changed.connect(_on_doctrine_changed)
 	if timeline_panel:
 		timeline_panel.star_focus_requested.connect(_on_timeline_star_focus)
+	if sidebar and sidebar.compute_panel:
+		sidebar.compute_panel.share_changed.connect(_on_compute_share_changed)
 	if sidebar and sidebar.star_map:
 		sidebar.star_map.colonize_requested.connect(_on_colonize_requested)
 		sidebar.star_map.laser_requested.connect(_on_laser_requested)
@@ -1866,6 +1891,8 @@ func _process(delta: float) -> void:
 				_extraction_page.set_extraction(current_planet, extraction_data(current_planet))
 			elif production_panel and production_panel.visible:
 				production_panel.set_planet(current_planet)   # no-op if the body didn't change
+		if sidebar and sidebar.compute_panel and sidebar.compute_panel.visible:
+			refresh_compute_panel()
 		# What the civilisation can see coming, on the timeline it is already looking at.
 		# Here rather than on the year tick: the horizon moves with COMPUTE, which changes when
 		# something is built, not when a year turns.
@@ -2015,6 +2042,71 @@ func _init_building_cache() -> void:
 	for r: Dictionary in RecipeData.RECIPES:
 		_recipe_cache[r["name"]] = r
 
+# ── Star clusters ─────────────────────────────────────────────────────────────
+#
+# A cluster is NOT a star, and the game should stop pretending it is.  It is a Voronoi territory
+# of the home tile holding thousands of stars, too far to resolve one by one: it is settled a
+# share at a time (cluster_colonized), and it is inhabited a share at a time too.
+#
+# That distinction decides what may be done to one.  There is no counterparty to trade with or
+# ally to — "the cluster" is not a polity, it is a volume of space containing many — so those
+# actions are refused rather than quietly doing something meaningless.  Weapons, by contrast,
+# work fine on a volume: they just hit a share of it rather than a system.
+
+## Share of each cluster's stars held by somebody else.  Seeded from the setup screen's choice of
+## how crowded the sky is, and reduced by anything the player does about it.
+var cluster_aliens: Dictionary = {}
+
+## How dense the neighbours are against the canon rate, from the setup screen.  "Alone" is zero
+## and puts nobody in any cluster; "Crowded" is a shade under twice the standard sky.
+const CANON_NEIGHBOURS: float = 6.0
+
+func alien_density_scale() -> float:
+	var nb: Dictionary = GameSession.choice("neighbours")
+	return maxf(float(nb.get("total", 6)), 0.0) / CANON_NEIGHBOURS
+
+
+## Whether a name is a cluster rather than a star.
+func is_cluster(name: String) -> bool:
+	return bool(_star_lookup(name).get("is_cluster", false))
+
+
+## The share of a cluster's stars that somebody else holds.
+##
+## Derived once from the canon civilisation density over the cluster's own territory — the same
+## 6-per-4.1e8 ly^3 the rest of the sky uses — scaled by how crowded the player asked the galaxy
+## to be.  Stored after that because weapons change it.
+func cluster_alien_share(cluster_name: String) -> float:
+	if cluster_aliens.has(cluster_name):
+		return clampf(float(cluster_aliens[cluster_name]), 0.0, 1.0)
+	var rec: Dictionary = _star_lookup(cluster_name)
+	if not bool(rec.get("is_cluster", false)) or bool(rec.get("is_home", false)):
+		return 0.0
+	var stars: float = maxf(float(rec.get("stars", 0.0)), 1.0)
+	var vol: float = maxf(float(rec.get("volume", 0.0)), 0.0)
+	var civs: float = vol * StarChunks.CIV_PER_LY3 * alien_density_scale()
+	# A little variation between clusters so they are not all the same figure, but anchored on
+	# the density rather than invented: one cluster is a richer prize than its neighbour.
+	civs *= _roll_range("cluster_aliens", 0.5, 1.6, cluster_name.hash())
+	var share: float = clampf(civs / stars, 0.0, 1.0)
+	cluster_aliens[cluster_name] = share
+	return share
+
+
+## Stars in a cluster held by somebody else, as a count.
+func cluster_alien_stars(cluster_name: String) -> float:
+	var rec: Dictionary = _star_lookup(cluster_name)
+	return maxf(float(rec.get("stars", 0.0)), 0.0) * cluster_alien_share(cluster_name)
+
+
+## Take `frac` of a cluster's inhabited stars out of it, and report how many that was.
+func _cluster_lose_aliens(cluster_name: String, frac: float) -> float:
+	var before: float = cluster_alien_stars(cluster_name)
+	var share: float = cluster_alien_share(cluster_name)
+	cluster_aliens[cluster_name] = clampf(share * (1.0 - clampf(frac, 0.0, 1.0)), 0.0, 1.0)
+	return maxf(0.0, before - cluster_alien_stars(cluster_name))
+
+
 # ── Forecasting ───────────────────────────────────────────────────────────────
 #
 # Compute buys FORESIGHT: how many years ahead the civilisation can say what is coming.
@@ -2037,6 +2129,34 @@ func _init_building_cache() -> void:
 # complete at the start or not until the very end; squared cost keeps it growing steadily the
 # whole way, and keeps a deliberate investment in compute buildings worth making.
 
+## Share of the civilisation's compute assigned to looking ahead rather than to research.
+##
+## This is the whole decision the forecast is built around: seeing further means researching
+## slower, because it is the same thinking either way.  Inert until FORECAST_RESEARCH is known —
+## before that there is nothing to look ahead WITH, and charging for it would be taking science
+## away in exchange for nothing.
+var compute_forecast_share: float = 0.0
+
+## What of the compute is actually going to the forecast, and what is left for science.
+func forecast_compute_share() -> float:
+	if not ResearchTree.is_unlocked(FORECAST_RESEARCH):
+		return 0.0
+	return clampf(compute_forecast_share, 0.0, FORECAST_MAX_SHARE)
+
+
+func research_compute_share() -> float:
+	return 1.0 - forecast_compute_share()
+
+
+## Compute currently pointed at the future, in FLOP/s.
+func forecast_compute() -> float:
+	return _get_compute_rate() * forecast_compute_share()
+
+
+## The most that may be diverted.  Not all of it: a civilisation that stopped thinking about
+## anything but what is coming would never build what it needs to answer it.
+const FORECAST_MAX_SHARE: float = 0.90
+
 ## What the civilisation has to know before it can forecast anything.  An existing node, not a
 ## new one: rigorous forecasting of complex systems is exactly what it describes.
 const FORECAST_RESEARCH: String = "predictive_modeling"
@@ -2058,7 +2178,7 @@ const FORECAST_MAX_EVENTS: int = 24
 func forecast_horizon_years() -> float:
 	if not ResearchTree.is_unlocked(FORECAST_RESEARCH):
 		return 0.0
-	var c: float = _get_compute_rate()
+	var c: float = forecast_compute()
 	if c <= 0.0:
 		return 0.0
 	var h: float = FORECAST_REF_YEARS * pow(c / FORECAST_REF_FLOPS, 1.0 / FORECAST_COST_EXPONENT)
@@ -2448,7 +2568,8 @@ func _combine_production() -> void:
 
 	_cached_compute = compute
 	_cached_prod = {
-		"science":  compute * science_multiplier * _policy_science_mult()
+		# Only the share not pointed at the future.  What the forecast spends, research does not.
+		"science":  compute * research_compute_share() * science_multiplier * _policy_science_mult()
 					* (1.0 + ResearchTree.get_boost("science_production")),
 		"minerals": minerals,
 		"energy":   energy,
@@ -4690,6 +4811,7 @@ func _check_interstellar_arrivals() -> void:
 		# Working the queue only on the way out of the arrival loop meant that a swarm with
 		# nothing currently in flight never sent anything again — it had no arrival to trigger
 		# the launch, and no launch to produce the next arrival.  Dead stop, permanently.
+		_vn_wake_near_freed()
 		_vn_work_queue()
 		_vn_resume()
 		return
@@ -4785,6 +4907,7 @@ func _check_interstellar_arrivals() -> void:
 		_vn_seeds[str(t)] = true
 		_vn_pending.append(str(t))
 	# Everything already out there tries again, whether or not anything arrived this year.
+	_vn_wake_near_freed()
 	_vn_work_queue()
 	_vn_resume()
 	_vn_check_milestone()
@@ -4820,15 +4943,58 @@ func _vn_work_queue() -> void:
 		var from_star: String = _vn_pending[_vn_head]
 		_vn_head += 1
 		if _vn_replicate(from_star, _vn_orders_for(from_star), enroute) == 0:
-			# Nothing within reach that is not already ours.  Colonisation never reverses, so a
-			# lineage in that position will never have anywhere to go again: retiring it is what
-			# stops the interior of a settled bubble being re-searched forever.  The frontier is
-			# unaffected — it is the lineages with somewhere to go, and they keep their place.
+			# Nothing within reach that is not already ours: the lineage sleeps, so the interior
+			# of a settled bubble is not re-searched forever.
+			#
+			# It used to be justified as permanent, on the grounds that colonisation never
+			# reverses.  OCCUPATION does: a system cleared by our own missiles or berserkers
+			# becomes colonisable again, and by then every colony near it had long since been
+			# retired — so the only lineages still awake to take it were on the far frontier,
+			# which is exactly what it looked like.  _vn_wake_near_freed puts the nearest one
+			# back to work instead.
 			_vn_seeds.erase(from_star)
 		done += 1
 	if _vn_head > 4096 or _vn_head >= _vn_pending.size():
 		_vn_pending = _vn_pending.slice(_vn_head)
 		_vn_head = 0
+
+
+## Match a freed system to the colony best placed to take it, and wake that colony.
+##
+## Star-driven rather than colony-driven, which is affordable precisely because it is rare: a
+## handful of systems are cleared in a century, against thousands of colonies that would each
+## have to be asked otherwise.
+func _vn_wake_near_freed() -> void:
+	if _vn_freed.is_empty() or not _vn_unlocked():
+		return
+	var enroute: Variant = null
+	for _i in range(VN_WAKE_PER_TICK):
+		if _vn_freed.is_empty():
+			return
+		var star: String = _vn_freed.pop_back()
+		if _col_star_set.has(star) or _star_occupied(star):
+			continue                      # taken or re-occupied while it waited
+		var pos: Vector3 = _star_pos(star)
+		var best: String = ""
+		var best_d: float = INF
+		for cs in colonized_stars:
+			var d: float = _star_pos(str(cs)).distance_squared_to(pos)
+			if d < best_d:
+				best_d = d
+				best = str(cs)
+		if best == "":
+			continue
+		# Sent straight there, not merely queued.  Queueing it only put the right colony at the
+		# back of a line thousands long, and a frontier lineage reached the system first anyway —
+		# in testing the nearest colony sat 10.9 ly away, awake, while one 189 ly out took it.
+		# A freed system already knows which colony should have it, so this is the one place the
+		# swarm matches star to colony rather than the other way round.
+		if enroute == null:
+			enroute = _enroute_targets()
+		_vn_launch(star, _star_pos(best), _vn_orders_for(best), best, enroute)
+		# And it is awake again, so it keeps expanding on its own from here.
+		_vn_seeds[best] = true
+		_vn_pending.append(best)
 
 
 ## Targets already being flown to, as a set.  O(missions) once, instead of per launch.
@@ -4924,7 +5090,7 @@ func _vn_replicate(from_star: String, orders: Dictionary = {}, enroute: Dictiona
 	var claims: bool = DoctrineData.mission_claims(mission)
 	var set_: Dictionary = enroute if not enroute.is_empty() else _enroute_targets()
 	var sent: int = 0
-	for tgt in _nearest_uncolonised(origin, VN_REPLICATE_COUNT, INF, not claims, set_):
+	for tgt in _nearest_uncolonised(origin, VN_REPLICATE_COUNT, vn_hop_limit_ly, not claims, set_):
 		if _vn_launch(str(tgt), origin, orders, from_star, set_):
 			sent += 1
 	return sent
@@ -5049,13 +5215,40 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
 			continue
 		if enroute.has(cnm) or cluster_colonized.has(cnm):
 			continue
+		# Deliberately NOT subject to max_ly.  A cluster is the destination a swarm reaches when
+		# there are no individual stars left within a sensible hop; refusing it for being far
+		# would leave a lineage on the edge of the resolved sky with nowhere to go at all.
 		var cd: float = origin.distance_to(c["pos"] as Vector3)
-		if cd <= max_ly and cd > 0.01:
+		if cd > 0.01:
 			_keep_nearest(cand, cd, cnm, max_n)
 	var out: Array = []
 	for e: Array in cand:
 		out.append(str(e[1]))
 	return out
+
+# ── Who should take a star ─────────────────────────────────────────────────────
+#
+# Greedy: each colony takes its own nearest unclaimed star, first-come-first-served by queue
+# position.  Two attempts at something better were measured and both were worse.
+#
+#   1. Defer to a nearer colony.           2808 -> 1307 colonies.
+#   2. Defer only to a nearer colony you   At MATCHED colony counts, routing got WORSE, not
+#      can SEE, light-delay and all.       better: excess over the nearest colony p50 16.5 ->
+#                                          21.1 at 1100 colonies, 35.2 -> 38.5 at 2400.
+#
+# The second is the interesting failure.  Deferring pushes a colony onto its second or third
+# choice, which is further away; and the colony it deferred to often does not act soon, so the
+# star is eventually taken by somebody further still.  Politeness lengthens flights.
+#
+# The measure that made both look attractive — "flight distance minus distance from the nearest
+# colony" — is itself misleading, because it scales with how dense the swarm is: at 1100
+# colonies the median is 16 ly and at 2400 it is 35, for the same algorithm.  In a settled
+# volume there is nearly always SOME colony nearer than the one that launched, and closing that
+# gap needs global assignment, not local courtesy.
+#
+# What DID fix the reported symptom — systems cleared of aliens being reseeded from across the
+# map — was _vn_wake_near_freed: a freed system is matched directly to the colony nearest it,
+# which is affordable precisely because freed systems are rare.
 
 ## Side of one cell of the star index, in light-years.  Near enough to VN_SURVEY_LY that a
 ## colony's own neighbourhood is a handful of cells.
@@ -5554,6 +5747,12 @@ func refresh_star_map() -> void:
 		disp.append({"target": str(m.get("target", "")), "progress": pp})
 	sidebar.star_map.set_interstellar_state(colo, disp, ResearchTree.resources.get("energy", 0.0))
 	sidebar.star_map.set_cluster_progress(cluster_colonized)
+	# Who else lives in each cluster, so the readout can say before the player aims at it.
+	var calien: Dictionary = {}
+	for c: Dictionary in StarMapPanel.star_clusters():
+		if not bool(c.get("is_home", false)):
+			calien[str(c["name"])] = cluster_alien_share(str(c["name"]))
+	sidebar.star_map.set_cluster_aliens(calien)
 	# The 3-D galaxy panel draws the same shell, so it gets the same numbers.
 	if sidebar.galaxy_debug:
 		sidebar.galaxy_debug.set_cluster_progress(cluster_colonized)
@@ -6881,6 +7080,11 @@ func _check_interstellar_attacks() -> void:
 		if not defended.has(t):
 			defended[t] = star_factions.has(t)
 	for t: String in defended:
+		if star_factions.has(t):
+			# The system is now empty, and empty means COLONISABLE.  Remembered so a colony near
+			# it can be woken: everything nearby retired long ago, when this star was somebody
+			# else's and there was nowhere else to go.
+			_vn_freed.append(t)
 		star_factions.erase(t)        # the force there is wiped out
 		_diplo_status.erase(t)
 		_infra_probed.erase(t)
@@ -6889,6 +7093,10 @@ func _check_interstellar_attacks() -> void:
 		var target: String = str(g["target"])
 		var kind: String = str(g["kind"])
 		var n: int = int(g["count"])
+		# A cluster is a volume, not a system: a weapon aimed at one takes a SHARE of it.
+		if is_cluster(target):
+			_resolve_cluster_strike(target, kind, n)
+			continue
 		var had: bool = bool(defended.get(target, false))
 		var many: bool = n > 1
 		var outcome: String = "The force there is obliterated." if had \
@@ -6929,6 +7137,29 @@ func _announce(title: String, desc: String, id: String, extra: Dictionary = {}) 
 	_pending_event_notifications.append(notif)
 	if timeline_panel:
 		timeline_panel.add_live_event(notif)
+
+## The player moved the research/forecasting split.
+##
+## Marks production dirty because science output is derived from the research share, so the
+## cached rate is wrong the instant this moves.
+func _on_compute_share_changed(share: float) -> void:
+	compute_forecast_share = clampf(share, 0.0, FORECAST_MAX_SHARE)
+	_mark_prod_dirty()
+	refresh_compute_panel()
+
+
+## Push the live figures to the compute panel.
+func refresh_compute_panel() -> void:
+	if sidebar == null or sidebar.compute_panel == null:
+		return
+	sidebar.compute_panel.set_state(
+		_get_compute_rate(),
+		compute_forecast_share,
+		ResearchTree.is_unlocked(FORECAST_RESEARCH),
+		float(_get_total_production().get("science", 0.0)),
+		forecast_horizon_years(),
+		FORECAST_LYAPUNOV_YEARS)
+
 
 ## A timeline card naming a star was clicked: open the star map and go to it.
 ##
@@ -7124,6 +7355,7 @@ func load_game(path: String = "") -> void:
 	_vn_resume_idx = 0
 	_vn_pending.clear()
 	_vn_head = 0
+	_vn_freed.clear()
 	_vn_resume_year = -1.0e18
 	if data.has("vn_seeds") and data["vn_seeds"] is Array:
 		for k in data["vn_seeds"]:
@@ -7872,6 +8104,86 @@ func _check_pandemic() -> void:
 	# decision is theirs; what they cannot do is ask the same year twice for a kinder answer.
 	if _roll("pandemic_fires", year) < pandemic_probability():
 		_trigger_pandemic()
+
+
+## How many stars one relativistic missile sterilises when it arrives in a cluster.
+## A missile is one rock at one system; a handful of systems is what a salvo of them reaches.
+const MISSILE_CLUSTER_STARS_MIN: float = 1.0
+const MISSILE_CLUSTER_STARS_MAX: float = 4.0
+## Share of a cluster ONE berserker seed takes, before the cluster's own population scales it.
+## Applied with diminishing returns, so a bigger swarm always takes more but never all.
+const BERSERKER_CLUSTER_BASE: float = 0.06
+
+
+## A weapon arrives in a cluster.  Clusters are settled and inhabited a share at a time, so this
+## is where a strike stops being "the system is destroyed" and becomes a fraction of thousands.
+func _resolve_cluster_strike(cluster_name: String, kind: String, count: int) -> void:
+	var rec: Dictionary = _star_lookup(cluster_name)
+	var total_stars: float = maxf(float(rec.get("stars", 0.0)), 1.0)
+	var held: float = cluster_alien_stars(cluster_name)
+
+	if kind == "missile":
+		# Relativistic kinetics are aimed, and at this range aimed badly: each one picks a system
+		# out of thousands.  Which ones is a roll — that is what "a random system in the cluster"
+		# means — and hitting an EMPTY one is the likeliest outcome by far, because most of them
+		# are.  Only strikes that land on an inhabited system take anything off the cluster.
+		var struck: float = 0.0
+		var killed: float = 0.0
+		var occupied: float = cluster_alien_share(cluster_name)
+		for i in range(count):
+			var s: float = _roll_range("missile_cluster_n", MISSILE_CLUSTER_STARS_MIN,
+				MISSILE_CLUSTER_STARS_MAX, year, i)
+			struck += s
+			if _roll("missile_cluster_hit", year, i) < occupied:
+				killed += s
+		if killed > 0.0:
+			_cluster_lose_aliens(cluster_name, minf(killed / maxf(held, 1.0), 1.0))
+		_announce("Relativistic Impact",
+			"%s into %s. %s struck; %s." % [
+				("%d relativistic missiles" % count) if count > 1 else "One relativistic missile",
+				cluster_name, Units.format_si(struck, " systems"),
+				("%s of them held somebody" % Units.format_si(killed, "")) if killed > 0.0
+					else "all of them empty rock"],
+			"pmissile_hit_%s_%d" % [cluster_name, year])
+		refresh_star_map()
+		return
+
+	if kind == "berserker":
+		# A berserker swarm does not strike, it SPREADS: it eats a system, builds copies of
+		# itself out of it, and moves on.  So what it takes depends on how much there is to eat —
+		# a cluster thick with settled systems feeds the swarm and burns, an empty one starves it
+		# — and on how many seeds were sent, with diminishing returns because they compete for
+		# the same systems.
+		var populated: float = clampf(cluster_alien_share(cluster_name)
+			+ float(cluster_colonized.get(cluster_name, 0.0)), 0.0, 1.0)
+		var luck: float = _roll_range("berserker_cluster", 0.6, 1.5, year, cluster_name.hash())
+		var per_seed: float = clampf(BERSERKER_CLUSTER_BASE * populated * luck, 0.0, 0.95)
+		var share: float = 1.0 - pow(1.0 - per_seed, float(maxi(count, 1)))
+		var lost: float = _cluster_lose_aliens(cluster_name, share)
+		# Indiscriminate: anything of the player's in the same cluster burns with the rest.
+		var ours_before: float = float(cluster_colonized.get(cluster_name, 0.0))
+		if ours_before > 0.0:
+			cluster_colonized[cluster_name] = clampf(ours_before * (1.0 - share), 0.0, 1.0)
+		_announce("Berserker Strike",
+			"%s reach %s and begin replicating. %d%% of its stars are sterilised — %s systems, %s" % [
+				("%d berserker swarms" % count) if count > 1 else "A berserker swarm",
+				cluster_name, int(round(share * 100.0)),
+				Units.format_si(share * total_stars, ""),
+				("including %s of our own." % Units.format_si(
+					(ours_before - float(cluster_colonized.get(cluster_name, 0.0))) * total_stars, ""))
+					if ours_before > 0.0 else "none of them ours."],
+			"berserker_hit_%s_%d" % [cluster_name, year])
+		if lost > 0.0 or ours_before > 0.0:
+			_mark_prod_dirty()
+		refresh_star_map()
+		return
+
+	# A laser pulse is a single beam at a single point: against thousands of stars it is a
+	# gesture.  Said plainly rather than pretending otherwise.
+	_announce("Laser Strike",
+		"The pulse crosses into %s and burns out against one of its thousands of stars." % cluster_name,
+		"laser_hit_%s_%d" % [cluster_name, year])
+	refresh_star_map()
 
 
 ## Chance an engineered plague breaks out in a year it is scheduled for, under CURRENT

@@ -57,6 +57,9 @@ material: do not regenerate them, or the thing they test is gone.
 | `verify_station.gd` | The Orbital Construction Station, its capacity off-world, and the two carriers |
 | `verify_delivery.gd` | A structure carrier charges its bill at the origin and is refused elsewhere |
 | `verify_path.gd` | The carrier flies to its lane berth and never through the star |
+| `verify_clusters.gd` | Clusters are not stars: alien-populated per the setup rules, no trade or alliance with a volume of space, missiles take random systems, berserkers sterilise a rising share |
+| `verify_infra_band.gd` | Every solar-orbit structure sits inside Mercury's perihelion and clear of the Sun, and the orbital planes stay spread |
+| `verify_compute_panel.gd` | The compute panel's slider drives the research/forecast split, is locked until the research lands, and the split survives a save |
 | `verify_forecast.gd` | Compute buys foresight on a squared-cost curve, and what it predicts is what the simulation then actually does — target, year and severity |
 | `verify_orbit_blur.gd` | Above 100× the bodies hide and their orbits draw as blurred rings; slowing down or pausing brings them back; the year alone no longer decides |
 | `verify_starmap_panel.gd` | The star map's action panel stays bound 10 px in from the right edge at any map width, and wide content moves its left edge out rather than pushing its right edge off-screen |

@@ -16,6 +16,8 @@ var star_map: StarMapPanel = null
 var galaxy_map: GalaxyMapPanel = null
 var galaxy_debug: GalaxyDebugPanel = null
 var automation_panel: AutomationPanel = null
+## Where the player divides the civilisation's thinking between research and forecasting.
+var compute_panel: ComputePanel = null
 ## Merged planet panel (info + build + population tabs), created and assigned by Game.
 var planet_tabs: Control = null
 ## The cloned "automation" sidebar button, hidden until Industrial AI is researched.
@@ -40,6 +42,11 @@ func _ready() -> void:
 	galaxy_debug.hide()
 	add_child(galaxy_debug)
 	_add_cloned_button("galaxy_debug", "galaxy 3d", _on_galaxy_debug_pressed)
+
+	compute_panel = ComputePanel.new()
+	compute_panel.hide()
+	add_child(compute_panel)
+	_add_cloned_button("compute_panel", "compute", _on_compute_pressed)
 
 	automation_panel = AutomationPanel.new()
 	automation_panel.hide()
@@ -88,6 +95,8 @@ func hide_all() -> void:
 		galaxy_map.hide()
 	if galaxy_debug:
 		galaxy_debug.hide()
+	if compute_panel:
+		compute_panel.hide()
 	if automation_panel:
 		automation_panel.hide()
 
@@ -143,6 +152,13 @@ func show_star_map() -> void:
 	var game := get_tree().current_scene
 	if game and game.has_method("refresh_star_map"):
 		game.refresh_star_map()
+
+
+func _on_compute_pressed() -> void:
+	if _toggle_panel(compute_panel):
+		var game := get_tree().current_scene
+		if game and game.has_method("refresh_compute_panel"):
+			game.refresh_compute_panel()
 
 
 func _on_starmap_pressed() -> void:

@@ -27,15 +27,51 @@ func _run() -> void:
 	# ── Gated on the research ──
 	check(not rt.is_unlocked(g.FORECAST_RESEARCH), "forecasting starts locked")
 	check(is_equal_approx(g.forecast_horizon_years(), 0.0), "and sees nothing until it is known")
+	# A share set before the research exists must not quietly tax science for nothing.
+	g.compute_forecast_share = 0.5
+	g._mark_prod_dirty()
+	check(is_equal_approx(g.forecast_compute_share(), 0.0),
+		"a share set before the research is inert: %s" % str(g.forecast_compute_share()))
+	g.compute_forecast_share = 0.0
+	g._mark_prod_dirty()
 	for n: ResearchNode in load("res://ResearchTreeData.gd").build():
 		rt.force_unlock(str(n.id))
-	check(g.forecast_horizon_years() > 0.0, "unlocking it opens a horizon")
+	check(is_equal_approx(g.forecast_horizon_years(), 0.0),
+		"and still sees nothing until compute is assigned to it")
+
+	# ── The split is the decision ──
+	# Nothing is forecast for free: the horizon comes out of the same pool research draws on.
+	g.compute_forecast_share = 0.0
+	g._mark_prod_dirty()
+	var science_all: float = float(g._get_total_production().get("science", 0.0))
+	g.compute_forecast_share = 0.5
+	g._mark_prod_dirty()
+	var science_half: float = float(g._get_total_production().get("science", 0.0))
+	check(g.forecast_horizon_years() > 0.0, "assigning compute opens a horizon")
+	check(absf(science_half / maxf(science_all, 1.0) - 0.5) < 0.01,
+		"and costs research exactly its share: %.3f" % (science_half / maxf(science_all, 1.0)))
+	# Four times the assigned compute must buy twice the sight.
+	g.compute_forecast_share = 0.1
+	var h_low: float = g.forecast_horizon_years()
+	g.compute_forecast_share = 0.4
+	check(absf(g.forecast_horizon_years() / maxf(h_low, 1e-9) - 2.0) < 0.02,
+		"four times the share, twice the horizon: %.3f" % (g.forecast_horizon_years() / h_low))
+	check(g.forecast_compute_share() <= g.FORECAST_MAX_SHARE,
+		"and it can never take all of the thinking")
+	g.compute_forecast_share = 0.9
+	g._mark_prod_dirty()
+	check(float(g._get_total_production().get("science", 0.0)) > 0.0,
+		"so research never stops entirely")
+	g.compute_forecast_share = 0.5
+	g._mark_prod_dirty()
 
 	# ── The curve ──
 	# Cost goes as the square of the horizon, so horizon goes as the square root of compute:
 	# four times the compute must buy exactly twice the sight.
 	var h0: float = g.forecast_horizon_years()
-	var c0: float = g._get_compute_rate()
+	# The cost inverts the horizon against the ASSIGNED compute, which is what buys it — not
+	# the civilisation's whole pool.
+	var c0: float = g.forecast_compute()
 	check(is_equal_approx(g.forecast_cost_flops(h0) / c0, 1.0),
 		"the cost function inverts the horizon: %s vs %s" % [
 			str(g.forecast_cost_flops(h0)), str(c0)])

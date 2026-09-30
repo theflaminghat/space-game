@@ -2130,6 +2130,13 @@ func selected_star() -> String:
 
 ## Push interstellar state from Game.gd: which stars are colonised, the in-flight
 ## colony missions (target name + 0..1 progress), and current energy for the readout.
+## Per-cluster alien-held fractions from Game (cluster name → 0..1).
+var _cluster_alien: Dictionary = {}
+
+func set_cluster_aliens(fracs: Dictionary) -> void:
+	_cluster_alien = fracs
+	queue_redraw()
+
 ## Per-cluster colonisation fractions from Game (cluster name → 0..1).
 func set_cluster_progress(frac: Dictionary) -> void:
 	_cluster_frac = frac
@@ -2277,6 +2284,14 @@ func _update_weapon_buttons(_dist: float, colonised: bool) -> void:
 	for db: Button in [_contact_btn, _ally_btn, _trade_btn, _war_btn]:
 		if db:
 			db.disabled = colonised or not has_intel
+	# A cluster is a volume holding thousands of stars, not a polity.  There is nobody in
+	# particular to trade with or ally to, so those are refused outright rather than quietly
+	# doing something that could not mean anything.  Weapons still work: they hit a share.
+	if _selected_cluster >= 0:
+		for db2: Button in [_ally_btn, _trade_btn]:
+			if db2:
+				db2.disabled = true
+				db2.tooltip_text = "A cluster is thousands of stars, not a government. There is nobody here to come to terms with."
 	if _probe_btn:
 		_probe_btn.disabled = colonised or not _can_missile
 		_probe_btn.text = "Send recon probe…" if _can_missile else "Recon probe — research"
@@ -3414,9 +3429,18 @@ func _draw() -> void:
 				float(all_stars_full().size()), ""))
 			clines.append("charted in full to %s ly" % Units.format_si(sol_cell_reach_ly(), ""))
 		if not home:
+			# Who else is in there.  A share, like everything else about a cluster: the systems
+			# are not resolved individually, so neither are their inhabitants.
+			var alien: float = clampf(float(_cluster_alien.get(str(cl["name"]), 0.0)), 0.0, 1.0)
+			if alien > 0.0:
+				clines.append("Inhabited: %s of %s stars (%.1f%%)" % [
+					Units.format_si(stars * alien, ""), Units.format_si(stars, ""),
+					alien * 100.0])
+			else:
+				clines.append("No civilisations detected")
 			# Too far to resolve individually — this is what you get INSTEAD of picking a star.
 			clines.append("Beyond individual resolution;")
-			clines.append("settled a share at a time.")
+			clines.append("settled — and defended — a share at a time.")
 		_draw_info_box(clines)
 	# Selected-star info box.
 	elif _selected >= 0:
