@@ -17,6 +17,7 @@ var _volume_slider:    HSlider      = null
 var _volume_val_label: Label        = null
 var _speed_option:     OptionButton = null
 var _autosave_option:  OptionButton = null
+var _timeline_popup_btn: CheckButton = null
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -134,6 +135,11 @@ func _build_ui() -> void:
 	_speed_option.custom_minimum_size = Vector2(150, 0)
 	speed_row.add_child(_speed_option)
 
+	# Off only silences the transient cards — the events still land on the timeline, which is
+	# where a player who turns these off goes to read them instead.
+	_timeline_popup_btn = _check_row(play, "Timeline Event Popups")
+	_timeline_popup_btn.button_pressed = true
+
 	# ── Saving ────────────────────────────────────────────────────────────────
 	# Its own category rather than a line under Gameplay: how often the game writes to disk is
 	# not a rule of play, and it is the setting a player most often comes here to change.
@@ -205,6 +211,8 @@ func _load_and_apply() -> void:
 		_volume_slider.value =             float(cfg.get_value("audio",    "master_volume",       1.0))
 		_speed_option.selected  =           int(cfg.get_value("gameplay", "default_speed_tier", 0))
 		_autosave_option.selected =         int(cfg.get_value("gameplay", "autosave_idx",        0))
+		_timeline_popup_btn.set_pressed_no_signal(
+			bool(cfg.get_value("gameplay", "timeline_popups", true)))
 	_volume_val_label.text = "%d%%" % int(_volume_slider.value * 100.0)
 	_apply_display()
 	_apply_volume(_volume_slider.value)
@@ -217,6 +225,7 @@ func save_settings() -> void:
 	cfg.set_value("audio",    "master_volume",     _volume_slider.value)
 	cfg.set_value("gameplay", "default_speed_tier", _speed_option.selected)
 	cfg.set_value("gameplay", "autosave_idx",      _autosave_option.selected)
+	cfg.set_value("gameplay", "timeline_popups",   _timeline_popup_btn.button_pressed)
 	cfg.save(SETTINGS_PATH)
 
 # ── Applying ──────────────────────────────────────────────────────────────────
@@ -266,6 +275,11 @@ func get_default_speed_tier() -> int:
 func get_autosave_seconds() -> int:
 	return AUTOSAVE_SECONDS[_autosave_option.selected]
 
+## Whether event notifications should pop up as transient cards.  The timeline itself is
+## unaffected either way.
+func timeline_popups_enabled() -> bool:
+	return _timeline_popup_btn == null or _timeline_popup_btn.button_pressed
+
 # ── Signal handlers ───────────────────────────────────────────────────────────
 
 func _on_fullscreen_toggled(pressed: bool) -> void:
@@ -286,7 +300,12 @@ func _apply_windowed_to_screen() -> void:
 	win.x = mini(win.x, usable.size.x)
 	win.y = mini(win.y, usable.size.y)
 	DisplayServer.window_set_size(win)
-	DisplayServer.window_set_position(usable.position + (usable.size - win) / 2)
+	# Integer division on purpose: a window is positioned in whole pixels, so the half-pixel a
+	# centred odd-sized window would want is exactly what should be discarded.  `win` is clamped
+	# to the usable size above, so the difference is never negative and truncating is flooring.
+	@warning_ignore("integer_division")
+	var centred: Vector2i = (usable.size - win) / 2
+	DisplayServer.window_set_position(usable.position + centred)
 
 func _on_vsync_toggled(pressed: bool) -> void:
 	var mode := (DisplayServer.VSYNC_ENABLED

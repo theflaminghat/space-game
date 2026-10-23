@@ -52,6 +52,9 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	# Taking Sol apart needs its own breakthrough — the swarm only supplies the power for it.
 	# Building in orbit at all is what this node is for; a shipyard is its largest expression.
 	"Orbital Construction Station": "precision_orbital_construction",
+	# The same gate as the Solar Satellite recipe and as building in solar orbit at all: this
+	# is that satellite, assembled where it will fly instead of being lofted to it.
+	"Swarm Collector Array": "space_power_infrastructure",
 	"Star Lifter":           "star_lifting",
 	"Sunshade Constellation": "solar_shading",
 	"Core Mixing Array":     "stellar_husbandry",

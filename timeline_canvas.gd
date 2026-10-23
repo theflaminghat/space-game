@@ -488,16 +488,16 @@ func add_event(ev: Dictionary) -> void:
 
 ## Replace what the civilisation can see coming.  Nothing is added if the list is unchanged, so
 ## a forecast that has not moved does not rebuild the card tree every refresh.
-func set_forecast_events(events: Array) -> void:
-	if _forecast_events.size() == events.size():
+func set_forecast_events(forecast: Array) -> void:
+	if _forecast_events.size() == forecast.size():
 		var same: bool = true
-		for i in range(events.size()):
-			if str(events[i].get("id", "")) != str(_forecast_events[i].get("id", "")):
+		for i in range(forecast.size()):
+			if str(forecast[i].get("id", "")) != str(_forecast_events[i].get("id", "")):
 				same = false
 				break
 		if same:
 			return
-	_forecast_events = events
+	_forecast_events = forecast
 	_layout_dirty = true
 
 

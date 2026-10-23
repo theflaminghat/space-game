@@ -625,9 +625,9 @@ func _add_job_row(job: Dictionary) -> void:
 	# is the container's own separation, and each card's handle bar draws its own edge.
 	_job_list.add_child(card)
 
-func _find_recipe(name: String) -> Dictionary:
+func _find_recipe(recipe_name: String) -> Dictionary:
 	for r in RecipeData.RECIPES:
-		if r["name"] == name:
+		if r["name"] == recipe_name:
 			return r
 	return {}
 

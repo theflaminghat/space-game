@@ -167,11 +167,11 @@ func _ready() -> void:
 ## Show the star block for the Sun and hide it for everything else.  The two dates are the ones
 ## stellar engineering exists to move, so they are spelled out as years rather than countdowns.
 func _set_star_rows(star: Dictionary) -> void:
-	var show: bool = not star.is_empty()
+	var has_star: bool = not star.is_empty()
 	for key: String in _star_rows:
-		(_star_rows[key]["key"] as Label).visible = show
-		(_star_rows[key]["value"] as Label).visible = show
-	if not show:
+		(_star_rows[key]["key"] as Label).visible = has_star
+		(_star_rows[key]["value"] as Label).visible = has_star
+	if not has_star:
 		return
 	var mass: float = float(star.get("mass_msun", 1.0))
 	var engineered: bool = bool(star.get("engineered", false))

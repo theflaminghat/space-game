@@ -2,11 +2,13 @@ class_name AutomationPanel
 extends PanelContainer
 
 ## AutomationPanel — lets the player write standing "automation rules" the game then
-## follows on its own.  Two kinds:
+## follows on its own.  Three kinds:
 ##   • build  — keep N of a building on a world (the game builds more whenever it can
 ##              afford one and the count is short).
 ##   • launch — keep N missions of a kind in flight (the game re-launches whenever a
 ##              slot frees up and the origin can supply the rockets + fuel).
+##   • defend — shoot down asteroids and/or weapons aimed at a world, without stopping
+##              the clock to ask, for as long as the array is up and the shot affordable.
 ##
 ## Rules matter because time accelerates toward heat death — past a point you cannot
 ## hand-place every factory or re-fly every supply run, so you delegate the routine to
@@ -18,13 +20,17 @@ extends PanelContainer
 ##     "target": int, "enabled": bool }
 ##   { "id": int, "type": "launch", "mission": String, "origin": String,
 ##     "target": String, "fuel": String, "arrival": String, "keep": int,
-##     "enabled": bool }
+##     "cargo": Dictionary, "enabled": bool }
+##   { "id": int, "type": "defend", "planet": String (or DEFEND_ANY),
+##     "asteroids": bool, "weapons": bool, "enabled": bool }
 
 signal automation_changed(rules: Array)
 ## Emitted when the player picks how this civilisation answers contact with another.
 signal doctrine_changed(doctrine: String)
 
 ## Build/launch origins (planets only); launch targets add the Sun.
+## A defence rule's world, when it is not one world: every holding the species has.
+const DEFEND_ANY: String = "*"
 const PLANETS: Array = [
 	"Earth", "Mercury", "Venus", "Mars",
 	"Jupiter", "Saturn", "Uranus", "Neptune",
@@ -55,7 +61,33 @@ var _l_fuel:    OptionButton = null
 var _l_arrival: OptionButton = null
 var _l_count:   SpinBox      = null
 
-var _rule_list: VBoxContainer = null
+# ── The hold ─────────────────────────────────────────────────────────────────
+## What a standing Supply Run carries.  A cargo mission with an empty manifest flies empty for
+## ever, which is the quietest kind of broken rule — the same launch, the same cost, nothing
+## delivered — so the manifest is part of the rule rather than something the executor guesses.
+##
+## Offered from what the ORIGIN actually holds, pushed by Game: a rule that names something the
+## world has never dug would simply never fire.
+var _l_cargo_box:  VBoxContainer = null
+var _l_cargo_pick: OptionButton  = null
+var _l_cargo_amt:  LineEdit      = null
+var _l_cargo_list: VBoxContainer = null
+var _l_cargo:      Dictionary    = {}      # compound → grams, for the rule being composed
+var _stocks:       Dictionary    = {}      # origin id → { compound → grams }
+
+## The standing orders, listed in their own column beside the forms that make them, and split
+## by what they are: a build rule and a launch rule have nothing to do with each other, and a
+## single list mixed them in whatever order they happened to be added.
+var _build_rules: VBoxContainer = null
+var _launch_rules: VBoxContainer = null
+var _defend_rules: VBoxContainer = null
+
+# ── Standing defence ─────────────────────────────────────────────────────────
+## An interception is a decision with one sensible answer whenever the shot is affordable, and
+## being stopped to make it every time across a million years is the opposite of automation.
+var _d_planet:    OptionButton = null
+var _d_asteroids: CheckBox     = null
+var _d_weapons:   CheckBox     = null
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -67,7 +99,10 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(560, 520)
+	# Wide enough for two columns.  560 was sized for one, and splitting it put the forms and
+	# the rules in half that each — a launch rule's description then wrapped to three lines in
+	# a column too narrow to read it in.
+	custom_minimum_size = Vector2(820, 520)
 	_build_ui()
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -116,6 +151,33 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
+	# ── Two columns: what you are setting up, and what is already running ───────
+	# The forms are long — a launch rule alone is six fields and a manifest — and the list of
+	# what is actually running used to sit underneath all of it, off the bottom of the panel
+	# exactly when there was most to see. Side by side, the orders stay in view while another
+	# one is composed.
+	var split := HBoxContainer.new()
+	split.add_theme_constant_override("separation", 12)
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(split)
+
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 8)
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# The forms carry labelled dropdowns and the rules carry a line of text apiece, so the
+	# space is split in their favour rather than evenly.
+	left.size_flags_stretch_ratio = 1.6
+	split.add_child(left)
+	split.add_child(VSeparator.new())
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 6)
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_child(right)
+
+	# Everything that follows builds into the left column.
+	vbox = left
+
 	# ── Autonomous von Neumann colonisation ──────────────────────────────────────
 	# One global directive: seed a self-replicating colony probe and let it spread on its own.
 	# Behaviour is gated on Relativistic Navigation + Self-Replicating Industry (checked by Game).
@@ -128,25 +190,43 @@ func _build_ui() -> void:
 	_build_build_form(vbox)
 	vbox.add_child(HSeparator.new())
 	_build_launch_form(vbox)
-
 	vbox.add_child(HSeparator.new())
+	_build_defend_form(vbox)
 
 	var rules_label := Label.new()
 	rules_label.text = "Active Rules"
 	rules_label.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(rules_label)
+	right.add_child(rules_label)
+
+	_build_rules = _rules_column(right, "Building")
+	right.add_child(HSeparator.new())
+	_launch_rules = _rules_column(right, "Launches")
+	right.add_child(HSeparator.new())
+	_defend_rules = _rules_column(right, "Defence")
+
+	_rebuild_rule_list()
+
+
+## One titled, scrolling list of rules.  The two share the right column's height, so a long
+## list of one kind does not push the other off the panel.
+func _rules_column(parent: Control, title: String) -> VBoxContainer:
+	var lbl := Label.new()
+	lbl.text = title
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.modulate = Color(0.70, 0.72, 0.78)
+	parent.add_child(lbl)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
+	scroll.custom_minimum_size = Vector2(0, 90)
+	parent.add_child(scroll)
 
-	_rule_list = VBoxContainer.new()
-	_rule_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rule_list.add_theme_constant_override("separation", 4)
-	scroll.add_child(_rule_list)
-
-	_rebuild_rule_list()
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 4)
+	scroll.add_child(list)
+	return list
 
 func _section_label(parent: Control, text: String) -> void:
 	var lbl := Label.new()
@@ -186,6 +266,9 @@ func _refresh_launch_validity() -> void:
 			_l_mission.selected = first
 	var m_def: Dictionary = MissionData.MISSION_TYPES[_l_mission.selected] \
 		if _l_mission.selected >= 0 else {}
+	# Only a mission with a hold gets a manifest; everything else carries machinery.
+	if _l_cargo_box:
+		_l_cargo_box.visible = bool(m_def.get("cargo", false))
 	var can_land: bool = MissionData.allows_arrival(m_def, kind, "land")
 	_l_arrival.set_item_disabled(1, not can_land)
 	_l_arrival.set_item_tooltip(1, "" if can_land
@@ -351,12 +434,15 @@ func _build_launch_form(vbox: VBoxContainer) -> void:
 	_l_count = _count_spin()
 	grid.add_child(_l_count)
 
+	_build_cargo_ui(vbox)
+
 	# A standing order fires the same launch for ever, so an impossible combination here is not
 	# one dropped launch but a rule that silently never fires.  The same rules the launch panel
 	# offers apply: pick a target and the missions that cannot reach it grey out, and so does an
 	# arrival the body has no ground for.
 	_l_mission.item_selected.connect(func(_i) -> void: _refresh_launch_validity())
 	_l_target.item_selected.connect(func(_i) -> void: _refresh_launch_validity())
+	_l_origin.item_selected.connect(func(_i) -> void: _refresh_cargo_choices())
 	_refresh_launch_validity()
 
 	var add := Button.new()
@@ -364,6 +450,153 @@ func _build_launch_form(vbox: VBoxContainer) -> void:
 	add.custom_minimum_size = Vector2(0, 32)
 	add.pressed.connect(_on_add_launch)
 	vbox.add_child(add)
+
+## The manifest editor, shown only for a mission that has a hold.
+func _build_cargo_ui(parent: Control) -> void:
+	_l_cargo_box = VBoxContainer.new()
+	_l_cargo_box.add_theme_constant_override("separation", 3)
+	_l_cargo_box.hide()
+	parent.add_child(_l_cargo_box)
+
+	var lbl := Label.new()
+	lbl.text = "Hold:"
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.modulate = Color(0.75, 0.75, 0.75)
+	_l_cargo_box.add_child(lbl)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_l_cargo_pick = OptionButton.new()
+	_l_cargo_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_l_cargo_pick.fit_to_longest_item = false
+	_l_cargo_pick.clip_text = true
+	row.add_child(_l_cargo_pick)
+	_l_cargo_amt = LineEdit.new()
+	_l_cargo_amt.placeholder_text = "grams"
+	_l_cargo_amt.custom_minimum_size = Vector2(96, 0)
+	row.add_child(_l_cargo_amt)
+	var add := Button.new()
+	add.text = "Add"
+	add.pressed.connect(_on_cargo_add)
+	row.add_child(add)
+	_l_cargo_box.add_child(row)
+
+	_l_cargo_list = VBoxContainer.new()
+	_l_cargo_list.add_theme_constant_override("separation", 2)
+	_l_cargo_box.add_child(_l_cargo_list)
+
+
+## What the chosen origin is holding, pushed by Game.
+func set_launch_stock(stocks: Dictionary) -> void:
+	_stocks = stocks
+	_refresh_cargo_choices()
+
+
+## Repopulate the compound list from what the selected origin actually holds — a rule naming
+## something that world has never dug would never fire.
+func _refresh_cargo_choices() -> void:
+	if _l_cargo_pick == null:
+		return
+	var prev: String = _l_cargo_pick.get_item_text(_l_cargo_pick.selected) \
+		if _l_cargo_pick.selected >= 0 else ""
+	_l_cargo_pick.clear()
+	var origin: String = str(PLANETS[_l_origin.selected]).to_lower() \
+		if _l_origin and _l_origin.selected >= 0 else ""
+	var held: Dictionary = _stocks.get(origin, {}) as Dictionary
+	var keys: Array = held.keys()
+	keys.sort()
+	for k in keys:
+		if float(held[k]) <= 0.0:
+			continue
+		_l_cargo_pick.add_item(str(k))
+		if str(k) == prev:
+			_l_cargo_pick.selected = _l_cargo_pick.item_count - 1
+
+
+func _on_cargo_add() -> void:
+	if _l_cargo_pick == null or _l_cargo_pick.selected < 0:
+		return
+	var key: String = _l_cargo_pick.get_item_text(_l_cargo_pick.selected)
+	var amt: float = maxf(0.0, float(_l_cargo_amt.text))
+	if amt <= 0.0:
+		return
+	_l_cargo[key] = float(_l_cargo.get(key, 0.0)) + amt
+	_l_cargo_amt.text = ""
+	_refresh_cargo_list()
+
+
+func _refresh_cargo_list() -> void:
+	if _l_cargo_list == null:
+		return
+	for c in _l_cargo_list.get_children():
+		c.queue_free()
+	for k: String in _l_cargo:
+		var row := HBoxContainer.new()
+		var l := Label.new()
+		l.text = "%s  %s" % [Units.format_si(float(_l_cargo[k]), "g"), k]
+		l.add_theme_font_size_override("font_size", 11)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		var x := Button.new()
+		x.text = "x"
+		x.pressed.connect(func() -> void:
+			_l_cargo.erase(k)
+			_refresh_cargo_list())
+		row.add_child(x)
+		_l_cargo_list.add_child(row)
+
+
+## Standing orders to shoot down what is coming at a world.
+func _build_defend_form(vbox: VBoxContainer) -> void:
+	_section_label(vbox, "Automated Defence")
+
+	var hint := Label.new()
+	hint.text = "Fires the orbital array without stopping to ask. Needs a built array and the energy for the shot; without either, the warning still comes up."
+	hint.add_theme_font_size_override("font_size", 11)
+	hint.modulate = Color(0.70, 0.72, 0.78)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(hint)
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 6)
+	vbox.add_child(grid)
+
+	_form_label(grid, "World:")
+	_d_planet = OptionButton.new()
+	_d_planet.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_d_planet.fit_to_longest_item = false
+	_d_planet.clip_text = true
+	# Projectiles are aimed at interstellar colonies too, and by the time that happens there are
+	# more of them than a dropdown can hold.  One entry covers the lot.
+	_d_planet.add_item("Everywhere")
+	_d_planet.set_item_tooltip(0, "Every world the species holds, Sol and the colonies both.")
+	for p in PLANETS:
+		_d_planet.add_item(p)
+	grid.add_child(_d_planet)
+
+	_form_label(grid, "Protect from:")
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 1)
+	_d_asteroids = CheckBox.new()
+	_d_asteroids.text = "Asteroids"
+	_d_asteroids.button_pressed = true
+	_d_asteroids.tooltip_text = "A mountain-sized body on an intercept course. The array holds on it until it comes apart, and the world takes a meteor shower instead of a crater."
+	box.add_child(_d_asteroids)
+	_d_weapons = CheckBox.new()
+	_d_weapons.text = "Weapons"
+	_d_weapons.button_pressed = true
+	_d_weapons.tooltip_text = "Relativistic missiles and berserker swarms, which cross at a fraction of c and can be burned down on the way in. A laser strike arrives with the light that announces it and cannot be intercepted by anything."
+	box.add_child(_d_weapons)
+	grid.add_child(box)
+
+	var add := Button.new()
+	add.text = "+ Add defence rule"
+	add.custom_minimum_size = Vector2(0, 32)
+	add.pressed.connect(_on_add_defend)
+	vbox.add_child(add)
+
 
 # ── Rule creation ─────────────────────────────────────────────────────────────
 
@@ -395,10 +628,32 @@ func _on_add_launch() -> void:
 		"fuel":    str(fuel_def["id"]),
 		"arrival": "land" if _l_arrival.selected == 1 else "orbit",
 		"keep":    int(_l_count.value),
+		"cargo":   _l_cargo.duplicate(),
 		"enabled": true,
 	})
 	_next_id += 1
+	_l_cargo = {}
+	_refresh_cargo_list()
 	_commit()
+
+func _on_add_defend() -> void:
+	if _d_planet.selected < 0:
+		return
+	# A rule that protects against nothing would sit in the list looking like cover.
+	if not _d_asteroids.button_pressed and not _d_weapons.button_pressed:
+		return
+	_rules.append({
+		"id":        _next_id,
+		"type":      "defend",
+		"planet":    DEFEND_ANY if _d_planet.selected == 0 \
+			else str(PLANETS[_d_planet.selected - 1]).to_lower(),
+		"asteroids": _d_asteroids.button_pressed,
+		"weapons":   _d_weapons.button_pressed,
+		"enabled":   true,
+	})
+	_next_id += 1
+	_commit()
+
 
 func _remove_rule(rule_id: int) -> void:
 	for i in range(_rules.size()):
@@ -421,19 +676,45 @@ func _commit() -> void:
 # ── Rule list rendering ───────────────────────────────────────────────────────
 
 func _rebuild_rule_list() -> void:
-	if _rule_list == null:
+	if _build_rules == null or _launch_rules == null or _defend_rules == null:
 		return
-	for c in _rule_list.get_children():
+	for c in _build_rules.get_children():
 		c.queue_free()
-	if _rules.is_empty():
-		var empty := Label.new()
-		empty.text = "No automation rules yet."
-		empty.add_theme_font_size_override("font_size", 11)
-		empty.modulate = Color(0.6, 0.6, 0.6)
-		_rule_list.add_child(empty)
-		return
+	for c in _launch_rules.get_children():
+		c.queue_free()
+	for c in _defend_rules.get_children():
+		c.queue_free()
+	var n_build: int = 0
+	var n_launch: int = 0
+	var n_defend: int = 0
 	for r in _rules:
-		_rule_list.add_child(_make_rule_row(r as Dictionary))
+		var rule: Dictionary = r
+		match str(rule.get("type", "")):
+			"launch":
+				_launch_rules.add_child(_make_rule_row(rule))
+				n_launch += 1
+			"defend":
+				_defend_rules.add_child(_make_rule_row(rule))
+				n_defend += 1
+			_:
+				_build_rules.add_child(_make_rule_row(rule))
+				n_build += 1
+	# Each list says so for itself: "no rules yet" under Building while six launches are running
+	# is the useful message, and a single shared one could not give it.
+	if n_build == 0:
+		_build_rules.add_child(_empty_note("Nothing is being kept built."))
+	if n_launch == 0:
+		_launch_rules.add_child(_empty_note("Nothing is being kept in flight."))
+	if n_defend == 0:
+		_defend_rules.add_child(_empty_note("Nothing is being defended."))
+
+
+func _empty_note(text: String) -> Label:
+	var empty := Label.new()
+	empty.text = text
+	empty.add_theme_font_size_override("font_size", 11)
+	empty.modulate = Color(0.6, 0.6, 0.6)
+	return empty
 
 func _make_rule_row(rule: Dictionary) -> HBoxContainer:
 	var row := HBoxContainer.new()
@@ -450,6 +731,11 @@ func _make_rule_row(rule: Dictionary) -> HBoxContainer:
 	info.text = _describe(rule)
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	info.add_theme_font_size_override("font_size", 11)
+	# Wrapped, because a Label's minimum width is its whole line: in a column half the panel
+	# wide an unwrapped rule description does not merely overflow, it pushes the column open
+	# from the inside and takes the checkbox and the remove button off the edge with it.
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.custom_minimum_size = Vector2(60, 0)
 	if not bool(rule.get("enabled", true)):
 		info.modulate = Color(0.55, 0.55, 0.55)
 	row.add_child(info)
@@ -463,6 +749,16 @@ func _make_rule_row(rule: Dictionary) -> HBoxContainer:
 	return row
 
 func _describe(rule: Dictionary) -> String:
+	if str(rule.get("type", "")) == "defend":
+		var against: Array = []
+		if bool(rule.get("asteroids", false)):
+			against.append("asteroids")
+		if bool(rule.get("weapons", false)):
+			against.append("weapons")
+		var where: String = str(rule.get("planet", "?"))
+		return "Defend  ·  %s from %s" % [
+			"Everywhere" if where == DEFEND_ANY else where.capitalize(),
+			" and ".join(against) if not against.is_empty() else "nothing"]
 	if str(rule.get("type", "")) == "build":
 		return "Build  ·  keep ≥ %d × %s on %s" % [
 			int(rule.get("target", 1)),

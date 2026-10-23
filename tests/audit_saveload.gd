@@ -28,7 +28,10 @@ func _run() -> void:
 	ss.aim_star_thrust(Vector3(1, 0, 0), "Sirius")
 	g.planet_buildings["sun"] = ["Star Lifter", "Shkadov Mirror", "Orbital Construction Station"]
 	g._mark_prod_dirty(); g._recompute_production_cache()
-	g.cluster_colonized = {"Cluster C-001": 0.33}
+	# A CURRENT cluster name.  "Cluster C-001" was the old series and is deliberately discarded
+	# on load now — clusters are addressed by tile ("Cluster -8:4-001") since the shell became
+	# streamed, and the old index does not identify anything in the new field.
+	g.cluster_colonized = {"Cluster -8:4-001": 0.33}
 	g.colonized_planets = ["mars"]
 	g._planet_inv("sun")["H2"] = 9.87e25
 	g.atmospheric_co2["earth"] = 3.0e19
@@ -79,6 +82,20 @@ func _run() -> void:
 	check(g.star_polity.size() == int(snapshot["polities"]), "polity holdings: %d vs %d" % [g.star_polity.size(), snapshot["polities"]])
 	check(g._factions.size() == int(snapshot["factions"]), "faction registry: %d vs %d" % [g._factions.size(), snapshot["factions"]])
 	check(g.cluster_colonized.size() == (snapshot["clusters"] as Dictionary).size(), "clusters")
+	check(g.cluster_colonized.has("Cluster -8:4-001"),
+		"a tile-addressed cluster survives the round trip: %s" % str(g.cluster_colonized))
+
+	# ── A save from before tile addressing loses its cluster records ──
+	# There is no honest migration: "Cluster C-042" was the 42nd seed of a 600-seed field that
+	# no longer exists, and the field now holds 2400 per tile in different places.  Dropping is
+	# better than rebinding it to whatever now sits at that index.
+	g.cluster_colonized["Cluster C-042"] = 0.5
+	g.cluster_aliens["Cluster C-042"] = 0.5
+	g._drop_unknown_clusters()
+	check(not g.cluster_colonized.has("Cluster C-042"), "a legacy cluster name is dropped")
+	check(not g.cluster_aliens.has("Cluster C-042"), "from both books")
+	check(g.cluster_colonized.has("Cluster -8:4-001"),
+		"and the current ones are left alone")
 	check((g.planet_buildings.get("sun", []) as Array).size() == int(snapshot["sun_buildings"]), "sun roster")
 	print("FAILS: ", fails)
 	quit()

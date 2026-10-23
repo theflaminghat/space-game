@@ -14,6 +14,14 @@ func check(ok: bool, msg: String) -> void:
 		fails += 1
 		print("FAIL: ", msg)
 
+## The star names out of a target list, dropping the clusters.
+func _stars_only(g: Node, names: Array) -> Array:
+	var out: Array = []
+	for n in names:
+		if not g.is_cluster(str(n)):
+			out.append(str(n))
+	return out
+
 func _initialize() -> void:
 	_run.call_deferred()
 
@@ -99,19 +107,31 @@ func _run() -> void:
 		"a swarm with nothing in flight still launches: %d" % g.interstellar_missions.size())
 
 	# ── An enclosed lineage retires instead of being searched forever ──
-	# Built deliberately rather than waited for: take one colony and claim everything its own
-	# search can reach, until it can reach nothing.  Then it is enclosed by construction, and
+	# Built deliberately rather than waited for: take one colony and claim every STAR its own
+	# search can reach, until it can reach none.  Then it is enclosed by construction, and
 	# whether it retires is a fact about the code rather than about how the run happened to go.
+	#
+	# Stars, and not clusters, is the whole of what "enclosed" means.  A cluster is never
+	# exhausted — the streamed patch always holds eight thousand of them and the swarm is
+	# allowed to reach one at any distance — so a lineage that counted them could not be
+	# enclosed by this construction or by any run, and the retirement path would never be taken.
 	var subject: String = str(g.colonized_stars[0])
 	var er: Dictionary = g._enroute_targets()
-	for _round in range(200):
-		var reachable: Array = g._nearest_uncolonised(g._star_pos(subject), 8, INF, false, er)
+	var rounds: int = 0
+	for _round in range(4000):
+		var reachable: Array = _stars_only(g, g._nearest_uncolonised(
+			g._star_pos(subject), 8, INF, false, er))
 		if reachable.is_empty():
 			break
+		rounds += 1
 		for r in reachable:
 			g._colonize_star(str(r))
-	check(g._nearest_uncolonised(g._star_pos(subject), 1, INF, false, er).is_empty(),
-		"the subject lineage now has nowhere to go")
+	check(_stars_only(g, g._nearest_uncolonised(g._star_pos(subject), 1, INF, false, er)).is_empty(),
+		"the subject lineage now has no star to go to (claimed over %d rounds)" % rounds)
+	# It can still see somewhere to send a probe — that is the point of the distinction.  The
+	# lineage retires anyway, having sent it.
+	check(not g._nearest_uncolonised(g._star_pos(subject), 1, INF, false, er).is_empty(),
+		"a cluster is still reachable, and being reachable is not enough to stay awake")
 	g._vn_seeds[subject] = true
 	# Only this one in the queue: tens of thousands are already waiting from the run above, and
 	# the time budget means a handful are worked per pass — appended at the back, the subject
@@ -122,10 +142,25 @@ func _run() -> void:
 	var had: bool = g._vn_seeds.has(subject)
 	# Work the queue directly: a whole tick also lands arrivals, and every arrival founds a
 	# colony that becomes a new seed, so the count moves for reasons that are not this.
+	var sent_before: int = g.interstellar_missions.size()
 	g._vn_work_queue()
 	check(had and not g._vn_seeds.has(subject),
 		"an enclosed lineage is retired, not retried forever")
-	print("enclosed lineage %s retired: %s" % [subject, str(not g._vn_seeds.has(subject))])
+	# ── And it sent on its way out ──
+	# Clusters fill the slots the stars leave over rather than competing for them, which is what
+	# makes "enclosed" answerable at all — but demoting them must not have made them
+	# unreachable.  An enclosed lineage is precisely the case where the fallback has to fire, so
+	# this is where to ask: it goes to a cluster, and sleeps anyway.
+	var went: Array = []
+	for m in g.interstellar_missions.slice(sent_before):
+		went.append(str(m.get("target", "")))
+	var to_cluster: bool = false
+	for t in went:
+		if g.is_cluster(str(t)):
+			to_cluster = true
+	check(to_cluster, "and it still sent to a cluster on the way out: %s" % str(went))
+	print("enclosed lineage %s retired: %s ; last sent to %s" % [
+		subject, str(not g._vn_seeds.has(subject)), str(went)])
 
 	# ── A cleared system goes to the colony nearest it ──
 	# Occupation reverses even though colonisation does not: our own weapons empty a system, and

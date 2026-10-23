@@ -89,7 +89,12 @@ func _run() -> void:
 			continue
 		var target: Node = ss if str(f.get("on", "game")) == "solar" else g
 		var got: Variant = target.get(SS_.prop_of(f))
-		if not _same(got, expect[key]):
+		# A field the table marks `completed` is filled in by load_game after it is decoded, so
+		# what it must prove is that the saved entries came BACK — not that nothing was added
+		# alongside them.  A field that is never read back still fails, which is the point.
+		var ok: bool = _contains(got, expect[key]) if bool(f.get("completed", false)) \
+			else _same(got, expect[key])
+		if not ok:
 			lost.append("%s (wanted %s, got %s)" % [key, str(expect[key]), str(got)])
 	check(lost.is_empty(), "every plain field came back: %s" % str(lost))
 
@@ -105,6 +110,19 @@ func _run() -> void:
 
 	print("FAILS: %d" % fails)
 	quit()
+
+
+## Whether every entry the save carried is present in what came back, for a field load_game
+## completes with defaults.  Nested one level, which is as deep as the marked fields go.
+func _contains(got: Variant, want: Variant) -> bool:
+	if not (got is Dictionary and want is Dictionary):
+		return _same(got, want)
+	for k: Variant in (want as Dictionary):
+		if not (got as Dictionary).has(k):
+			return false
+		if not _same((got as Dictionary)[k], (want as Dictionary)[k]):
+			return false
+	return true
 
 
 ## A value of the right shape that the game would never produce on its own.

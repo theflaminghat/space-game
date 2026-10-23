@@ -261,7 +261,13 @@ func _day_of_week(y: int, m: int, d: int) -> int:
 	var yy: int = y
 	if m < 3:
 		yy -= 1
-	return (yy + yy / 4 - yy / 100 + yy / 400 + t[m - 1] + d) % 7
+	# Sakamoto's day-of-week, which like the JDN formula below is DEFINED on floor division:
+	# the yy/4 - yy/100 + yy/400 terms are a leap-day count and the remainder is what must be
+	# dropped.  yy is positive for any year this calendar is asked about, so truncating toward
+	# zero and flooring are the same thing here.
+	@warning_ignore("integer_division")
+	var leaps: int = yy / 4 - yy / 100 + yy / 400
+	return (yy + leaps + t[m - 1] + d) % 7
 
 
 func _date_before(ay: int, am: int, ad: int, by: int, bm: int, bd: int) -> bool:
@@ -271,8 +277,20 @@ func _date_before(ay: int, am: int, ad: int, by: int, bm: int, bd: int) -> bool:
 
 
 ## Julian Day Number — used only for offset arithmetic.
+##
+## The integer divisions are the algorithm, not a rounding slip: the standard Gregorian-to-JDN
+## formula is defined on FLOOR division, and discarding the remainder is what makes the leap-year
+## terms (yy/4 - yy/100 + yy/400) count centuries correctly.  GDScript's `/` on two ints truncates
+## toward zero rather than flooring, which differs only for negative operands — and none occur
+## here: m is 1..12 so (14 - m) is positive, and yy = y + 4800 - a is positive for any year this
+## calendar can be asked about.
 func _to_jdn(y: int, m: int, d: int) -> int:
+	@warning_ignore("integer_division")
 	var a:  int = (14 - m) / 12
 	var yy: int = y + 4800 - a
 	var mm: int = m + 12 * a - 3
-	return d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045
+	@warning_ignore("integer_division")
+	var leap: int = yy / 4 - yy / 100 + yy / 400
+	@warning_ignore("integer_division")
+	var months: int = (153 * mm + 2) / 5
+	return d + months + 365 * yy + leap - 32045

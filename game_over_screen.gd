@@ -318,9 +318,11 @@ func _build_stats_text(stats: Dictionary, people_ever_lived: float) -> String:
 func _fmt_sci(v: float) -> String:
 	if v <= 0.0:
 		return "0"
-	var exp: int = int(floor(log(v) / log(10.0)))
-	var mant: float = v / pow(10.0, exp)
-	return "%.2fe%d" % [mant, exp]
+	# `expo`, not `exp`: that is a built-in function, and shadowing it hides exp() from the rest
+	# of this scope as well as warning on every reload.
+	var expo: int = int(floor(log(v) / log(10.0)))
+	var mant: float = v / pow(10.0, expo)
+	return "%.2fe%d" % [mant, expo]
 
 ## Format very large population figures with appropriate SI suffix.
 func _fmt_pop_large(v: float) -> String:

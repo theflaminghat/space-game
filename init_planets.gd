@@ -21,9 +21,12 @@ const EARTH_ORBIT_DAYS:   float = 365.25
 ## cross like a 3D swarm.  Each collector is one Solar Satellite the player has
 ## manufactured and launched to the Sun: satellites fill the evenly-spaced slots of
 ## one lane, and once a lane is full new arrivals spill into the next lane.
-const SWARM_LANES:    int   = 18    # more lanes, each packed with as many panels as fit
+## KEEP IN SYNC with Game.SWARM_LANES / SWARM_INNER_AU / SWARM_OUTER_AU, which price the swarm.
+## Lanes are 0.00235294 AU apart — a quarter of the original spacing — and the inner one is
+## fixed, so 21 of them reach 0.10 + 20 x 0.00235294 = 0.147059 AU.
+const SWARM_LANES:    int   = 21
 const SWARM_INNER_AU: float = 0.10   # hugs the Sun, inside Mercury's orbit
-const SWARM_OUTER_AU: float = 0.18   # KEEP IN SYNC with Game.SWARM_OUTER_AU
+const SWARM_OUTER_AU: float = 0.147059
 const PANEL_W:    float = 0.30   # collector panel width (game units)
 const PANEL_THIN: float = 0.04   # panel thickness
 ## Arc length each panel occupies on its ring (panel width + a clear gap), so a lane fits
@@ -95,10 +98,10 @@ func _process(delta: float) -> void:
 ## Show the swarm whenever the solar system is active or the game is paused, so it
 ## stays visible for inspection even after the orbit-freeze cutoff year.
 func _sync_visibility() -> void:
-	var show: bool = SolarSystem.solar_system_active \
+	var swarm_on: bool = SolarSystem.solar_system_active \
 		or SolarSystem.paused or SolarSystem.ui_paused
 	if _swarm_mmi:
-		_swarm_mmi.visible = show
+		_swarm_mmi.visible = swarm_on
 		# Make sure a freshly-paused (or just-loaded) swarm shows the right count
 		# and is positioned, even though _process is suspended while paused.
 		_refresh_swarm_count()
@@ -262,7 +265,12 @@ func _update_swarm_transforms() -> void:
 		# PANEL_W — narrower than the slot spacing, so neighbours never overlap.
 		var radial:  Vector3 = (lb * Vector3(cos(th), 0.0, sin(th)))
 		var tangent: Vector3 = (lb * Vector3(-sin(th), 0.0, cos(th)))
-		var across:  Vector3 = radial.cross(tangent).normalized()
+		# tangent x radial, so Basis(tangent, radial, across) is right-handed — see the note in
+		# Planet._update_infra.  Nothing visible changes here: a collector is a flat panel and
+		# mirroring one about its own plane gives the same quad in the same place.  It is fixed
+		# anyway because it is the same defect, and the day a panel stops being symmetrical is
+		# not the day to be discovering it.
+		var across:  Vector3 = tangent.cross(radial).normalized()
 		var b := Basis(tangent * PANEL_W, radial * PANEL_THIN, across * PANEL_W)
 		_swarm_mm.set_instance_transform(i, Transform3D(b, pos))
 
@@ -299,11 +307,15 @@ func _refresh_swarm_count() -> void:
 func get_swarm_max() -> int:
 	return _swarm_max
 
-## How many Solar Satellites have arrived at the Sun (read from Game).
+## How many swarm panels exist (read from Game): Solar Satellites that have arrived at the Sun
+## plus Swarm Collector Arrays built in solar orbit.  Game.swarm_panels() is the one accessor
+## that counts both; the raw field is the fallback for an older Game without it.
 func _deployed_satellite_count() -> int:
 	var game := get_tree().current_scene
 	if game == null:
 		return 0
+	if game.has_method("swarm_panels"):
+		return int(game.swarm_panels())
 	var n: Variant = game.get("solar_satellites_deployed")
 	return int(n) if n != null else 0
 

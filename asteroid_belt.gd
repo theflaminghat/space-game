@@ -462,11 +462,11 @@ func _update_transforms() -> void:
 			_incl_amp[i] * sin(ang + _node_phase[i]),
 			r_vis * cos(ang))
 
-		var basis := Basis(_spin_axis[i], _spin_angle[i]).scaled(
+		var rock_basis := Basis(_spin_axis[i], _spin_angle[i]).scaled(
 			Vector3(_size[i], _size[i], _size[i]))
 
 		_multimeshes[_variant[i]].set_instance_transform(
-			_local_idx[i], Transform3D(basis, pos))
+			_local_idx[i], Transform3D(rock_basis, pos))
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

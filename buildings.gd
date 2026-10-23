@@ -53,6 +53,15 @@ const LEVEL_SUFFIX:      Array = ["", " II", " III", " IV", " V"]
 ## One research node per tier, shared by every building — a single breakthrough scales the
 ## whole industrial base rather than gating each structure separately.
 const LEVEL_RESEARCH: Array = ["", "precision_manufacturing", "autonomous_factories"]
+## The microchip grade each tier is built from.  A structure whose level-1 cost lists "Microchip"
+## has that entry SUBSTITUTED for the chip of its tier, so levelling the industrial base means
+## standing up a fabrication line for the better chip first — the research that unlocks the chip
+## is not enough on its own, because the chip is a different item that has to be produced.
+##
+## Only buildings that already needed chips are affected; a concrete mine still needs concrete.
+const LEVEL_CHIP: Array = ["Microchip", "AdiabaticChip", "ReversibleChip"]
+## The key in an authored cost that the table above replaces.
+const CHIP_COST_KEY: String = "Microchip"
 ## Dictionary blocks scaled by output.  "consumption" is included deliberately: a bigger plant
 ## burns proportionally more fuel, so tiers don't quietly become free energy.
 const LEVEL_OUTPUT_KEYS: Array = ["production", "storage", "consumption"]
@@ -192,6 +201,13 @@ static func _scaled(base: Dictionary, level: int) -> Dictionary:
 	var costs: Dictionary = d.get("cost", {})
 	for k: String in costs:
 		costs[k] = float(costs[k]) * cost_f
+	# A higher tier is built from a better chip.  Substituted rather than added, so the bill is
+	# the same shape it always was — this tier simply cannot be built out of the old generation's
+	# electronics.
+	var chip: String = str(LEVEL_CHIP[mini(level - 1, LEVEL_CHIP.size() - 1)])
+	if chip != CHIP_COST_KEY and costs.has(CHIP_COST_KEY):
+		costs[chip] = costs[CHIP_COST_KEY]
+		costs.erase(CHIP_COST_KEY)
 	for key: String in LEVEL_OUTPUT_KEYS:
 		var blk: Dictionary = d.get(key, {})
 		for k: String in blk:
@@ -257,6 +273,7 @@ const DESCRIPTIONS: Dictionary = {
 	"Workshop": "Assembly halls and machine tools. Adds factory capacity to its world: the manufacturing work that recipes and construction draw on each day.",
 	"Nuclear Plant": "Pressurised-water reactor. Burns enriched uranium from Uranium Enrichment or Thorium Activation and emits no CO₂. Each reactor counts toward latent weapons capability, which raises the probability of nuclear war while humanity is concentrated on few worlds.",
 	"Research Lab": "A world's instrumented laboratories. Adds fixed compute on top of the population's own thinking.",
+	"Swarm Collector Array": "One Dyson swarm collector array, assembled in solar orbit rather than launched from a surface. Identical to a deployed Solar Satellite: it occupies one slot in the innermost lane with a free slot, and the power it beams back is set by that lane's distance from the Sun and by the Sun's current output. The swarm's total capacity is fixed by lane geometry, so arrays built here and satellites flown here compete for the same slots.",
 	"Observatory": "Optical survey telescope. Adds signature-detection power, which sets how quickly alien civilisations are resolved once their light has reached Sol. Detection power is zero until Radio Astronomy is researched.",
 	"Radio Telescope Array": "Radio dishes and a correlator. Adds signature-detection power.",
 	"Space Telescope": "Observatory in orbit, above atmospheric absorption and noise. Adds signature-detection power.",
@@ -849,6 +866,23 @@ const BUILDINGS := [
 	# greenhouse forcing directly.  And every solar collector on a shaded world makes less, which
 	# is the price.  Overshoot and the ceiling falls again on the other side — an iced world is
 	# as hostile as a cooked one.
+	# A swarm collector array assembled in solar orbit instead of lofted from a launch pad.
+	# One of these is exactly one Solar Satellite's worth — SWARM_COLLECTORS_PER_PANEL
+	# collectors station-kept as a unit — and it takes the same slot in the same lane, so the
+	# two routes to a swarm are interchangeable and share one cap (Game._swarm_max()).
+	#
+	# `production` is deliberately EMPTY.  The power a collector beams back is computed by
+	# Game._swarm_power(), which prices each lane by its own 1/r² flux and scales the lot with
+	# the Sun's current luminosity; an "energy" entry here would be that power counted a second
+	# time, at a flat rate, with no lane and no star behind it.  The marker below is what tells
+	# the swarm this building is one of its panels.
+	{"name": "Swarm Collector Array",
+		"category": "support",
+		"allowed_types": ["star"],
+		"cost": {"SolarPanel": 8_000_000, "Al": 2_400_000, "Microchip": 200_000,
+			"Metamaterial": 1_500_000, "energy": 30_000_000},
+		"production": {},
+		"swarm_panels": 1},
 	{"name": "Sunshade Constellation",
 		"category": "support",
 		"allowed_types": ["star"],

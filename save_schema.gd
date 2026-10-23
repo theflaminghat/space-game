@@ -76,6 +76,10 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "star_age_offset",    "on": ON_SOLAR, "prop": "star_age_offset_years",
 		"kind": FLOAT, "default": 0.0},
 	{"key": "star_drift_ly",      "on": ON_SOLAR, "kind": VEC3, "default": null},
+	# The same journey as a 64-bit scalar; the vector above saturates past ~1.8e19 ly.  A save
+	# written before this existed carries no value, and Game._migrate_star_drift takes the
+	# vector's own length instead — which is exact for any drift an older run could have had.
+	{"key": "star_drift_dist_ly", "on": ON_SOLAR, "kind": FLOAT, "default": -1.0},
 	{"key": "star_velocity_ms",   "on": ON_SOLAR, "kind": FLOAT, "default": 0.0},
 	{"key": "star_thrust_dir",    "on": ON_SOLAR, "kind": VEC3, "default": null},
 	{"key": "star_thrust_target", "on": ON_SOLAR, "kind": STR, "default": ""},
@@ -101,7 +105,16 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "automation_rules",   "custom": true},   # lives in the automation panel
 	{"key": "policies",           "custom": true},   # retired policies are dropped
 	{"key": "entropy_exported",   "kind": FLOAT, "default": 0.0},
+	# The single forecast/research split, kept so an old save can be migrated into the per-track
+	# allocation below (Game._migrate_compute_alloc).  Nothing reads it to decide anything.
 	{"key": "compute_forecast_share", "kind": FLOAT, "default": 0.0},
+	# track -> {human, ai} budget weights, and each simulation's accumulated frontier year.
+	# `completed` marks a field that load_game deliberately FILLS IN after decoding it — here
+	# Game._migrate_compute_alloc, which adds any track or frontier the file did not carry so an
+	# older save resumes with a whole allocation.  The schema audit checks such a field for
+	# containment rather than equality; without the marker the completion reads as corruption.
+	{"key": "compute_alloc",      "kind": DICT_DICT,  "default": null, "completed": true},
+	{"key": "foresight_frontier", "kind": DICT_FLOAT, "default": null, "completed": true},
 	{"key": "atmospheric_co2",    "kind": DICT_FLOAT, "default": null},
 	{"key": "solar_satellites_deployed", "custom": true},  # migrated arrays add to it
 
@@ -114,6 +127,21 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "colonized_year",     "prop": "_colonized_year", "custom": true},   # back-filled
 	{"key": "split_thresholds",   "prop": "_split_thresholds", "custom": true}, # back-filled
 	{"key": "colony_parent",      "prop": "_colony_parent", "kind": DICT_STR, "default": null},
+	# Which population settled each world, and the standing order for the next colony ship.
+	# Custom because loading VALIDATES rather than copies: every stock that comes off disk is
+	# put through StockData.normalise, so a renamed id, a hand-edited file and a save from
+	# before stocks existed all arrive as a stock the accessors can read — including the cached
+	# trait key the population loop reads, which is rebuilt from the traits rather than trusted.
+	# A file without either key loads every world as the unedited baseline, which is what such
+	# a run was; a file naming one of the life histories traits replaced loads unedited too,
+	# because those were selected rather than written and have no equivalent.
+	{"key": "world_stock",        "prop": "_world_stock", "custom": true},
+	{"key": "colony_stock",       "custom": true},
+	# Sequences the civilisation holds, and the requests still in flight. Both are plain: an
+	# older save simply has an empty archive, which is what a run that never traded with its
+	# own colonies had, and load filters out any id that is no longer a trait.
+	{"key": "lineage_archive",    "kind": DICT_TRUE, "default": null},
+	{"key": "lineage_transfers",  "kind": ARRAY_DICT, "default": null},
 	{"key": "colony_year",        "prop": "_colony_year", "kind": DICT_INT, "default": null},
 	{"key": "variant_parent",     "custom": true},   # replays the evolution tree into the UI
 	{"key": "engulfed_planets",   "prop": "_engulfed_planets", "kind": DICT_TRUE, "default": null},
@@ -153,6 +181,9 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "alien_last_year",  "prop": "_alien_last_year", "kind": FLOAT,
 		"default": DEFAULT_YEAR},
 	{"key": "deterrent_active", "prop": "_deterrent_active", "kind": BOOL, "default": false},
+	# Latched the first time a star outside the home cell is held; unlocks the Sol cluster on
+	# the map.  Saved rather than re-derived so it survives losing the colony that set it.
+	{"key": "left_sol_cell", "prop": "left_sol_cell", "kind": BOOL, "default": false},
 	{"key": "diplo_status",     "prop": "_diplo_status", "kind": DICT_STR, "default": null},
 	{"key": "grudges",          "prop": "_grudges", "kind": DICT_INT, "default": null},
 

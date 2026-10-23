@@ -1,9 +1,25 @@
 extends PanelContainer
 
 ## Population-statistics tab of the merged planet panel.  Fed by Game each tick (while its
-## tab is visible) via set_stats — a flat, instrument-style readout of the species' numbers.
+## tab is visible) via set_stats — a flat, instrument-style readout of the species' numbers,
+## and, once Synthetic Biology is in, the one place a world's own people can be rewritten.
+
+## The player asked for a sequence to be spliced into this world's population.  Game is the
+## authority (see splice_block_reason) and pushes the accepted state back.
+signal lineage_direct_requested(world: String, trait_id: String)
 
 var _value_labels: Dictionary = {}   # row key → value Label
+
+# ── Engineering this world's people ──────────────────────────────────────────
+## Hidden until Synthetic Biology is researched.  Before that the only sequences a civilisation
+## has are the ones its colonies wrote and sent home, and the place to ask is the star map — and a
+## control that is permanently greyed teaches that less well than one that is not there yet.
+var _bio_box:     VBoxContainer = null
+var _bio_opt:     OptionButton  = null
+var _bio_status:  Label         = null
+var _bio_ids:     Array         = []
+var _bio_world:   String        = ""
+var _bio_quiet:   bool          = false
 
 ## Swallow scroll-wheel so hovering this tab doesn't zoom the 3-D camera behind it.
 func _gui_input(event: InputEvent) -> void:
@@ -59,6 +75,67 @@ func _ready() -> void:
 		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		grid.add_child(v)
 		_value_labels[key] = v
+
+	_build_bio_ui(vbox)
+
+
+## The splicing control: what this world's people carry, and what could be written into them.
+func _build_bio_ui(parent: Control) -> void:
+	_bio_box = VBoxContainer.new()
+	_bio_box.add_theme_constant_override("separation", 3)
+	_bio_box.hide()
+	parent.add_child(HSeparator.new())
+	parent.add_child(_bio_box)
+
+	var title := Label.new()
+	title.text = "Applied genomics"
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color(0.72, 0.90, 0.80))
+	title.tooltip_text = "Synthetic Biology writes a sequence from first principles rather than waiting for a colony to work one out. It does not deliver people: the sequence is information, and getting it into a living population is still a couple of generations of germ-line work."
+	_bio_box.add_child(title)
+
+	_bio_status = Label.new()
+	_bio_status.add_theme_font_size_override("font_size", 11)
+	_bio_status.modulate = Color(0.75, 0.82, 0.95)
+	_bio_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bio_box.add_child(_bio_status)
+
+	_bio_opt = OptionButton.new()
+	_bio_opt.fit_to_longest_item = false
+	_bio_opt.clip_text = true
+	_bio_opt.item_selected.connect(func(i: int) -> void:
+		if _bio_quiet or i <= 0 or _bio_world == "" or i - 1 >= _bio_ids.size():
+			return
+		lineage_direct_requested.emit(_bio_world, str(_bio_ids[i - 1])))
+	_bio_box.add_child(_bio_opt)
+
+
+## Game's answer about this world's lineage and what may be done to it.
+##
+## Everything comes from Game: which sequences can go in here, what the population
+## currently is, and how far any programme has to run.  The panel shows what comes back and
+## nothing it was not given, so an option it offers is one the simulation will accept.
+func set_lineage(state: Dictionary) -> void:
+	if _bio_box == null:
+		return
+	if state.is_empty() or not bool(state.get("unlocked", false)):
+		_bio_box.hide()
+		return
+	_bio_box.show()
+	_bio_world = str(state.get("world", ""))
+	_bio_status.text = str(state.get("text", ""))
+	var targets: Array = state.get("targets", []) as Array
+	_bio_quiet = true
+	_bio_opt.clear()
+	_bio_ids = []
+	_bio_opt.add_item("Splice in…")
+	for t: Dictionary in targets:
+		_bio_opt.add_item(str(t["label"]))
+		_bio_opt.set_item_tooltip(_bio_ids.size() + 1, str(t.get("blurb", "")))
+		_bio_ids.append(str(t["id"]))
+	_bio_opt.selected = 0
+	_bio_opt.disabled = targets.is_empty()
+	_bio_quiet = false
 
 ## Push the current figures.  `data` keys mirror ROWS' meaning:
 ##   population, capacity, life_expectancy, worlds, star_systems, ever_lived

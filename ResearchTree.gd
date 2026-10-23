@@ -68,6 +68,7 @@ func load_tree(node_list: Array) -> void:
 		nodes[node.id] = node
 		node.state = ResearchNode.State.LOCKED
 		node.progress = 0.0
+		node.level = 0
 		node.unlocks.clear()
 		node.tier = 0
 
@@ -115,7 +116,9 @@ func start_research(node_id: String) -> bool:
 
 	var node: ResearchNode = nodes[node_id]
 
-	if node.state == ResearchNode.State.UNLOCKED:
+	# A repeatable node stays UNLOCKED between passes — that is what keeps everything gating on
+	# is_unlocked() satisfied — so being unlocked only refuses it when there is no pass left.
+	if node.state == ResearchNode.State.UNLOCKED and not node.has_next_level():
 		push_warning("ResearchTree: '%s' is already unlocked." % node_id)
 		return false
 
@@ -173,7 +176,10 @@ func cancel_research() -> void:
 	if active_research == null:
 		return
 	var node := active_research
-	node.state = ResearchNode.State.AVAILABLE
+	# A cancelled UPGRADE drops back to what the node already was, not to unresearched: the
+	# earlier passes are still done and still paying out.
+	node.state = ResearchNode.State.UNLOCKED if node.is_known() \
+		else ResearchNode.State.AVAILABLE
 	node.progress = 0.0
 	active_research = null
 	set_research_paused(false)   # nothing active to hold
@@ -201,7 +207,8 @@ func _prereqs_scheduled(node: ResearchNode) -> bool:
 		var pre: ResearchNode = nodes.get(pre_id)
 		if pre == null:
 			continue
-		if pre.state == ResearchNode.State.UNLOCKED or pre.state == ResearchNode.State.RESEARCHING or research_queue.has(pre_id):
+		if pre.is_known() or pre.state == ResearchNode.State.RESEARCHING \
+				or research_queue.has(pre_id):
 			continue
 		return false
 	return true
@@ -213,7 +220,10 @@ func can_queue(node_id: String) -> bool:
 	var node: ResearchNode = nodes.get(node_id)
 	if node == null:
 		return false
-	if node.state == ResearchNode.State.UNLOCKED or node.state == ResearchNode.State.RESEARCHING:
+	if node.state == ResearchNode.State.RESEARCHING:
+		return false
+	# Unlocked is not the end of the road for a repeatable node; it is between passes.
+	if node.state == ResearchNode.State.UNLOCKED and not node.has_next_level():
 		return false
 	if research_queue.has(node_id):
 		return false
@@ -242,6 +252,22 @@ func force_unlock(node_id: String) -> void:
 	var node: ResearchNode = nodes[node_id]
 	node.state = ResearchNode.State.UNLOCKED
 	node.progress = 1.0
+	# One pass per call, so calling this repeatedly walks a repeatable node up its levels; an
+	# already-maxed node is left where it is rather than counting past its own ceiling.
+	node.level = mini(maxi(node.level, 0) + 1, node.max_level)
+	node_state_changed.emit(node)
+	_refresh_children_availability(node)
+	_recompute_boosts()
+
+
+## Take a repeatable node straight to its last level (cheat / debug / test setup).
+func force_max_level(node_id: String) -> void:
+	if not nodes.has(node_id):
+		return
+	var node: ResearchNode = nodes[node_id]
+	node.state = ResearchNode.State.UNLOCKED
+	node.progress = 1.0
+	node.level = node.max_level
 	node_state_changed.emit(node)
 	_refresh_children_availability(node)
 	_recompute_boosts()
@@ -253,6 +279,7 @@ func reset_node(node_id: String) -> void:
 		return
 	var node: ResearchNode = nodes[node_id]
 	node.progress = 0.0
+	node.level = 0
 	_refresh_single_availability(node)
 	node_state_changed.emit(node)
 
@@ -275,16 +302,19 @@ func tick(_delta: float, research_speed: float = 1.0) -> void:
 	# every point of science banked is poured into the active node until the requirement is met.
 	# Nothing is on a wall clock — double your research output and everything finishes twice as
 	# fast; let it collapse and progress simply stalls where it stands.
-	var need: float = float(active_research.cost.get("science", 0.0))
+	# The pass being paid for, not the first one: a repeatable node's second pass costs more.
+	var need: float = float(active_research.cost_for_next_level().get("science", 0.0))
 	if need <= 0.0:
 		_complete_research(active_research)
 		return
 	var pool: float = float(resources.get("science", 0.0))
 	if pool <= 0.0:
 		return
-	# research_speed makes each point of science count for more, rather than adding time.  The
-	# "research_speed" boost is NOT applied here: Game already multiplies compute by it, and
-	# science is produced from compute, so applying it again would square the bonus.
+	# `research_speed` is a caller-supplied multiplier and defaults to 1.0; nothing passes
+	# anything else.  How much science a civilisation gets out of its thinking is decided on the
+	# production side, where the research BUDGET is multiplied by the efficiency of whichever
+	# pool it came from (Game.human_research_efficiency / ai_research_efficiency).  Applying an
+	# efficiency here as well would count it twice.
 	var effective_speed: float = maxf(0.01, research_speed)
 	var remaining_frac: float = 1.0 - active_research.progress
 	var gained: float = minf(pool * effective_speed / need, remaining_frac)
@@ -304,14 +334,14 @@ func get_research_node(node_id: String) -> ResearchNode:
 
 func is_unlocked(node_id: String) -> bool:
 	var n = nodes.get(node_id)
-	return n != null and n.state == ResearchNode.State.UNLOCKED
+	return n != null and n.is_known()
 
 func is_available(node_id: String) -> bool:
 	var n = nodes.get(node_id)
 	return n != null and n.state == ResearchNode.State.AVAILABLE
 
 func get_unlocked_nodes() -> Array:
-	return nodes.values().filter(func(n): return n.state == ResearchNode.State.UNLOCKED)
+	return nodes.values().filter(func(n): return n.is_known())
 
 func get_available_nodes() -> Array:
 	return nodes.values().filter(func(n): return n.state == ResearchNode.State.AVAILABLE)
@@ -338,7 +368,8 @@ func save_state() -> Dictionary:
 		var n: ResearchNode = nodes[id]
 		state_data[id] = {
 			"state": n.state,
-			"progress": n.progress
+			"progress": n.progress,
+			"level": n.level,
 		}
 	return {
 		"nodes": state_data,
@@ -360,6 +391,16 @@ func load_state(saved: Dictionary) -> void:
 		var n: ResearchNode = nodes[id]
 		n.state = node_data[id].get("state", ResearchNode.State.LOCKED)
 		n.progress = node_data[id].get("progress", 0.0)
+		# A save written before levels existed carries no "level", and every unlocked node in it
+		# was taken exactly once — so the state is the level, and an old save loads as a tree
+		# with every repeatable line of work sitting at its first pass.
+		var lv: int = int(node_data[id].get("level",
+			1 if n.state == ResearchNode.State.UNLOCKED else 0))
+		n.level = clampi(lv, 0, n.max_level)
+		# A node recorded as unlocked must hold at least one pass, or it would gate things open
+		# while contributing nothing.
+		if n.state == ResearchNode.State.UNLOCKED:
+			n.level = maxi(n.level, 1)
 		node_state_changed.emit(n)
 
 	research_queue = saved.get("research_queue", []).duplicate()
@@ -384,6 +425,10 @@ func load_state(saved: Dictionary) -> void:
 func _complete_research(node: ResearchNode) -> void:
 	node.state = ResearchNode.State.UNLOCKED
 	node.progress = 1.0
+	# Banked before the boosts are recomputed below, because that is what reads it.  A node with
+	# passes left is still UNLOCKED: the state says "this is known", and the level says how far
+	# it has been taken.
+	node.level = mini(maxi(node.level, 0) + 1, node.max_level)
 	active_research = null
 	set_research_paused(false)   # job done; the next queued one starts running, not held
 	node_state_changed.emit(node)
@@ -428,7 +473,7 @@ func _advance_queue() -> void:
 
 func _refresh_all_availability() -> void:
 	for node in nodes.values():
-		if node.state != ResearchNode.State.UNLOCKED:
+		if not node.is_known():
 			_refresh_single_availability(node)
 
 
@@ -439,9 +484,9 @@ func _refresh_children_availability(parent: ResearchNode) -> void:
 
 
 func _refresh_single_availability(node: ResearchNode) -> void:
-	if node.state == ResearchNode.State.UNLOCKED:
-		return
-	if node.state == ResearchNode.State.RESEARCHING:
+	# Known or running: nothing to reconsider.  `is_known` rather than the UNLOCKED state, so a
+	# node part-way through an upgrade is not demoted to AVAILABLE underneath the active job.
+	if node.is_known() or node.state == ResearchNode.State.RESEARCHING:
 		return
 
 	var old_state: ResearchNode.State = node.state
@@ -460,11 +505,15 @@ func _recompute_boosts() -> void:
 	active_boosts.clear()
 	for n_v: Variant in nodes.values():
 		var n: ResearchNode = n_v as ResearchNode
-		if n.state != ResearchNode.State.UNLOCKED:
+		if not n.is_known():
 			continue
-		for boost_type_v: Variant in n.boosts.keys():
+		# One pass' worth of boost per level taken.  Linear rather than compounding, so the
+		# fifth pass of a node is worth exactly what the first was and the cost curve alone
+		# decides when pushing it further stops being worth it.
+		var contrib: Dictionary = n.boosts_at_level()
+		for boost_type_v: Variant in contrib.keys():
 			var boost_type: String = boost_type_v as String
-			active_boosts[boost_type] = active_boosts.get(boost_type, 0.0) + float(n.boosts[boost_type])
+			active_boosts[boost_type] = active_boosts.get(boost_type, 0.0) + float(contrib[boost_type])
 
 
 ## Returns the total additive bonus for a boost type (0.0 if none active).

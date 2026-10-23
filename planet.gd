@@ -50,8 +50,15 @@ const MOON_TEXTURES := {
 ## instance orbits per building of that type the player has raised there.
 ## Every orbital structure gets a lane, a stand-in shape and the shared placeholder texture, so
 ## anything the player puts in orbit is actually visible there — around a planet or around the
-## Sun.  Lanes are spaced 0.25 apart in planet radii; colour groups them by what they do
+## Sun.  Lanes are spaced 0.04 apart in planet radii; colour groups them by what they do
 ## (amber = heat, blue = power link, grey = storage, green = people).
+##
+## The band runs 0.980 .. 1.780 planet radii, which around the SUN puts it OUTSIDE the Dyson
+## swarm rather than through it.  Both bands scale with the star, so the comparison is a fixed
+## one: at the Sun's base scale of ~4.70 these lanes span 4.61 .. 8.37 world units, against the
+## swarm's 3.05 .. 4.39 and Mercury's perihelion at 8.58.  It used to run 0.640 .. 1.700, i.e.
+## 3.01 .. 7.99 — straight through the collector shell, with most of the infrastructure
+## embedded in it.  tests/verify_infra_band.gd holds all three apart.
 ##
 ## "ground" marks the two that are NOT orbital on a world with a surface: a radiator field and a
 ## superconducting storage ring both stand on the ground of a rocky planet.  They still get a
@@ -63,36 +70,56 @@ const MOON_TEXTURES := {
 const INFRA_PLANE_ANGLE: float = 2.399963229728653
 
 const INFRA_LANES := [
-	{"type": "Orbital Laser",         "radius": 0.721, "color": Color(1.00, 0.45, 0.40), "mesh": "rod"},
-	{"type": "Space Telescope",       "radius": 0.786, "color": Color(0.60, 0.85, 1.00), "mesh": "cyl"},
-	{"type": "Thermal Radiator",      "radius": 0.851, "color": Color(0.95, 0.75, 0.40), "mesh": "flat",
-		"ground": true},
-	{"type": "Orbital Vault",         "radius": 0.917, "color": Color(0.72, 0.74, 0.80), "mesh": "box"},
-	{"type": "Orbital Battery",       "radius": 0.982, "color": Color(0.50, 0.95, 0.62), "mesh": "box"},
+	{"type": "Orbital Laser",         "radius": 1.140, "color": Color(1.00, 0.45, 0.40),
+		"mesh": "laser", "texture": "res://models/orbital_laser_albedo.png"},
+	{"type": "Space Telescope",       "radius": 1.220, "color": Color(0.60, 0.85, 1.00),
+		"mesh": "telescope", "texture": "res://models/orbital_telescope_albedo.png"},
+	{"type": "Thermal Radiator",      "radius": 1.260, "color": Color(0.95, 0.75, 0.40),
+		"mesh": "thermal", "ground": true,
+		"texture": "res://models/orbital_thermal_radiator_albedo.png"},
+	{"type": "Orbital Vault",         "radius": 1.300, "color": Color(0.72, 0.74, 0.80), "mesh": "depot",
+		"texture": "res://models/orbital_depot_albedo.png"},
+	{"type": "Orbital Battery",       "radius": 1.340, "color": Color(0.50, 0.95, 0.62),
+		"mesh": "battery", "texture": "res://models/orbital_battery_albedo.png"},
 	# Power link: receiving and transmitting apertures.
-	{"type": "Microwave Uplink",      "radius": 1.047, "color": Color(0.55, 0.80, 0.95), "mesh": "dish"},
-	{"type": "Orbital Rectenna",      "radius": 1.113, "color": Color(0.45, 0.75, 1.00), "mesh": "dish"},
-	{"type": "Power Relay Satellite", "radius": 1.178, "color": Color(0.70, 0.70, 1.00), "mesh": "dish"},
-	{"type": "Orbital Power Grid",    "radius": 1.243, "color": Color(0.60, 0.72, 1.00), "mesh": "flat"},
-	{"type": "Stellar Rectenna Grid", "radius": 1.308, "color": Color(0.40, 0.68, 1.00), "mesh": "flat"},
-	{"type": "Swarm Relay Network",   "radius": 1.374, "color": Color(0.78, 0.68, 1.00), "mesh": "dish"},
+	{"type": "Microwave Uplink",      "radius": 1.380, "color": Color(0.55, 0.80, 0.95),
+		"mesh": "uplink", "texture": "res://models/orbital_uplink_albedo.png"},
+	{"type": "Orbital Rectenna",      "radius": 1.420, "color": Color(0.45, 0.75, 1.00),
+		"mesh": "rectenna", "texture": "res://models/orbital_rectenna_albedo.png"},
+	{"type": "Power Relay Satellite", "radius": 1.460, "color": Color(0.70, 0.70, 1.00),
+		"mesh": "relay", "texture": "res://models/orbital_relay_sat_albedo.png"},
+	{"type": "Orbital Power Grid",    "radius": 1.500, "color": Color(0.60, 0.72, 1.00),
+		"mesh": "grid", "texture": "res://models/orbital_power_grid_albedo.png"},
+	{"type": "Stellar Rectenna Grid", "radius": 1.540, "color": Color(0.40, 0.68, 1.00),
+		"mesh": "rect_grid", "texture": "res://models/orbital_rectenna_grid_albedo.png"},
+	{"type": "Swarm Relay Network",   "radius": 1.580, "color": Color(0.78, 0.68, 1.00),
+		"mesh": "swarm_relay", "texture": "res://models/orbital_swarm_relay_albedo.png"},
 	# Heat: the other half of any large power economy.
-	{"type": "Orbital Radiator Array","radius": 1.439, "color": Color(1.00, 0.70, 0.35), "mesh": "flat"},
-	{"type": "Radiator Swarm",        "radius": 1.504, "color": Color(1.00, 0.62, 0.30), "mesh": "flat"},
+	{"type": "Orbital Radiator Array","radius": 1.620, "color": Color(1.00, 0.70, 0.35),
+		"mesh": "radiator", "texture": "res://models/orbital_radiator_array_albedo.png"},
+	{"type": "Radiator Swarm",        "radius": 1.660, "color": Color(1.00, 0.62, 0.30),
+		"mesh": "rad_swarm", "texture": "res://models/orbital_radiator_swarm_albedo.png"},
 	# Storage.
-	{"type": "Superconducting Storage Ring", "radius": 1.569, "color": Color(0.62, 0.90, 0.80),
-		"mesh": "ring", "ground": true},
-	{"type": "Orbital Ring Store",    "radius": 1.635, "color": Color(0.55, 0.85, 0.78), "mesh": "ring"},
+	{"type": "Superconducting Storage Ring", "radius": 1.700, "color": Color(0.62, 0.90, 0.80),
+		"mesh": "sc_ring", "ground": true,
+		"texture": "res://models/orbital_storage_ring_albedo.png"},
+	{"type": "Orbital Ring Store",    "radius": 1.740, "color": Color(0.55, 0.85, 0.78),
+		"mesh": "ring_store", "texture": "res://models/orbital_ring_store_albedo.png"},
 	# People.
-	{"type": "Orbital Habitat",       "radius": 1.700, "color": Color(0.70, 0.95, 0.65), "mesh": "ring"},
+	{"type": "Orbital Habitat",       "radius": 1.780, "color": Color(0.70, 0.95, 0.65),
+		"mesh": "habitat", "texture": "res://models/orbital_habitat_albedo.png"},
 	# Industry and its stores, flown out to a build site that has no ground.
-	{"type": "Orbital Construction Station", "radius": 0.755, "color": Color(0.85, 0.88, 0.95),
-		"mesh": "box"},
+	{"type": "Orbital Construction Station", "radius": 1.180, "color": Color(0.85, 0.88, 0.95),
+		"mesh": "station", "texture": "res://models/orbital_construction_station_albedo.png"},
 	# Stellar engineering: the lifters hang closest of anything here, because they have to.
-	{"type": "Star Lifter",           "radius": 0.682, "color": Color(1.00, 0.85, 0.45), "mesh": "dish"},
-	{"type": "Sunshade Constellation","radius": 0.703, "color": Color(0.70, 0.78, 0.95), "mesh": "flat"},
-	{"type": "Core Mixing Array",     "radius": 0.661, "color": Color(0.95, 0.60, 0.95), "mesh": "ring"},
-	{"type": "Shkadov Mirror",        "radius": 0.640, "color": Color(0.95, 0.95, 1.00), "mesh": "flat"},
+	{"type": "Star Lifter",           "radius": 1.060, "color": Color(1.00, 0.85, 0.45),
+		"mesh": "lifter", "texture": "res://models/orbital_star_lifter_albedo.png"},
+	{"type": "Sunshade Constellation","radius": 1.100, "color": Color(0.70, 0.78, 0.95),
+		"mesh": "sunshade", "texture": "res://models/orbital_sunshade_albedo.png"},
+	{"type": "Core Mixing Array",     "radius": 1.020, "color": Color(0.95, 0.60, 0.95),
+		"mesh": "core_mixer", "texture": "res://models/orbital_core_mixer_albedo.png"},
+	{"type": "Shkadov Mirror",        "radius": 0.980, "color": Color(0.95, 0.95, 1.00),
+		"mesh": "shkadov", "texture": "res://models/orbital_shkadov_albedo.png"},
 ]
 const INFRA_MAX_PER_LANE: int = 64   # cap per lane (MultiMesh instance budget)
 
@@ -104,6 +131,8 @@ var _infra: Array = []
 var _infra_poll: float = 0.0
 ## Set once the star has had its orbital lanes created (it skips the planet build-out above).
 var _star_infra_built: bool = false
+## Whether the lanes are currently drawn — false past ORBIT_BLUR_ABOVE_MULT (100x) unless paused.
+var _infra_visible: bool = true
 
 ## Per-gas-giant ring appearance.  Radii are multiples of the planet's own
 ## radius; tilt matches each body's real axial tilt (Uranus rings are nearly
@@ -437,18 +466,18 @@ func _create_orbit_line() -> void:
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var line_mesh := ArrayMesh.new()
+	line_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.55, 0.70, 1.0, 0.35)   # translucent blue
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
-	mesh.surface_set_material(0, mat)
+	line_mesh.surface_set_material(0, mat)
 
 	_orbit_line = MeshInstance3D.new()
-	_orbit_line.mesh = mesh
+	_orbit_line.mesh = line_mesh
 	_orbit_line.name = name + "_orbit_line"
 	_orbit_line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var ext: float = r_max + TUBE_R
@@ -476,6 +505,9 @@ func engulf() -> void:
 	set_process(false)                   # no more orbit / moon / infra updates for a dead world
 
 func _sync_visibility() -> void:
+	# Before the early returns below: the STAR takes one, and solar orbit is where most of this
+	# infrastructure actually is.
+	_sync_infra_visibility()
 	if _engulfed:                        # a swallowed planet stays gone
 		visible = false
 		if _orbit_line: _orbit_line.visible = false
@@ -485,13 +517,13 @@ func _sync_visibility() -> void:
 		visible = true
 		return
 	# Body shows during normal sim, or whenever paused so the player can inspect it.
-	var show := SolarSystem.solar_system_active or SolarSystem.paused or SolarSystem.ui_paused
-	visible = show
+	var body_on := SolarSystem.solar_system_active or SolarSystem.paused or SolarSystem.ui_paused
+	visible = body_on
 	# When motion is frozen (past the orbit-freeze cutoff) the body normally holds
 	# its last position.  If we're showing it because the player paused, snap it to
 	# its true position at the snap year (chosen by Game so the viewed planet keeps
 	# its place and the rest fall into their correct relative positions).
-	if show and not SolarSystem.solar_system_active:
+	if body_on and not SolarSystem.solar_system_active:
 		_snap_to_year(SolarSystem.snap_year)
 	# Orbit lines stay drawn even past the freeze cutoff (when the planet bodies
 	# are hidden), so the system's layout remains legible.
@@ -501,7 +533,7 @@ func _sync_visibility() -> void:
 	# exactly when the discrete body is hidden, so the planet reads as a smeared
 	# band whipping round its orbit too fast to resolve.
 	if _blur_torus:
-		_blur_torus.visible = not show
+		_blur_torus.visible = not body_on
 
 ## Place the planet at the true Keplerian position it would occupy at year `y`.
 ## A body's mean anomaly advances by one full revolution every a^1.5 years
@@ -550,11 +582,18 @@ func _process(delta: float) -> void:
 	elif not _star_infra_built and type == Type.STAR:
 		_star_infra_built = true
 		_create_infra_lanes()
+		# The star returns early from _sync_visibility, so its lanes are given their first
+		# visibility state here rather than inheriting one.
+		_sync_infra_visibility()
 
 	# Orbital infrastructure: refresh counts + orbit them every frame (even while paused, so
 	# newly-built structures appear immediately).  Cheap — small counts, polled on a throttle.
 	if not _infra.is_empty():
-		_update_infra(delta)
+		# Hidden lanes are not laid out: past 100x nothing is drawn, so positioning a few
+		# hundred structures every frame would be work with nothing to show for it.
+		_sync_infra_visibility()
+		if _infra_visible:
+			_update_infra(delta)
 
 	# Stellar evolution — update once per year so it has zero per-frame cost.
 	if type == Type.STAR:
@@ -585,11 +624,12 @@ func _process(delta: float) -> void:
 		orbit_angle += angular_velocity * delta
 		_update_position()
 
-	# Moons spin at a steady real-time rate (cosmetic), decoupled from the wildly
-	# varying sim timescale.  Only reached when the system is active and unpaused, so
-	# they hold still exactly when the planet does.
+	# Moons orbit on the GAME clock, like the planet carrying them.  They used to spin at a
+	# steady real-time rate, deliberately decoupled from the timescale — which meant a world
+	# fast-forwarded through a century had a moon going round at exactly the pace it did at 1x,
+	# and the only thing on screen that did not react to the speed control.
 	if not _moons.is_empty():
-		_update_moons(delta)
+		_update_moons(delta * SolarSystem.speed_multiplier())
 
 # ── Keplerian position update ─────────────────────────────────────────────────
 
@@ -701,6 +741,8 @@ func _create_moons() -> void:
 	_update_moons(0.0)
 
 ## Advance each moon along its tilted circular orbit in the planet's local frame.
+## `delta` here is GAME time, not wall-clock: the caller has already scaled it by the speed
+## multiplier, so a moon's period is the same number of game-days at every rung of the ladder.
 func _update_moons(delta: float) -> void:
 	for m in _moons:
 		var a: float = float(m["angle"]) + float(m["speed"]) * delta
@@ -729,41 +771,156 @@ static func _get_placeholder_tex() -> ImageTexture:
 	_placeholder_tex = ImageTexture.create_from_image(img)
 	return _placeholder_tex
 
-## Placeholder mesh per infrastructure kind — a simple distinguishable stand-in shape.
-func _infra_mesh(kind: String) -> Mesh:
-	match kind:
-		"cyl":
-			var c := CylinderMesh.new()
-			c.top_radius = 0.06; c.bottom_radius = 0.06; c.height = 0.26
-			c.radial_segments = 8; c.rings = 1
-			return c
-		"flat":
-			var f := BoxMesh.new(); f.size = Vector3(0.34, 0.03, 0.24); return f
-		"rod":
-			var r := BoxMesh.new(); r.size = Vector3(0.10, 0.10, 0.30); return r
-		"dish":
-			# A shallow cone reads as an aperture pointed somewhere.
-			var d := CylinderMesh.new()
-			d.top_radius = 0.18; d.bottom_radius = 0.02; d.height = 0.10
-			d.radial_segments = 10; d.rings = 1
-			return d
-		"ring":
-			# A spun torus: habitats and storage rings both look like what they are.
-			var t := TorusMesh.new()
-			t.inner_radius = 0.10; t.outer_radius = 0.17
-			t.rings = 12; t.ring_segments = 6
-			return t
-		_:
-			var b := BoxMesh.new(); b.size = Vector3(0.18, 0.16, 0.18); return b
+## Texture named by a lane spec, loaded once and shared by every body drawing that lane.
+##
+## A lane without a "texture" key keeps the shared checker, which is still what most of them
+## want: a stand-in primitive has no UV layout worth painting for.  A lane WITH one gets a map
+## baked against its model's actual unwrap (tools/depot.py), so the two must travel together —
+## the texture is meaningless on any other mesh.
+##
+## The map is greyscale on purpose.  albedo_color tints it with the lane's own colour, exactly
+## as it tinted the checker, so what the bake carries is value and not hue.  A missing or
+## unimported texture falls back to the checker rather than rendering untextured white.
+static var _lane_tex_cache: Dictionary = {}
 
-## Material: placeholder checker texture tinted with the lane's colour + faint self-glow
-## so the structures read in the scene's limited lighting.
-func _infra_material(color: Color) -> StandardMaterial3D:
+static func _lane_texture(path: String) -> Texture2D:
+	if path.is_empty():
+		return _get_placeholder_tex()
+	if _lane_tex_cache.has(path):
+		return _lane_tex_cache[path]
+	var tex: Texture2D = null
+	if ResourceLoader.exists(path):
+		tex = load(path) as Texture2D
+	if tex == null:
+		push_warning("planet.gd: %s missing — that lane falls back to the checker." % path)
+		tex = _get_placeholder_tex()
+	_lane_tex_cache[path] = tex
+	return tex
+
+## Normal map belonging to a lane texture, by naming convention: the same path with
+## "_albedo" swapped for "_normal".  Returns null when a model has no normal map baked yet,
+## and the lane simply goes without one rather than failing.
+##
+## Kept as a convention rather than another key in the lane spec: the two maps are baked
+## together from the same pattern by the same script, and a lane that named one but not the
+## other would be describing a state tools/build_models.sh cannot produce.
+static var _lane_normal_cache: Dictionary = {}
+
+static func _lane_normal(tex_path: String) -> Texture2D:
+	if tex_path.is_empty():
+		return null
+	if _lane_normal_cache.has(tex_path):
+		return _lane_normal_cache[tex_path]
+	var path: String = tex_path.replace("_albedo.png", "_normal.png")
+	var tex: Texture2D = null
+	if path != tex_path and ResourceLoader.exists(path):
+		tex = load(path) as Texture2D
+	_lane_normal_cache[tex_path] = tex
+	return tex
+
+## Mesh per infrastructure kind.  The kinds in LANE_MODELS are modelled assets loaded from
+## disk; the rest are still simple distinguishable stand-in shapes.
+func _infra_mesh(kind: String) -> Mesh:
+	if LANE_MODELS.has(kind):
+		return _model_mesh(kind)
+	# Every lane in INFRA_LANES names a model now, so there is no primitive left to fall
+	# back to — only this, for a kind nobody implemented.  It warns, because a silent box
+	# looks enough like real infrastructure to sit in the band unnoticed, which is the same
+	# failure tests/verify_lane_models.gd watches for at load.
+	push_warning("planet.gd: no mesh kind \"%s\" — drawing a placeholder box." % kind)
+	var b := BoxMesh.new()
+	b.size = Vector3(0.18, 0.16, 0.18)
+	return b
+
+## Modelled lane meshes, shared by every lane on every body that draws one.
+##
+## Built by tools/build_models.sh out of the matching tools/*.py — single-surface,
+## material-free meshes with real UVs, because the lane applies its own material_override and
+## would discard anything the .glb carried anyway.  Each one's +Y is the radial-outward axis,
+## which is the column _update_infra() hands the instance basis.
+##
+## A kind listed here takes its model; anything else falls through to the primitives below.
+## All five stand-in primitives are gone, retired one at a time as their last users got
+## models: the rod, the torus, the plain cylinder, the shallow cone that served every
+## aperture in the power-link band, and finally the flat plate that served every radiator,
+## sail and mirror.  tests/verify_lane_models.gd names all five, so a lane left pointing at
+## one cannot fail quietly — it would otherwise reach the placeholder at the end of
+## _infra_mesh() and look like real infrastructure.
+##
+## The torus is the one worth recording, as the rod went before it: three lanes shared it and all
+## three now have models, because buildings.gd describes three different things.  The habitat
+## is "a spun cylinder", which is the one shape a ring is not; the ring store is "a loop of
+## orbital diameter", which wants an empty middle the primitive had no way to leave out; and
+## the core mixer "reaches into the core", which points it the opposite way from everything.
+const LANE_MODELS := {
+	"battery": "res://models/orbital_battery.glb",
+	"core_mixer": "res://models/orbital_core_mixer.glb",
+	"depot":   "res://models/orbital_depot.glb",
+	"grid":    "res://models/orbital_power_grid.glb",
+	"habitat": "res://models/orbital_habitat.glb",
+	"laser":   "res://models/orbital_laser.glb",
+	"lifter":  "res://models/orbital_star_lifter.glb",
+	"rad_swarm": "res://models/orbital_radiator_swarm.glb",
+	"radiator": "res://models/orbital_radiator_array.glb",
+	"rect_grid": "res://models/orbital_rectenna_grid.glb",
+	"rectenna": "res://models/orbital_rectenna.glb",
+	"relay":   "res://models/orbital_relay_sat.glb",
+	"ring_store": "res://models/orbital_ring_store.glb",
+	"sc_ring": "res://models/orbital_storage_ring.glb",
+	"shkadov": "res://models/orbital_shkadov.glb",
+	"station": "res://models/orbital_construction_station.glb",
+	"sunshade": "res://models/orbital_sunshade.glb",
+	"swarm_relay": "res://models/orbital_swarm_relay.glb",
+	"thermal": "res://models/orbital_thermal_radiator.glb",
+	"telescope": "res://models/orbital_telescope.glb",
+	"uplink":  "res://models/orbital_uplink.glb",
+}
+static var _model_mesh_cache: Dictionary = {}
+
+## Godot imports a .glb as a PackedScene, so the ArrayMesh is lifted out of its MeshInstance3D
+## once and cached: the lanes ask for this per body, and re-instancing the scene each time
+## would be hundreds of throwaway nodes at load.  A missing or unimported model falls back to
+## the box these lanes used before, so a fresh checkout that has not imported its assets yet
+## still draws something rather than crashing the solar system.
+static func _model_mesh(kind: String) -> Mesh:
+	if _model_mesh_cache.has(kind):
+		return _model_mesh_cache[kind]
+	var path: String = str(LANE_MODELS.get(kind, ""))
+	var mesh: Mesh = null
+	if not path.is_empty() and ResourceLoader.exists(path):
+		var packed: PackedScene = load(path) as PackedScene
+		if packed != null:
+			var root: Node = packed.instantiate()
+			for n: Node in root.find_children("*", "MeshInstance3D", true, false):
+				var mi := n as MeshInstance3D
+				if mi != null and mi.mesh != null:
+					mesh = mi.mesh
+					break
+			root.free()
+	if mesh == null:
+		push_warning("planet.gd: no mesh for lane model \"%s\" (%s) — falling back to a box."
+			% [kind, "unlisted" if path.is_empty() else path])
+		var b := BoxMesh.new()
+		b.size = Vector3(0.18, 0.16, 0.18)
+		mesh = b
+	_model_mesh_cache[kind] = mesh
+	return mesh
+
+## Material: the lane's texture (its own baked map, or the shared checker) tinted with the
+## lane's colour + faint self-glow so the structures read in the scene's limited lighting.
+func _infra_material(color: Color, tex_path: String = "") -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.albedo_texture = _get_placeholder_tex()
+	m.albedo_texture = _lane_texture(tex_path)
 	m.albedo_color   = color
 	m.metallic       = 0.3
 	m.roughness      = 0.7
+	# Surface relief, where the model has it baked.  The albedo map carries the same
+	# pattern as painted light and dark, which does not move when the light does; this is
+	# what makes the plating and the cell grids actually catch it.
+	var nrm: Texture2D = _lane_normal(tex_path)
+	if nrm != null:
+		m.normal_enabled = true
+		m.normal_texture = nrm
 	m.emission_enabled = true
 	m.emission       = color
 	m.emission_energy_multiplier = 0.15
@@ -790,13 +947,14 @@ func _create_infra_lanes() -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "%s_infra_%s" % [name, str(spec["type"]).replace(" ", "_")]
 		mmi.multimesh = mm
-		mmi.material_override = _infra_material(spec["color"])
+		mmi.material_override = _infra_material(spec["color"], str(spec.get("texture", "")))
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var ext: float = float(spec["radius"]) + 0.5
 		mmi.custom_aabb = AABB(Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
 		add_child(mmi)
 		_infra.append({
 			"mm":     mm,
+			"mmi":    mmi,
 			"type":   str(spec["type"]),
 			"radius": float(spec["radius"]),
 			"phase":  rng.randf() * TAU,
@@ -804,17 +962,91 @@ func _create_infra_lanes() -> void:
 			# Orbital planes spread over the WHOLE sphere, by the golden angle so consecutive
 			# lanes land nowhere near each other.  They used to sit in a narrow random band of
 			# +-0.3 rad, which was fine when the lanes were a quarter of a unit apart in radius
-			# and could not touch.  Tightened inside Mercury they are a sixteenth of a unit
-			# apart, closer than the structures themselves are wide, so what keeps them clear of
-			# one another is the angle between their planes rather than the gap between their
-			# radii — the same trick the Dyson swarm uses to be a shell instead of a disk.
+			# and could not touch.  Squeezed into the band between the Dyson swarm and Mercury
+			# they are a twenty-fifth of a unit apart, closer than the structures themselves
+			# are wide, so what keeps them clear of one another is the angle between their
+			# planes rather than the gap between their radii — the same trick the Dyson swarm
+			# uses to be a shell instead of a disk.
 			"incl":   fposmod(float(_infra.size()) * INFRA_PLANE_ANGLE, PI),
 		})
 	_update_infra(0.0)
 
+## Show or hide every orbital-infrastructure lane on this body.
+##
+## Past ORBIT_BLUR_ABOVE_MULT (100x) individual orbital positions are not worth drawing — the
+## bodies themselves are already replaced by motion-blur rings there — and a few hundred
+## structures smeared round the Sun at a thousand times real time is a bright knot that says
+## nothing about where anything is.  The paused exception is the same one the bodies and the
+## Dyson swarm take: pausing is how the player inspects a system the clock has blurred.
+func _sync_infra_visibility() -> void:
+	var lanes_on: bool = not _engulfed and (SolarSystem.solar_system_active
+		or SolarSystem.paused or SolarSystem.ui_paused)
+	_infra_visible = lanes_on
+	for lane: Dictionary in _infra:
+		var mmi: MultiMeshInstance3D = lane.get("mmi")
+		if mmi != null:
+			mmi.visible = lanes_on
+
+
+## How one orbital structure sits at `pos` in its body's local frame: up-axis outward, like a
+## real satellite bus.  +Y is the radial, which is the contract the models are built to.
+##
+## RIGHT-HANDED, and that is the whole reason this is a function with a name rather than four
+## lines inside the draw loop.  Basis(x, y, z) is right-handed when x cross y is z; built the
+## other way round its determinant is -1, which is a MIRROR — and a mirrored instance transform
+## reverses the effective winding of everything it draws, so the renderer culls the near faces,
+## keeps the far ones, and the structure is shaded from the inside.
+##
+## It was wrong for every lane and showed on exactly one, because a mirrored box is a box: rod,
+## cyl, flat, box, dish and ring are all symmetric enough to hide it, and the Orbital Vault is
+## the only lane that draws a modelled hull.  The Dyson swarm's collectors had it too.
+##
+## CONTINUOUS all the way round, which is the other half of what this function is for.  The
+## sideways axis is the ALONG-TRACK direction, taken from the orbit's own plane — a real
+## satellite bus flies that way, and more to the point it is defined everywhere on the orbit.
+##
+## Built instead from a world axis it is not.  The previous version picked a reference of UP, or
+## RIGHT when the structure came within 0.95 of straight overhead, and at that threshold the
+## whole frame snapped about the radial axis: five of the twenty-one lanes have a steep enough
+## inclination to cross it, four times an orbit, turning as much as 171 degrees in one frame.
+## That is a structure visibly spinning part way round its orbit and then back.
+##
+## Any fixed reference has the same failure somewhere — there is no continuous non-vanishing
+## tangent field on a sphere — so the fix is not a better constant but a reference that moves
+## with the orbit.  The orbit normal is constant per lane and never parallel to the radial, so
+## their cross product never vanishes.
+##
+## Pulled out here because the bug is NOT reachable through the MultiMesh it feeds: a headless
+## run has no renderer, set_instance_transform keeps nothing and get_instance_transform hands
+## back the identity, so an assertion made against the lanes themselves passes whatever the
+## maths does.  This is the part that can actually be checked — see verify_infra_band.
+static func infra_orientation(pos: Vector3, orbit_normal: Vector3) -> Basis:
+	var radial: Vector3 = pos.normalized() if pos.length_squared() > 1e-9 else Vector3.UP
+	var n: Vector3 = orbit_normal.normalized() if orbit_normal.length_squared() > 1e-9 \
+		else Vector3.UP
+	var tangent: Vector3 = n.cross(radial)
+	# Only reachable if a caller hands in a normal its position does not orbit about; on a lane
+	# the two are perpendicular by construction.  Fall back to something orthonormal rather than
+	# normalising a zero vector into nan.
+	if tangent.length_squared() < 1.0e-12:
+		var ref: Vector3 = Vector3.UP if absf(radial.y) < 0.95 else Vector3.RIGHT
+		tangent = radial.cross(ref)
+	tangent = tangent.normalized()
+	return Basis(tangent, radial, tangent.cross(radial))
+
+
+## The normal of the orbital plane a lane at inclination `incl` lies in — the axis
+## _update_infra's own parameterisation turns about.
+static func infra_orbit_normal(incl: float) -> Vector3:
+	return Vector3(0.0, -cos(incl), sin(incl))
+
+
 ## Poll how many of each orbital structure the planet has (throttled) and lay the visible
 ## instances out evenly around their lane, advancing the shared lane angle each frame.
 func _update_infra(delta: float) -> void:
+	# Wall-clock on purpose, unlike the motion below: this is how often the lanes re-read how
+	# many structures exist, which is a UI refresh rate and should not fire a thousand times a
+	# frame because the player sped the clock up.
 	_infra_poll += delta
 	var repoll: bool = _infra_poll >= 0.5
 	if repoll:
@@ -825,6 +1057,12 @@ func _update_infra(delta: float) -> void:
 	# structures appear); only advance the lane angle when the simulation is actually running.
 	var running: bool = SolarSystem.solar_system_active \
 		and not SolarSystem.paused and not SolarSystem.ui_paused
+	# Station-keeping on the GAME clock, for the same reason the moons are: a structure in orbit
+	# that holds its pace while the years tear past is the one thing on screen ignoring the speed
+	# control.  speed_multiplier() is 1.0 on the base rung, so this is unchanged at 1x and runs
+	# proportionally faster above it — and the lanes stop being drawn past 100x anyway, which is
+	# what bounds it.
+	var sim_delta: float = delta * SolarSystem.speed_multiplier()
 	# The lanes are children of the (scaled) planet, so cancel the planet's scale in each
 	# instance's basis — the structures render at a constant world size regardless of how
 	# big the planet is (their orbit radius still scales, so they hug each world).
@@ -832,7 +1070,8 @@ func _update_infra(delta: float) -> void:
 	for lane: Dictionary in _infra:
 		var mm: MultiMesh = lane["mm"]
 		if running:
-			lane["phase"] = fposmod(float(lane["phase"]) + float(lane["motion"]) * delta, TAU)
+			lane["phase"] = fposmod(
+				float(lane["phase"]) + float(lane["motion"]) * sim_delta, TAU)
 		if repoll and game and game.has_method("_count_building"):
 			mm.visible_instance_count = mini(
 				int(game._count_building(pname, str(lane["type"]))), INFRA_MAX_PER_LANE)
@@ -842,18 +1081,15 @@ func _update_infra(delta: float) -> void:
 		var r: float = float(lane["radius"])
 		var incl: float = float(lane["incl"])
 		var base: float = float(lane["phase"])
+		# Constant for the lane, so it is taken once rather than per structure.
+		var onormal: Vector3 = infra_orbit_normal(incl)
 		for i in range(count):
 			var th: float = base + TAU * float(i) / float(count)   # evenly spaced around the ring
 			var z: float = r * sin(th)
 			var pos := Vector3(r * cos(th), z * sin(incl), z * cos(incl))
-			# Orient each structure's up-axis outward (radially), like a real satellite bus.
-			var radial: Vector3 = pos.normalized() if pos.length_squared() > 1e-9 else Vector3.UP
-			var ref: Vector3 = Vector3.UP if absf(radial.y) < 0.95 else Vector3.RIGHT
-			var t1: Vector3 = radial.cross(ref).normalized()
-			var t2: Vector3 = radial.cross(t1)
 			# Basis scaled by inv_s → constant world-space structure size on any planet.
-			mm.set_instance_transform(i,
-				Transform3D(Basis(t1 * inv_s, radial * inv_s, t2 * inv_s), pos))
+			mm.set_instance_transform(i, Transform3D(
+				infra_orientation(pos, onormal).scaled(Vector3(inv_s, inv_s, inv_s)), pos))
 
 ## World position of one slot in an orbital lane — where the `index`-th structure of `type` sits
 ## once the lane holds `total` of them.

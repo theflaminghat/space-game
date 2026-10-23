@@ -7,6 +7,10 @@ class_name StarMapPanel
 
 ## Emitted when the player clicks a star (or empty space → "").
 signal star_selected(star_name: String)
+## The player asked a colony of their own for its sequence data, or asked for one of the
+## sequences the civilisation holds to be spliced in.  Game is the authority for both.
+signal lineage_requested(world: String)
+signal lineage_direct_requested(world: String, trait_id: String)
 ## Emitted when the player commits an interstellar colony mission to a star at a chosen
 ## max Lorentz factor γ (cruise speed) and max acceleration (m/s²).  Game validates
 ## energy + launches.
@@ -306,33 +310,78 @@ static var _max_star_dist: float = 1.0
 ## to whatever the map is centred on).  See STAR_BODY_BUDGET.  Rebuilt when the frame moves or
 ## the catalogue changes — both rare — so the renderer never sorts six thousand stars per frame,
 ## and a star does not gain and lose its body as the view is merely rotated or zoomed.
-static var _dist_rank: PackedInt32Array = PackedInt32Array()
+## Level-of-detail cuts: beyond these distances from the reference point a star draws no body
+## and a cluster draws no glyph.  They replace the per-object rank arrays — see _refresh_lod_cuts.
+static var _star_body_cut: float = INF
+static var _cluster_glyph_cut: float = INF
+## The catalogue and patch revisions the cuts were taken at, so they are redone when what they
+## were measured over actually changes rather than only when the viewpoint moves.
+static var _cut_cat: int = -1
+static var _cut_patch: int = -1
 static var _rank_ref: Vector3 = Vector3(INF, INF, INF)
 ## The same ordering over the cluster shell.  See CLUSTER_GLYPH_BUDGET.
-static var _cl_rank: PackedInt32Array = PackedInt32Array()
 
 ## Order the catalogue by distance from `ref`, if that is not the order it is already in.
-static func _rank_by_distance(ref: Vector3) -> void:
-	if _rank_ref == ref and _dist_rank.size() == _all_stars.size():
+## Refresh the two level-of-detail CUTS: the distance beyond which a star gets no drawn body,
+## and the distance beyond which a cluster gets no glyph.
+##
+## This used to build a full distance ORDERING of everything — two Array sorts with a GDScript
+## lambda per comparison, across six thousand stars and eight thousand clusters — and store a
+## rank per object.  Both ranks were only ever read as `rank >= BUDGET`, which is a question
+## about a threshold, not about an order: the K-th nearest object's distance answers it exactly,
+## and finding that needs no sort at all.  The draw loop already has each star's distance to the
+## reference, so the test became a float compare instead of an array lookup.
+##
+## The other half is the tolerance.  The guard used to be `_rank_ref == ref` — exact equality —
+## and _sync_sol_frame explicitly invalidated it whenever Sol moved, so a Shkadov thruster
+## carrying the star two hundredths of a light-year redid the whole thing EVERY FRAME.
+##
+## Moving the reference by d can only change an object's distance by d, so a selection taken at
+## the cut can only be wrong for things within d of it — objects at the very edge of the budget,
+## where swapping one for another is invisible.  One per cent of the cut is far inside that, and
+## in a twenty-frame run with the thruster going it brings the recomputes to zero.
+static func _refresh_lod_cuts(ref: Vector3) -> void:
+	var tol: float = maxf(_star_body_cut, 1.0) * 0.01
+	if _cut_cat == _catalogue_version and _cut_patch == _patch_version \
+			and ref.distance_squared_to(_rank_ref) < tol * tol:
 		return
 	_rank_ref = ref
-	var by_dist: Array = []
-	for i in range(_all_stars.size()):
-		by_dist.append([ref.distance_squared_to((_all_stars[i] as Dictionary)["pos"] as Vector3), i])
-	by_dist.sort_custom(func(a: Array, c: Array) -> bool: return float(a[0]) < float(c[0]))
-	_dist_rank.resize(_all_stars.size())
-	for r in range(by_dist.size()):
-		_dist_rank[int((by_dist[r] as Array)[1])] = r
-	# The clusters get the same treatment and for the same reason: only so many of them are worth
-	# a full glyph, and which ones depends on where the map is centred, not on the frame counter.
-	var cl: Array = star_clusters()
-	var by_cl: Array = []
-	for i in range(cl.size()):
-		by_cl.append([ref.distance_squared_to((cl[i] as Dictionary)["pos"] as Vector3), i])
-	by_cl.sort_custom(func(a: Array, c: Array) -> bool: return float(a[0]) < float(c[0]))
-	_cl_rank.resize(cl.size())
-	for r in range(by_cl.size()):
-		_cl_rank[int((by_cl[r] as Array)[1])] = r
+	_cut_cat = _catalogue_version
+	_cut_patch = _patch_version
+	_star_body_cut = _kth_nearest(_all_stars, ref, STAR_BODY_BUDGET)
+	_cluster_glyph_cut = _kth_nearest(star_clusters(), ref, CLUSTER_GLYPH_BUDGET)
+
+
+## Distance from `ref` to the k-th nearest entry of `items`, or INF when there are fewer than k.
+##
+## A bounded insert buffer rather than a sort: the buffer holds the k smallest seen so far, and
+## once it is full almost every candidate is rejected on its first comparison against the worst
+## of them.  The same idiom _nearest_uncolonised and _nearest_rivals already use, and for the
+## same reason — reading the front of a long list should not cost sorting the whole of it.
+static func _kth_nearest(items: Array, ref: Vector3, k: int) -> float:
+	if k <= 0:
+		return 0.0
+	if items.size() <= k:
+		return INF                            # everything fits inside the budget
+	var buf := PackedFloat32Array()           # the k smallest distances, largest last
+	buf.resize(k)
+	var n: int = 0
+	var worst: float = INF
+	for it: Dictionary in items:
+		var d: float = ref.distance_to(it["pos"] as Vector3)
+		if n == k and d >= worst:
+			continue                          # cannot displace anything; the common case
+		var at: int = n if n < k else k - 1
+		while at > 0 and buf[at - 1] > d:
+			buf[at] = buf[at - 1]
+			at -= 1
+		buf[at] = d
+		if n < k:
+			n += 1
+		worst = buf[k - 1] if n == k else INF
+	return worst
+
+
 ## name → index into all_stars(), and name → position for the cluster shell.  Both are lookups
 ## the DRAW loop performs for every mission and every attack, twice each; scanning a 10 000-star
 ## catalogue for them cost tens of millions of comparisons a second once a swarm of probes was
@@ -422,9 +471,21 @@ static func all_stars() -> Array:
 			var sd: Dictionary = _all_stars[i]
 			_name_to_idx[str(sd["name"])] = i
 			_max_star_dist = maxf(_max_star_dist, float(sd["dist"]))
-		_rank_ref = Vector3(INF, INF, INF)     # forces the ordering below to be rebuilt
+		_catalogue_version += 1     # _refresh_lod_cuts watches this and redoes the cuts
 		_stars_dirty = false
 	return _all_stars
+
+## Bumped every time all_stars() is rebuilt.
+##
+## Anything that indexes INTO the catalogue by position has to drop its index when this moves.
+## Size is not enough to detect that: the list is trimmed to MAX_RESOLVED and re-sorted by live
+## distance, so Sol drifting far enough for one star to leave range as another enters rebuilds
+## the whole ordering without changing the count, and every stored index then points at the
+## wrong star.
+static var _catalogue_version: int = 0
+
+static func catalogue_version() -> int:
+	return _catalogue_version
 
 ## The run's galaxy seed.
 static func galaxy_seed() -> int:
@@ -437,6 +498,12 @@ static func galaxy_seed() -> int:
 static func set_galaxy_seed(v: int) -> void:
 	if v == _galaxy_seed and not _clusters.is_empty():
 		return
+	_seed_set = true
+	_tile_cache.clear()
+	_loaded_centre = Vector2i(0x7FFFFFFF, 0x7FFFFFFF)
+	_loaded_patch = []
+	_sol_tile_hint = Vector2i(0x7FFFFFFF, 0x7FFFFFFF)
+	_patch_pending = true
 	_galaxy_seed = v
 	_clusters.clear()
 	_cell_rivals.clear()
@@ -452,14 +519,18 @@ static func set_galaxy_seed(v: int) -> void:
 	_all_stars.clear()
 	_all_full.clear()
 	_name_to_idx.clear()
-	_dist_rank.clear()
-	_cl_rank.clear()
 	_rank_ref = Vector3(INF, INF, INF)
 	_future.clear()
 	_born_count = 0
 	_born_year = 0.0
 	_obs_range_ly = PROC_BASE_RANGE_LY
 	_stars_dirty = true
+	# Built here, as part of choosing the galaxy, rather than lazily on first use.  Everything
+	# that reads the star catalogue downstream — seeding civilisations, the night sky, the first
+	# von Neumann survey — depends on the home cell being known, because in_sol_cell() is what
+	# admits a chunk-generated star to the catalogue at all.
+	_patch_pending = false
+	_ensure_patch(tile_of(Vector3.ZERO))
 
 ## Expand how far the player can resolve individual stars (ly from Sol).  MONOTONIC — a star,
 ## once in range, stays visible — so call it as telescopes/colonies push the frontier outward.
@@ -506,7 +577,12 @@ static func _generate_future_stars() -> Array:
 
 ## Advance the catalogue to `y`, admitting every star whose formation year has arrived.  Cheap:
 ## the pool is sorted, so this is a pointer walk that almost always does nothing.
-static func advance_star_formation(y: float) -> void:
+##
+## Returns the names admitted by THIS call.  A star that forms inside settled space is a system
+## that became colonisable with nobody watching — every von Neumann lineage near it retired when
+## there was nowhere left to go — so Game has to be told which ones, exactly as it is told about
+## a system cleared by weapons.
+static func advance_star_formation(y: float) -> Array:
 	# The standing population must exist before any newborn is appended to it.  The catalogue
 	# views generate it lazily only while _proc_stars is EMPTY, so if the first star to form
 	# landed in the list first (a far-future save loaded and unpaused before anything asked for
@@ -516,15 +592,16 @@ static func advance_star_formation(y: float) -> void:
 	if _future.is_empty():
 		_future = _generate_future_stars()
 	_born_year = y
-	var added: bool = false
+	var born: Array = []
 	while _born_count < _future.size() and float(_future[_born_count]["born"]) <= y:
 		_proc_stars.append(_future[_born_count])
+		born.append(str((_future[_born_count] as Dictionary)["name"]))
 		_born_count += 1
-		added = true
-	if added:
+	if not born.is_empty():
 		_all_full.clear()      # force the catalogue views to rebuild with the new stars
 		_all_stars.clear()
 		_stars_dirty = true
+	return born
 
 ## How many stars have yet to form, and when the next one does — for the galaxy readout.
 static func pending_star_formation() -> Dictionary:
@@ -806,10 +883,21 @@ const STAR_RENDER_MAX_LY: float = 1400.0
 ## volume the player cannot see star-by-star, each a colonisable target in its own right.  You
 ## do not settle a star out here — you settle a cluster, and what you get is however many
 ## thousand suns came with it.
+## Seeds per tile.  Twice what it was, so every Voronoi cell owns half the volume and is about
+## 79% of its old width — Sol's safe radius measures 172 ly against the 290 it had.  Smaller
+## cells are what make the streaming below mean anything: Sol borders more of them, and crossing
+## one is a shorter journey.
+##
+## This is the knob to turn for smaller still, and the cost is scene load, because the patch is
+## seven tiles rather than one: 1200 loads in 3.5 s, 1600 in 4.3 s, 2400 in 5.6 s, against about
+## 2 s before the shell was streamed at all.  Generation is most of it and it is one-off per
+## tile — a tile already visited is cached, and a border crossing only generates the three tiles
+## that newly border.
+##
 ## The tile is 7.3e10 ly³.  At the Milky Way's real open-cluster density (~20 000 in the disk)
-## it would hold about seventy; this is deliberately several times that, because a cluster is a
-## colonisation TARGET and a game running to heat death needs more than seventy places to go.
-const CLUSTER_COUNT:   int   = 600
+## it would hold about seventy; this is deliberately far more, because a cluster is a
+## colonisation TARGET and a game running to heat death needs somewhere to go.
+const CLUSTER_COUNT:   int   = 1200
 const CLUSTER_SEED:    int   = 0x0C1_5EED
 ## Minimum separation between ANY two seeds, Sol included, as a fraction of the edge of the cube
 ## each seed would own if the tile were divided evenly.  Seeds thrown down at random give
@@ -817,9 +905,26 @@ const CLUSTER_SEED:    int   = 0x0C1_5EED
 ## and Sol used to be walled off by an exclusion radius of its own, which left the home territory
 ## five times the size of anybody else's.  Enforcing one separation for everyone turns the field
 ## into blue noise: still organic, but every cluster owns roughly the same volume, and Sol owns
-## its share on the same terms as the rest.  0.86 is about as tight as dart-throwing packs
-## without the draw count running away.
-const CLUSTER_SEP_FRAC: float = 0.86
+## its share on the same terms as the rest.
+##
+## 0.80, and the figure is where it is because the cost of asking for more is not linear.  The
+## sampler is random sequential adsorption, which jams: ask for a separation near the limit and
+## the last seeds become nearly impossible to land.  Measured over a tile of 1200, with the
+## spread of nearest-neighbour distances as the quality the separation is actually FOR —
+##
+##   frac   darts   ms    NN spread (CV)
+##   0.86   40010   138   0.055
+##   0.80   11410    32   0.070
+##   0.75    6393    20   0.088
+##   0.70    4328    14   0.107
+##   0.65    3337    11   0.132
+##
+## — 0.86 was spending 58 % of its darts on the LAST TENTH of the seeds.  Stepping back one
+## notch is four times cheaper for a spread that is still 0.07, against 0.52 for seeds thrown
+## down with no separation at all; the cells stay as even as they ever needed to be.  Below
+## 0.80 the cost curve has already flattened and only the regularity keeps falling, which is
+## the wrong trade in the other direction.
+const CLUSTER_SEP_FRAC: float = 0.80
 ## Thickness of the galactic slab the clusters live in — the same height as one region prism,
 ## so a cluster is always inside the tile that addresses it (mirrors Game.HEX_HEIGHT_LY).
 const HEX_HEIGHT_LY:   float = 6000.0
@@ -853,6 +958,65 @@ const SQRT3_2: float = 0.8660254
 ## star name or with the "Cluster C-nnn" series.
 const SOL_CLUSTER_NAME: String = "Sol Cluster"
 
+# ── Tile addressing ──────────────────────────────────────────────────────────
+#
+# The galaxy is partitioned into flat-top hexagonal prisms — "tiles" — of circumradius HEX_SIZE
+# and height HEX_HEIGHT_LY, on a lattice whose origin is the GALACTIC CENTRE rather than Sol.
+# HEX_SIZE is chosen so that SOL_GC_LY is an exact multiple of it, which puts Sol dead centre of
+# its own tile at the start of a run.
+#
+# The same addressing is what Game's statistical regions use.  It lives here, static, and Game
+# calls into it, so there is exactly one implementation and the cluster shell and the region
+# grid cannot drift out of alignment with each other.
+
+## Axial (q, r) of the tile containing a Sol-relative position.
+static func tile_of(pos: Vector3) -> Vector2i:
+	var ax: Array = _galactic_basis()
+	var rel: Vector3 = pos - (ax[0] as Vector3) * SOL_GC_LY   # measured from the galactic centre
+	var gpx: float = rel.dot(ax[0] as Vector3)
+	var gpy: float = rel.dot(ax[1] as Vector3)
+	return hex_round((2.0 / 3.0 * gpx) / HEX_SIZE,
+		(-1.0 / 3.0 * gpx + SQRT3 / 3.0 * gpy) / HEX_SIZE)
+
+## Sol-relative centre of tile (q, r).
+static func tile_center(t: Vector2i) -> Vector3:
+	var ax: Array = _galactic_basis()
+	var lx: float = HEX_SIZE * (1.5 * float(t.x))
+	var ly: float = HEX_SIZE * (SQRT3 / 2.0 * float(t.x) + SQRT3 * float(t.y))
+	return (ax[0] as Vector3) * (SOL_GC_LY + lx) + (ax[1] as Vector3) * ly
+
+## The six tiles sharing an edge with `t`, in axial order.
+static func tile_neighbours(t: Vector2i) -> Array:
+	var out: Array = []
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(1, -1), Vector2i(0, -1),
+			Vector2i(-1, 0), Vector2i(-1, 1), Vector2i(0, 1)]:
+		out.append(t + d)
+	return out
+
+## `t` and its six neighbours — the set the generator keeps loaded.
+static func tile_patch(t: Vector2i) -> Array:
+	return ([t] as Array) + tile_neighbours(t)
+
+## Round fractional axial coordinates to the nearest hex, via cube rounding.
+static func hex_round(q: float, r: float) -> Vector2i:
+	var x: float = q
+	var z: float = r
+	var y: float = -x - z
+	var rx: float = round(x)
+	var ry: float = round(y)
+	var rz: float = round(z)
+	var dx: float = absf(rx - x)
+	var dy: float = absf(ry - y)
+	var dz: float = absf(rz - z)
+	if dx > dy and dx > dz:
+		rx = -ry - rz
+	elif dy > dz:
+		ry = -rx - rz
+	else:
+		rz = -rx - ry
+	return Vector2i(int(rx), int(rz))
+
+
 static var _basis_cache: Array = []
 static var _clusters: Array = []
 ## Total volume of the player's tile (ly³), summed from the cells themselves so the reported
@@ -866,40 +1030,226 @@ static var _sol_cell_r_in:  float = 0.0
 static var _sol_cell_r_out: float = 0.0
 static var _seed_pos:  PackedVector3Array = PackedVector3Array()
 static var _seed_half: PackedFloat32Array = PackedFloat32Array()
-## Which rivals actually bound each cell — everything else is redundant, so the slice only has
-## to clip against these.  Indexed alongside star_clusters().
-static var _cell_rivals: Array = []
+## Which rivals actually bound each carved cell — everything else is redundant, so the slice
+## only has to clip against these.  Keyed by index into star_clusters(), not a parallel array:
+## only the focus is carved, so the indices are sparse.
+static var _cell_rivals: Dictionary = {}
+## The carved cells, index into star_clusters() -> faces.  Only Sol's own cell and the ones
+## bordering it are carved; the rest of the patch is drawn as points and needs no geometry.
+static var _focus_cells: Dictionary = {}
+## Index of Sol's own cluster, and the position the focus is taken from.
+static var _focus_index: int = -1
+static var _sol_focus: Vector3 = Vector3.ZERO
+## Radius around the focus seed inside which Sol is certainly still in the same cell: half the
+## distance to its nearest rival.  A point nearer to its own seed than that cannot be nearer to
+## any other, so the expensive check is skipped entirely while Sol is well inside its cluster.
+static var _focus_safe_r: float = 0.0
 ## Last computed cross-section (see cluster_slice) and the height it was cut at.
 static var _slice_cache: Array = []
 static var _slice_z: float = INF
+## The streamed patch: which tile it is centred on, which tiles that covers, and each tile's
+## generated clusters.  A tile is generated on entry and evicted when it stops bordering.
+static var _loaded_centre: Vector2i = Vector2i(0x7FFFFFFF, 0x7FFFFFFF)
+static var _loaded_patch: Array = []
+static var _tile_cache: Dictionary = {}
+## Where the patch should be centred, pushed by Game as Sol drifts.  Defaults to the tile that
+## contains the origin, which is where every run starts.
+static var _sol_tile_hint: Vector2i = Vector2i(0x7FFFFFFF, 0x7FFFFFFF)
+## Whether the run has said which galaxy this is.  Panels are built before start_new_game picks
+## the seed, and whatever they asked for generated the whole seven-tile patch against seed 0 —
+## which was then thrown away and built again the moment the real seed arrived.  That doubling
+## was most of the scene-load cost: 5.9 s of generation for 14 tiles' worth of a 7-tile patch.
+static var _seed_set: bool = false
+## Set by set_galaxy_seed so the patch is built as part of choosing the galaxy, not lazily on
+## first use.  The home cell's bisectors are what in_sol_cell() filters the star catalogue
+## against, so anything that reads the catalogue before the clusters exist — seeding
+## civilisations, the night sky, the first von Neumann survey — sees a galaxy of sixty
+## hand-catalogued stars and nothing else.
+static var _patch_pending: bool = false
+## Bumped whenever the patch changes, so callers holding an index or a name map can tell.
+static var _patch_version: int = 0
+## Bumped whenever the focus set is recarved — which happens when the patch changes AND when
+## Sol crosses a cluster border inside one tile, so it is not implied by _patch_version.
+static var _focus_version: int = 0
 
-## The generated cluster shell.  Deterministic from CLUSTER_SEED, so it is identical every
-## session and both the map and Game agree on where everything is.
+## How many times the loaded patch has been rebuilt.  Anything that indexes clusters by name or
+## position has to drop its index when this moves.
+static func patch_version() -> int:
+	return _patch_version
+
+## Every cluster in the loaded patch: Sol's own tile and the six that border it.
+##
+## STREAMED, not global.  Clusters used to be a single set filling Sol's tile alone, which meant
+## the shell simply stopped at the tile wall; now each tile generates its own, deterministically
+## from its axial coordinates, and the patch follows Sol as the Shkadov thruster carries it
+## across tile borders.  Tiles that fall out of the patch are evicted and regenerate identically
+## if they are ever entered again.
+##
+## Both the map and Game read this, so they always agree on what exists.
 static func star_clusters() -> Array:
-	if _clusters.is_empty():
-		var rng := RandomNumberGenerator.new()
-		rng.seed = CLUSTER_SEED ^ _galaxy_seed
-		# The clusters belong to the PLAYER'S OWN TILE — the single hexagonal prism of the region
-		# grid that contains Sol — and they fill it.  Sol sits exactly at that tile's centre (the
-		# lattice is sized for it), so the cell is a flat-top hexagon of circumradius HEX_SIZE
-		# about the origin, HEX_HEIGHT_LY tall.
-		#
-		# They were previously drawn in a spherical shell out to 9 000 ly: four times the tile's
-		# own radius, so nearly all of them fell in neighbouring cells or outside the disk
-		# entirely.  Sampling is by rejection inside the prism, which is the simple way to get a
-		# genuinely uniform fill of a hexagon rather than a ring that thins at the corners.
-		var basis: Array = _galactic_basis()
-		var gx: Vector3 = basis[0]
-		var gy: Vector3 = basis[1]
-		var gz: Vector3 = basis[2]
-		var half_h: float = HEX_HEIGHT_LY * 0.5
-		# Sol's own neighbourhood is a cluster like any other, seeded at the origin.  Without it
-		# the Voronoi partition would hand the space around the home star to whichever cluster
-		# happened to be nearest, which is wrong twice over: that ground is already settled, and
-		# it is the one piece of the tile the player can see star by star.  It is not a
-		# colonisation target (Game skips is_home) and draws no cluster glyph -- the Sun is
-		# already painted there -- but it owns territory and reports it like the rest.
-		_clusters.append({
+	_ensure_patch(_sol_tile_hint)
+	return _clusters
+
+
+## Rebuild the patch around the tile containing `pos`, if it is not the one already loaded.
+## Called by Game whenever Sol moves; cheap and idempotent when nothing has changed.
+static func set_cluster_origin(pos: Vector3) -> void:
+	# Called on every tick that Sol moves, so the common case has to be free.  Inside the safe
+	# radius nothing can have changed — see _focus_safe_r — and this returns after one distance
+	# test.  Without it the full check is 16 800 distances plus a re-carve, which measured at
+	# 121 ms and would have been paid every frame the thruster was running.
+	if _focus_index >= 0 and _focus_index < _clusters.size():
+		if pos.distance_squared_to(_clusters[_focus_index]["pos"] as Vector3) \
+				< _focus_safe_r * _focus_safe_r:
+			_sol_focus = pos
+			return
+	var t: Vector2i = tile_of(pos)
+	# The focus moves with Sol WITHIN a tile as well as across tiles: crossing a cluster border
+	# changes which cells are drawn in full even when the tile has not changed.
+	var moved_cell: bool = _focus_index < 0 or _nearest_seed_changed(pos)
+	_sol_focus = pos
+	if t != _loaded_centre:
+		_sol_tile_hint = t
+		_ensure_patch(t)
+	elif moved_cell:
+		_build_cluster_cells()
+
+
+## Whether `p` has left the cell the focus is currently on.
+static func _nearest_seed_changed(p: Vector3) -> bool:
+	if _focus_index < 0 or _focus_index >= _clusters.size():
+		return true
+	var here: float = (_clusters[_focus_index]["pos"] as Vector3).distance_squared_to(p)
+	for i in range(_clusters.size()):
+		if (_clusters[i]["pos"] as Vector3).distance_squared_to(p) < here:
+			return true
+	return false
+
+
+## The tile the loaded patch is centred on.
+static func loaded_tile() -> Vector2i:
+	return _loaded_centre
+
+
+## The tiles currently generated — Sol's and its six neighbours.
+static func loaded_tiles() -> Array:
+	return _loaded_patch.duplicate()
+
+
+## Make sure the patch centred on `centre` is the one in memory.
+static func _ensure_patch(centre_in: Vector2i) -> void:
+	# The hint starts unset, so the first call falls back to the tile holding the origin — where
+	# every run begins, before Game has had a chance to say where Sol has got to.
+	if not _seed_set:
+		return                      # the galaxy is not chosen yet; generating now is wasted work
+	var centre: Vector2i = centre_in
+	if centre.x == 0x7FFFFFFF:
+		centre = tile_of(Vector3.ZERO)
+	if not _clusters.is_empty() and _loaded_centre == centre:
+		return
+	_loaded_centre = centre
+	_loaded_patch = tile_patch(centre)
+	# Evict anything no longer bordering: a tile left behind costs memory and would otherwise
+	# accumulate for the whole length of a run that keeps moving.
+	var keep: Dictionary = {}
+	for t: Vector2i in _loaded_patch:
+		keep[t] = true
+	for t: Vector2i in (_tile_cache.keys() as Array):
+		if not keep.has(t):
+			_tile_cache.erase(t)
+	_clusters = []
+	# The tiles the patch does not already hold are generated IN PARALLEL.
+	#
+	# A patch is seven tiles and each one is 145 ms of rejection sampling, so a cold patch was a
+	# second of wall time on the thread that also has to draw the first frame — a third of the
+	# scene load, and paid again at every tile border the thruster crosses.  _generate_tile is a
+	# pure function of the tile and the galaxy seed: its own RandomNumberGenerator, constants,
+	# and the galactic basis, which is warmed below so no worker races to fill the lazy cache.
+	# Nothing it touches is shared and nothing it writes is read until every task is done, so
+	# the tiles come out bit-for-bit what generating them one after another gives — which is
+	# what verify_tile_threads checks, because a generator that is only MOSTLY deterministic
+	# would be worse than a slow one.
+	var want: Array = []
+	for t: Vector2i in _loaded_patch:
+		if not _tile_cache.has(t):
+			want.append(t)
+	if want.size() > 1:
+		_galactic_basis()                  # fill the lazy cache on this thread, before the workers
+		_gen_want = want
+		_gen_out = []
+		_gen_out.resize(want.size())
+		var gid: int = WorkerThreadPool.add_group_task(
+			_gen_tile_task, want.size(), -1, false, "cluster tiles")
+		WorkerThreadPool.wait_for_group_task_completion(gid)
+		for i in range(want.size()):
+			_tile_cache[want[i] as Vector2i] = _gen_out[i]
+		_gen_want = []
+		_gen_out = []
+	for t: Vector2i in _loaded_patch:
+		if not _tile_cache.has(t):
+			_tile_cache[t] = _generate_tile(t)
+		_clusters.append_array(_tile_cache[t] as Array)
+	_slice_cache = []
+	_slice_z = INF
+	_patch_version += 1
+	_build_cluster_cells()
+	# The star catalogue depends on this.  in_sol_cell() decides which chunk-generated stars are
+	# admitted, and it is the HOME CELL's bisectors that answer — so a patch that has just been
+	# built or re-centred has moved the boundary the catalogue was filtered against.
+	#
+	# The two used to be generated in one go, so the dependency never showed.  With generation
+	# deferred until the galaxy seed is known, the catalogue could be built first and keep a
+	# home field of zero stars: all_stars() returned the sixty hand-catalogued ones and nothing
+	# else, and the sky, the VN swarm and the civilisations seeded into it all followed it down.
+	_all_full.clear()
+	_all_stars.clear()
+	_stars_dirty = true
+
+
+## One tile's clusters, dart-thrown into its hexagonal prism.
+##
+## Deterministic from the galaxy seed and the tile's own coordinates, so a tile regenerates
+## identically however many times it is entered and left, and two tiles never share a layout.
+## Tiles handed to the worker pool, and where each one's result goes.  Written only by
+## _ensure_patch before the tasks start and read only after they have all finished, so the
+## workers share nothing but the index they were given.
+static var _gen_want: Array = []
+static var _gen_out: Array = []
+
+## One tile, on whichever thread the pool picked.
+static func _gen_tile_task(i: int) -> void:
+	_gen_out[i] = _generate_tile(_gen_want[i] as Vector2i)
+
+
+static func _generate_tile(t: Vector2i) -> Array:
+	var out: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = CLUSTER_SEED ^ _galaxy_seed ^ (t.x * 0x9E3779B1) ^ (t.y * 0x85EBCA6B)
+	var basis: Array = _galactic_basis()
+	var gx: Vector3 = basis[0]
+	var gy: Vector3 = basis[1]
+	var gz: Vector3 = basis[2]
+	var half_h: float = HEX_HEIGHT_LY * 0.5
+	var centre: Vector3 = tile_center(t)
+	var lps: Array = []
+	var grid: Dictionary = {}
+	# Sol's own neighbourhood is a cluster like any other, seeded at the ORIGIN — the place the
+	# run started, which is a fixed point in the galaxy whatever the thruster does to Sol
+	# afterwards.  Without it the partition would hand that ground to whichever cluster happened
+	# to be nearest, which is wrong twice over: it is already settled, and it is the one piece of
+	# the shell the player can see star by star.  It draws no glyph (the Sun is painted there)
+	# but it owns territory and reports it like the rest.
+	# Every seed carries the MEAN cell volume of its tile up front.  Only the focus is carved,
+	# so most clusters never get an exact figure — and the volume is what sizes a cluster's
+	# alien population, so a missing one silently emptied the whole shell of inhabitants.
+	# The estimate is a good one by construction: CLUSTER_SEP_FRAC packs the seeds as blue
+	# noise precisely so that every cell owns roughly the same volume.  _build_cluster_cells
+	# overwrites it with the true figure for the cells it carves.
+	var mean_vol: float = (1.5 * SQRT3 * HEX_SIZE * HEX_SIZE * HEX_HEIGHT_LY) \
+		/ float(maxi(CLUSTER_COUNT, 1))
+	var home_tile: bool = t == tile_of(Vector3.ZERO)
+	if home_tile:
+		out.append({
 			"name":     SOL_CLUSTER_NAME,
 			"pos":      Vector3.ZERO,
 			"lp":       Vector3.ZERO,
@@ -907,55 +1257,61 @@ static func star_clusters() -> Array:
 			"stars":    0,
 			"is_cluster": true,
 			"is_home":  true,
+			"tile":     t,
+			"volume":   mean_vol,
 			"color":    Color(1.00, 0.92, 0.70),
 		})
-		# One separation for everyone, Sol included: seeds are dart-thrown and rejected if they
-		# land inside another's radius.  A uniform bucket grid keyed on that radius keeps the
-		# test to the 27 buckets around the candidate, so the whole field costs a few tens of
-		# thousands of distance checks rather than a few million.
-		var sep: float = CLUSTER_SEP_FRAC * pow(
-			(1.5 * SQRT3 * HEX_SIZE * HEX_SIZE * HEX_HEIGHT_LY) / float(CLUSTER_COUNT), 1.0 / 3.0)
-		var sep_sq: float = sep * sep
-		var grid: Dictionary = {}
-		var lps: Array = [Vector3.ZERO]
+		lps.append(Vector3.ZERO)
+	var sep: float = CLUSTER_SEP_FRAC * pow(
+		(1.5 * SQRT3 * HEX_SIZE * HEX_SIZE * HEX_HEIGHT_LY) / float(CLUSTER_COUNT), 1.0 / 3.0)
+	var sep_sq: float = sep * sep
+	if home_tile:
 		grid[_bucket(Vector3.ZERO, sep)] = PackedInt32Array([0])
-		var i: int = 0
-		var guard: int = 0
-		while i < CLUSTER_COUNT and guard < CLUSTER_COUNT * 400:
-			guard += 1
-			# Uniform in the hexagon's bounding box, then rejected to the hexagon itself.
-			var px: float = rng.randf_range(-HEX_SIZE, HEX_SIZE)
-			var py: float = rng.randf_range(-HEX_INRADIUS, HEX_INRADIUS)
-			if SQRT3 * absf(px) + absf(py) > SQRT3 * HEX_SIZE:
-				continue                                      # outside a flat-top hex edge
-			var zz: float = rng.randf_range(-half_h, half_h)
-			var cand := Vector3(px, py, zz)
-			if _too_close(cand, lps, grid, sep, sep_sq):
-				continue                                      # crowds a seed already placed
-			var pos: Vector3 = gx * px + gy * py + gz * zz
-			var d: float = pos.length()
-			var key: Vector3i = _bucket(cand, sep)
-			var bucket: PackedInt32Array = grid.get(key, PackedInt32Array())
-			bucket.append(lps.size())
-			grid[key] = bucket
-			lps.append(cand)
-			i += 1
-			var n_stars: int = CLUSTER_STARS_MIN + rng.randi() % (CLUSTER_STARS_MAX - CLUSTER_STARS_MIN)
-			# Richer clusters read hotter/bluer; sparse ones dimmer.
-			var t: float = float(n_stars - CLUSTER_STARS_MIN) / float(CLUSTER_STARS_MAX - CLUSTER_STARS_MIN)
-			_clusters.append({
-				"name":     "Cluster C-%03d" % i,
-				"pos":      pos,
-				# Position in the tile's own frame, kept for the Voronoi pass so it never has to
-				# re-project the seeds onto the galactic basis.
-				"lp":       cand,
-				"dist":     d,
-				"stars":    n_stars,
-				"is_cluster": true,
-				"color":    Color(0.72, 0.80, 1.00).lerp(Color(1.00, 0.94, 0.82), 1.0 - t),
-			})
-		_build_cluster_cells()
-	return _clusters
+	var i: int = 0
+	var guard: int = 0
+	while i < CLUSTER_COUNT and guard < CLUSTER_COUNT * 400:
+		guard += 1
+		# Uniform in the hexagon's bounding box, then rejected to the hexagon itself — the
+		# simple way to fill a hexagon evenly rather than getting a ring that thins at the
+		# corners.  Coordinates are in the TILE's own frame, offset to the galaxy at the end.
+		var px: float = rng.randf_range(-HEX_SIZE, HEX_SIZE)
+		var py: float = rng.randf_range(-HEX_INRADIUS, HEX_INRADIUS)
+		if SQRT3 * absf(px) + absf(py) > SQRT3 * HEX_SIZE:
+			continue                                      # outside a flat-top hex edge
+		var zz: float = rng.randf_range(-half_h, half_h)
+		var cand := Vector3(px, py, zz)
+		if _too_close(cand, lps, grid, sep, sep_sq):
+			continue                                      # crowds a seed already placed
+		var pos: Vector3 = centre + gx * px + gy * py + gz * zz
+		var key: Vector3i = _bucket(cand, sep)
+		var bucket: PackedInt32Array = grid.get(key, PackedInt32Array())
+		bucket.append(lps.size())
+		grid[key] = bucket
+		lps.append(cand)
+		i += 1
+		var n_stars: int = CLUSTER_STARS_MIN + rng.randi() % (CLUSTER_STARS_MAX - CLUSTER_STARS_MIN)
+		# Richer clusters read hotter/bluer; sparse ones dimmer.
+		var frac: float = float(n_stars - CLUSTER_STARS_MIN) / float(CLUSTER_STARS_MAX - CLUSTER_STARS_MIN)
+		out.append({
+			# Addressed by TILE and index, not by a bare running number.  A bare index means
+			# nothing once more than one tile exists, and the name is what saves bind to.
+			# Tile-addressed: a bare running index means nothing once more than one tile
+			# exists, and the name is what saves bind to.  The colon keeps a negative q
+			# readable — "C--8.4-439" is unambiguous but awful to look at.
+			"name":     "Cluster %d:%d-%03d" % [t.x, t.y, i],
+			"pos":      pos,
+			# Position in the tile's own frame, kept for the Voronoi pass so it never has to
+			# re-project the seeds onto the galactic basis.
+			"lp":       cand,
+			"dist":     pos.length(),
+			"stars":    n_stars,
+			"is_cluster": true,
+			"tile":     t,
+			"volume":   mean_vol,
+			"color":    Color(0.72, 0.80, 1.00).lerp(Color(1.00, 0.94, 0.82), 1.0 - frac),
+		})
+	return out
+
 
 ## Bucket a tile-frame position by the separation radius, so a candidate only ever has to be
 ## compared against the seeds in its own bucket and the 26 around it.
@@ -993,37 +1349,133 @@ static func _too_close(cand: Vector3, lps: Array, grid: Dictionary,
 ## cross-section — see cluster_slice — because a hundred and forty overlapping polyhedra seen at
 ## once is not a map of anything.
 static func _build_cluster_cells() -> void:
-	_tile_volume = 0.0
+	# Bumped here rather than on the way out, so every path through this function counts —
+	# including the ones that bail with no focus at all.  Anything caching a decision that
+	# depended on WHICH clusters are drawn in full has to drop it when this moves.
+	_focus_version += 1
+	# The prism's own volume, not a sum over cells: only the focus is carved now, so summing
+	# what was carved would report a tile a hundredth of its real size.
+	_tile_volume = 1.5 * SQRT3 * HEX_SIZE * HEX_SIZE * HEX_HEIGHT_LY
 	_sol_cell_r_out = 0.0
 	_cell_rivals.clear()
+	_focus_cells.clear()
 	var n: int = _clusters.size()
 	if n <= 0:
 		return
-	var lp: Array = []                       # seed positions in the tile's own frame
+	# GALAXY coordinates, not the tile-local "lp".  With seven tiles loaded, lp is measured from
+	# each tile's own centre, so a seed at lp = (0,0,0) in one tile and one in another are the
+	# same point as far as a Voronoi carve is concerned — the partition came out nonsense.
+	var gp: Array = []
 	for i in n:
-		lp.append(_clusters[i]["lp"])
-	for i in n:
-		var res: Array = _carve_cell(lp, i, n, _nearest_rivals(lp, i, n, CELL_RIVALS_K))
-		var faces: Array = res[0]
-		_cell_rivals.append(res[1] as PackedInt32Array)
-		var vol: float = _faces_volume(faces)
-		_clusters[i]["volume"] = vol
-		_tile_volume += vol
-		if i == 0:
-			for v: Vector3 in _faces_verts(faces):
-				_sol_cell_r_out = maxf(_sol_cell_r_out, v.length())
-	# Bisector planes of the home cell, kept for in_sol_cell(): Sol is at the origin, so the
-	# plane between it and a seed s is p·s = |s|²/2 and the cell is the intersection of the near
-	# sides.  The nearest seed's plane is the closest any of them gets, so half that distance is
-	# a radius that needs no test at all.
+		gp.append(_clusters[i]["pos"])
+
+	# Only the cells that are DRAWN are carved.  Carving the whole patch cost 9.8 seconds per
+	# border crossing at four thousand seeds, and nothing looked at the result: the shell beyond
+	# the focus is rendered as points, which need a position and nothing else.
+	var focus: int = _nearest_seed(gp, _sol_focus_pos())
+	if focus < 0:
+		return
+	var carved: Dictionary = {}
+	var first: Array = _carve_cell(gp, focus, n, _nearest_rivals(gp, focus, n, CELL_RIVALS_K))
+	carved[focus] = first
+	# Its Voronoi neighbours are exactly the rivals whose bisector actually bounds it, which the
+	# carve already worked out — no separate adjacency pass is needed.
+	for j: int in (first[1] as PackedInt32Array):
+		if j >= 0 and j < n and not carved.has(j):
+			carved[j] = _carve_cell(gp, j, n, _nearest_rivals(gp, j, n, CELL_RIVALS_K))
+	for i: int in carved:
+		var res: Array = carved[i]
+		_focus_cells[i] = res[0]
+		_cell_rivals[i] = res[1] as PackedInt32Array
+		_clusters[i]["volume"] = _faces_volume(res[0] as Array)
+	_focus_index = focus
+	# Half the distance to the nearest rival: the radius the guard in set_cluster_origin uses.
+	_focus_safe_r = 0.0
+	var fp: Vector3 = gp[focus]
+	var nearest: float = INF
+	for j: int in (first[1] as PackedInt32Array):
+		if j != focus:
+			nearest = minf(nearest, fp.distance_to(gp[j] as Vector3))
+	if is_finite(nearest):
+		_focus_safe_r = nearest * 0.5
+
+	# Bisector planes of the HOME cell, kept for in_sol_cell(): the home cluster sits at the
+	# origin — the place the run started, which stays put however far the thruster carries Sol —
+	# so the plane between it and a seed s is p·s = |s|²/2 and the cell is the intersection of
+	# the near sides.  The nearest seed's plane is the closest any of them gets, so half that
+	# distance is a radius that needs no test at all.
 	_seed_pos.clear()
 	_seed_half.clear()
+	var home: int = -1
+	for i in n:
+		if bool((_clusters[i] as Dictionary).get("is_home", false)):
+			home = i
+			break
+	if home < 0:
+		_sol_cell_r_in = 0.0
+		_sol_cell_r_out = 0.0
+		return
+	var hres: Array = carved[home] if carved.has(home) \
+		else _carve_cell(gp, home, n, _nearest_rivals(gp, home, n, CELL_RIVALS_K))
+	for v: Vector3 in _faces_verts(hres[0] as Array):
+		_sol_cell_r_out = maxf(_sol_cell_r_out, v.length())
+	# Only the rivals that actually BOUND the home cell, not every seed in the patch.  The cell
+	# is exactly the intersection of those half-spaces — that is what the carve determined — so
+	# this is the same test, not an approximation of it.
+	#
+	# It has to be, now: in_sol_cell() runs once per star in the catalogue, and testing six
+	# thousand stars against sixteen thousand seeds is a hundred million operations.  That one
+	# loop was most of a twenty-two-second scene load.  A dozen planes is what it was always
+	# really asking about.
 	_sol_cell_r_in = _sol_cell_r_out
-	for i in range(1, n):
+	for i: int in (hres[1] as PackedInt32Array):
+		if i == home or i < 0 or i >= n:
+			continue
 		var sp: Vector3 = _clusters[i]["pos"]
 		_seed_pos.append(sp)
 		_seed_half.append(sp.length_squared() * 0.5)
 		_sol_cell_r_in = minf(_sol_cell_r_in, sp.length() * 0.5)
+
+
+
+## Where the cluster focus sits: Sol itself, wherever the thruster has taken it.
+static func _sol_focus_pos() -> Vector3:
+	return _sol_focus
+
+
+## The seed nearest `p`, or -1 if there are none.
+static func _nearest_seed(gp: Array, p: Vector3) -> int:
+	var best: int = -1
+	var best_d: float = INF
+	for i in range(gp.size()):
+		var d: float = (gp[i] as Vector3).distance_squared_to(p)
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+
+## Index into star_clusters() of the cluster Sol is currently inside, or -1.
+static func sol_cluster_index() -> int:
+	star_clusters()
+	return _focus_index
+
+
+## The clusters bordering Sol's own — the ones whose bisector bounds its cell.  These are what
+## get drawn in full; everything else in the patch is a point.
+static func focus_cluster_indices() -> PackedInt32Array:
+	star_clusters()
+	var out := PackedInt32Array()
+	for i: int in _focus_cells:
+		out.append(i)
+	return out
+
+
+## The carved cell of cluster `i`, or [] if it is outside the focus.
+static func cluster_cell_faces(i: int) -> Array:
+	star_clusters()
+	return _focus_cells.get(i, [])
+
 
 ## Clip the tile prism down to seed `i`'s cell.  Returns [faces, the rivals that actually cut it].
 ##
@@ -1041,7 +1493,10 @@ static func _build_cluster_cells() -> void:
 ## two across the whole field and only tests a couple of dozen rivals per cell.
 static func _carve_cell(lp: Array, i: int, n: int, near: PackedInt32Array) -> Array:
 	var si: Vector3 = lp[i]
-	var faces: Array = _prism_faces()
+	# The seed's own tile, so a cell in a bordering tile is bounded by that tile's prism rather
+	# than by the home one.
+	var faces: Array = _prism_faces(tile_center(
+		(_clusters[i] as Dictionary).get("tile", tile_of(si)) as Vector2i))
 	var verts: PackedVector3Array = _faces_verts(faces)
 	var reach: float = _verts_radius(verts, si)
 	var used := PackedInt32Array()
@@ -1118,7 +1573,14 @@ static func _nearest_rivals(lp: Array, i: int, n: int, k: int) -> PackedInt32Arr
 
 ## The player's tile as a closed polyhedron: a flat-top hexagonal prism about the origin, its
 ## faces as ordered vertex loops.  Every Voronoi cell starts life as a copy of this.
-static func _prism_faces() -> Array:
+## The hexagonal prism of one tile, in GALAXY coordinates — the volume a carve starts from.
+## Centred on the tile rather than the origin, because a focus cell can sit in any tile of the
+## patch once Sol has drifted.
+static func _prism_faces(centre: Vector3 = Vector3.ZERO) -> Array:
+	var basis: Array = _galactic_basis()
+	var gx: Vector3 = basis[0]
+	var gy: Vector3 = basis[1]
+	var gz: Vector3 = basis[2]
 	var h: float = HEX_HEIGHT_LY * 0.5
 	var ring: Array = [
 		Vector2(HEX_SIZE, 0.0),
@@ -1128,22 +1590,24 @@ static func _prism_faces() -> Array:
 		Vector2(-HEX_SIZE * 0.5, -HEX_SIZE * SQRT3_2),
 		Vector2(HEX_SIZE * 0.5, -HEX_SIZE * SQRT3_2),
 	]
+	# Each corner is lifted into galaxy coordinates through the galactic basis, so the prism is
+	# the real volume of the tile rather than an axis-aligned stand-in for it.
+	var at := func(p: Vector2, zz: float) -> Vector3:
+		return centre + gx * p.x + gy * p.y + gz * zz
 	var top := PackedVector3Array()
 	var bot := PackedVector3Array()
 	for k in range(6):
-		var p: Vector2 = ring[k]
-		var q: Vector2 = ring[5 - k]
-		top.append(Vector3(p.x, p.y, h))
-		bot.append(Vector3(q.x, q.y, -h))
+		top.append(at.call(ring[k] as Vector2, h))
+		bot.append(at.call(ring[5 - k] as Vector2, -h))
 	var faces: Array = [top, bot]
 	for k in range(6):
 		var a: Vector2 = ring[k]
 		var c: Vector2 = ring[(k + 1) % 6]
 		var side := PackedVector3Array()
-		side.append(Vector3(a.x, a.y, -h))
-		side.append(Vector3(c.x, c.y, -h))
-		side.append(Vector3(c.x, c.y, h))
-		side.append(Vector3(a.x, a.y, h))
+		side.append(at.call(a, -h))
+		side.append(at.call(c, -h))
+		side.append(at.call(c, h))
+		side.append(at.call(a, h))
 		faces.append(side)
 	return faces
 
@@ -1283,17 +1747,29 @@ static func cluster_slice(z0: float) -> Array:
 		Vector2(-HEX_SIZE * 0.5, -HEX_SIZE * SQRT3_2),
 		Vector2(HEX_SIZE * 0.5, -HEX_SIZE * SQRT3_2),
 	])
-	var lp: Array = []
+	# In-plane galactic coordinates, so cells from different tiles share one frame.  The cells
+	# are carved in galaxy coordinates now; slicing in the tile's local frame would put two
+	# tiles' seeds on top of each other.
+	var flat: Array = []
 	for i in n:
-		lp.append(_clusters[i]["lp"])
-	for i in n:
-		var si: Vector3 = lp[i]
-		var poly: PackedVector2Array = hexagon.duplicate()
+		var p: Vector3 = _clusters[i]["pos"]
+		flat.append(Vector3(p.dot(gx), p.dot(gy), p.dot(gz)))
+	# Only the CARVED cells have a cross-section to draw.  The rest of the patch is rendered as
+	# points, which is the whole reason the carve is limited to the focus — see
+	# _build_cluster_cells.
+	for i: int in _focus_cells:
+		var si: Vector3 = flat[i]
+		var tc: Vector3 = tile_center((_clusters[i] as Dictionary)["tile"] as Vector2i)
+		var cx: float = tc.dot(gx)
+		var cy: float = tc.dot(gy)
+		var poly := PackedVector2Array()
+		for h: Vector2 in hexagon:
+			poly.append(Vector2(cx + h.x, cy + h.y))
 		# Only the rivals that actually bound the solid cell can bound its cross-section: the
 		# rest were already redundant in 3D and stay redundant on any plane through it.  That
 		# keeps a slice at a dozen clips per cell no matter how crowded the tile gets.
-		for j: int in (_cell_rivals[i] as PackedInt32Array):
-			var sj: Vector3 = lp[j]
+		for j: int in (_cell_rivals.get(i, PackedInt32Array()) as PackedInt32Array):
+			var sj: Vector3 = flat[j]
 			var nrm := Vector2(sj.x - si.x, sj.y - si.y)
 			var d: float = (sj.length_squared() - si.length_squared()) * 0.5 - z0 * (sj.z - si.z)
 			poly = _clip_half_plane(poly, nrm, d)
@@ -1353,8 +1829,14 @@ static func tile_half_height_ly() -> float:
 ## Volume of the home cell (ly³) — the territory of the Sol Cluster, and the only part of the
 ## galaxy where individual stars are placed.
 static func sol_cell_volume_ly3() -> float:
-	var cl: Array = star_clusters()
-	return float((cl[0] as Dictionary).get("volume", 0.0)) if not cl.is_empty() else 0.0
+	# Found by its flag, not taken from index 0.  The home cluster is the first seed of the tile
+	# that holds the ORIGIN, and index 0 is the first seed of whichever tile the patch is
+	# currently centred on — the same thing only until the thruster carries Sol into a
+	# neighbouring tile, after which this returned a different cluster's volume entirely.
+	for c: Dictionary in star_clusters():
+		if bool(c.get("is_home", false)):
+			return float(c.get("volume", 0.0))
+	return 0.0
 
 ## Outer reach of the home cell (ly) — no individually-catalogued star lies beyond it.
 static func sol_cell_reach_ly() -> float:
@@ -1435,6 +1917,9 @@ var _selected: int = -1
 ## Index into star_clusters() of the selected cluster, or -1.  Stars and clusters are picked
 ## from the same click, and selecting one clears the other.
 var _selected_cluster: int = -1
+## Set by Game once the player has held a star outside the home cell — see
+## set_home_cluster_selectable.  Closed at the start of a run.
+var _home_cluster_selectable: bool = false
 ## Whether any star carries a colony or a known civilisation.  While nothing does — the whole
 ## opening of a run — the culling pass can skip a name conversion and two dictionary probes for
 ## every one of six thousand stars, every frame.
@@ -1463,6 +1948,14 @@ var _ref_pos:  Vector3 = Vector3.ZERO   # kept level with Sol's drift; see _sync
 var _ref_name: String  = "Sol"
 ## The "Aim thruster" button, shown only when Shkadov mirrors are standing.
 var _thrust_btn: Button = null
+## The lineage block in the info box: what a colony's people have become, the request for their
+## sequence data, and the list of sequences that could be spliced into them.
+var _lineage_label: Label = null
+var _lineage_btn: Button = null
+var _breed_opt: OptionButton = null
+var _breed_ids: Array = []
+## Pushed by Game for the SELECTED world only — see Game.lineage_ui_state.
+var _lineage_state: Dictionary = {}
 ## Orthonormal galactic basis in the equatorial frame + the galactic-centre position (ly).
 var _g_x: Vector3 = Vector3.RIGHT   # toward the galactic centre (l=0, b=0)
 var _g_y: Vector3 = Vector3.FORWARD # toward l=90 (direction of galactic rotation)
@@ -1472,6 +1965,18 @@ var _gc_pos: Vector3 = Vector3.ZERO # galactic centre, relative to Sol
 ## Interstellar state pushed by Game.gd.
 var _colonized: Dictionary = {}      # star name → true
 var _factions: Dictionary = {}       # star name → "aggressive" | "peaceful"
+
+# ── Layer filter ──────────────────────────────────────────────────────────────
+## What the map draws, from the checkboxes in the top-right corner.  All on, which is the map
+## as it has always been — a filter nobody has touched changes nothing.
+##
+## Not saved.  It is a way of LOOKING at the map rather than a property of the run: a player who
+## hid the empty stars to read their own holdings does not mean that every future session should
+## open that way, and a save that came back with half the galaxy missing would read as a bug.
+var _layers: Dictionary = {"stars": true, "clusters": true, "galaxies": true}
+## Which kinds of star, by STAR_CLASSES id.  Meaningful only while "stars" is on.
+var _star_classes: Dictionary = {}
+
 var _missions: Array = []            # [{ target, progress, origin, kind: "colony"|"vn", mission }]
 var _avail_energy: float = 0.0       # current energy, for the launch affordability readout
 var _dash_phase: float = 0.0         # animates the travel-line dashes
@@ -1538,7 +2043,139 @@ func _ready() -> void:
 	_build_galaxies()
 	_build_galaxy()   # galactic basis + procedural star field + intra-galactic landmarks
 	_build_launch_ui()
+	_build_layer_ui()
 	resized.connect(queue_redraw)
+
+# ── Layer filter: what the map draws ──────────────────────────────────────────
+var _layer_ui: PanelContainer = null
+var _layer_boxes: Dictionary = {}        # layer id → CheckBox
+var _class_boxes: Dictionary = {}        # star class id → CheckBox
+
+## Whether a layer is drawn.
+func layer_shown(id: String) -> bool:
+	return bool(_layers.get(id, true))
+
+## Whether a star of this class is drawn.  False for every star while the Stars layer is off, so
+## one test answers both halves of the filter.
+func star_class_shown(cls: String) -> bool:
+	if not bool(_layers.get("stars", true)):
+		return false
+	return bool(_star_classes.get(cls, true))
+
+## Whether a star is drawn, from the two facts the culling pass already has.
+func _star_shown(colonised: bool, faction: String) -> bool:
+	return star_class_shown(star_class(colonised, faction))
+
+## Turn a layer on or off from outside the panel (the console, a test, a future hotkey).
+func set_layer_shown(id: String, on: bool) -> void:
+	if not _layers.has(id):
+		return
+	_layers[id] = on
+	if _layer_boxes.has(id):
+		(_layer_boxes[id] as CheckBox).set_pressed_no_signal(on)
+	_on_filter_changed()
+
+## Turn one class of star on or off.
+func set_star_class_shown(cls: String, on: bool) -> void:
+	if not _star_classes.has(cls):
+		return
+	_star_classes[cls] = on
+	if _class_boxes.has(cls):
+		(_class_boxes[cls] as CheckBox).set_pressed_no_signal(on)
+	_on_filter_changed()
+
+## Everything that has to happen when the filter moves.
+func _on_filter_changed() -> void:
+	# The sub-options mean nothing while the layer above them is off, and a live checkbox that
+	# does nothing is worse than a greyed one.
+	var stars_on: bool = bool(_layers.get("stars", true))
+	for cls: String in _class_boxes:
+		(_class_boxes[cls] as CheckBox).disabled = not stars_on
+	# A selection that is no longer drawn is dropped rather than left pointing at nothing: the
+	# launch panel and the info box both read it, and a ring around a hidden star is a ghost.
+	if _selected >= 0:
+		var stars: Array = all_stars()
+		if _selected < stars.size():
+			var nm: String = str((stars[_selected] as Dictionary)["name"])
+			if not _star_shown(_colonized.has(nm), str(_factions.get(nm, ""))):
+				_selected = -1
+				_update_launch_ui()
+				star_selected.emit(selected_star())
+	if _selected_cluster >= 0 and not layer_shown("clusters"):
+		_selected_cluster = -1
+		_update_launch_ui()
+		star_selected.emit(selected_star())
+	# The cached cluster sort is keyed on the view, and this is part of the view now.
+	_cl_key = []
+	queue_redraw()
+
+## Build the top-right layer filter: what the map draws, and which stars.
+##
+## It doubles as the legend.  The map is colour-coded by what is in a system and nothing on
+## screen said which colour meant what; the class list has to carry those colours anyway, so
+## naming each one next to its own swatch costs nothing and answers a question the map was
+## leaving open.
+func _build_layer_ui() -> void:
+	_layer_ui = PanelContainer.new()
+	_layer_ui.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_layer_ui.offset_right = -LAUNCH_UI_GAP
+	_layer_ui.offset_left = -LAUNCH_UI_GAP
+	_layer_ui.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_layer_ui.offset_top = LAUNCH_UI_GAP
+	_layer_ui.offset_bottom = LAUNCH_UI_GAP
+	_layer_ui.grow_vertical = Control.GROW_DIRECTION_END
+	add_child(_layer_ui)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 1)
+	var mc := MarginContainer.new()
+	for m in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		mc.add_theme_constant_override(m, 8)
+	mc.add_child(vb)
+	_layer_ui.add_child(mc)
+
+	_layer_boxes["stars"] = _layer_box(vb, "Stars", "stars",
+		"Every catalogued and generated star. The classes below refine which of them.")
+	# The star classes are indented under the layer they belong to, so the nesting is visible
+	# rather than something to be worked out from the wording.
+	var indent := MarginContainer.new()
+	indent.add_theme_constant_override("margin_left", 14)
+	var cvb := VBoxContainer.new()
+	cvb.add_theme_constant_override("separation", 1)
+	indent.add_child(cvb)
+	vb.add_child(indent)
+	for c: Dictionary in STAR_CLASSES:
+		var cls: String = str(c["id"])
+		_star_classes[cls] = true
+		var cb := CheckBox.new()
+		cb.text = str(c["label"])
+		cb.button_pressed = true
+		cb.add_theme_font_size_override("font_size", 11)
+		# The swatch is the point: this list is the only place the map says what its colours mean.
+		cb.add_theme_color_override("font_color", c["color"])
+		cb.add_theme_color_override("font_hover_color", c["color"])
+		cb.add_theme_color_override("font_pressed_color", c["color"])
+		cb.toggled.connect(func(on: bool) -> void: set_star_class_shown(cls, on))
+		cvb.add_child(cb)
+		_class_boxes[cls] = cb
+
+	_layer_boxes["clusters"] = _layer_box(vb, "Clusters", "clusters",
+		"The generated cluster shell — everything too far to resolve star by star.")
+	_layer_boxes["galaxies"] = _layer_box(vb, "Galaxies", "galaxies",
+		"The extragalactic layer, out in the far decades.")
+
+
+## One top-level layer checkbox.
+func _layer_box(parent: Control, label: String, id: String, tip: String) -> CheckBox:
+	var cb := CheckBox.new()
+	cb.text = label
+	cb.button_pressed = true
+	cb.tooltip_text = tip
+	cb.add_theme_font_size_override("font_size", 12)
+	cb.toggled.connect(func(on: bool) -> void: set_layer_shown(id, on))
+	parent.add_child(cb)
+	return cb
+
 
 ## Build the bottom-docked launch sub-panel (speed slider + Launch button).
 func _build_launch_ui() -> void:
@@ -1598,6 +2235,40 @@ func _build_launch_ui() -> void:
 	_launch_info.custom_minimum_size = Vector2(360, 0)
 	_launch_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_child(_launch_info)
+
+	# ── A colony of our own: what its people have become, and the trade in it ──
+	# Only a settled world shows these.  A colony four hundred light-years out is autonomous in
+	# every way that matters, and what can usefully cross that gap is its genetic data — so the
+	# offer belongs on the system itself, next to the distance that prices it.
+	_lineage_label = Label.new()
+	_lineage_label.add_theme_font_size_override("font_size", 11)
+	_lineage_label.modulate = Color(0.70, 0.90, 0.78)
+	_lineage_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_lineage_label.custom_minimum_size = Vector2(360, 0)
+	_lineage_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_lineage_label.hide()
+	vb.add_child(_lineage_label)
+
+	_lineage_btn = Button.new()
+	_lineage_btn.hide()
+	_lineage_btn.pressed.connect(func() -> void:
+		var s: String = selected_star()
+		if s != "":
+			lineage_requested.emit(s))
+	vb.add_child(_lineage_btn)
+
+	# Splicing a sequence into a world.  A dropdown rather than a button per
+	# life history: the archive grows, and three buttons that are usually absent is a panel that
+	# changes shape every time a transfer lands.
+	_breed_opt = OptionButton.new()
+	_breed_opt.fit_to_longest_item = false
+	_breed_opt.clip_text = true
+	_breed_opt.hide()
+	_breed_opt.item_selected.connect(func(i: int) -> void:
+		var s: String = selected_star()
+		if i > 0 and s != "" and i - 1 < _breed_ids.size():
+			lineage_direct_requested.emit(s, str(_breed_ids[i - 1])))
+	vb.add_child(_breed_opt)
 
 	# Each action button opens the configuration dialog for that action (speed / acceleration /
 	# number to send, or laser output) with a live cost readout and a confirm — nothing fires on
@@ -1964,6 +2635,11 @@ func _on_dialog_confirm() -> void:
 func _process(delta: float) -> void:
 	if visible and (not _missions.is_empty() or not _attacks.is_empty() or not _incoming.is_empty()):
 		_dash_phase = fmod(_dash_phase + delta * 24.0, 1.0e6)
+		# Carry the calendar forward at the game's own rate between refreshes.  seconds_per_day
+		# is the clock both time modes run on, so this tracks the fast rungs as well as the slow
+		# ones.  The pause flags cover game over too, which sets SolarSystem.paused.
+		if not (SolarSystem.paused or SolarSystem.ui_paused):
+			_flight_year += delta / maxf(SolarSystem.seconds_per_day, 1.0e-12) / 365.25
 		queue_redraw()
 
 ## Resolve each galaxy's RA/Dec/distance into the cartesian frame the stars use, and
@@ -2142,13 +2818,66 @@ func set_cluster_progress(frac: Dictionary) -> void:
 	_cluster_frac = frac
 	queue_redraw()
 
-func set_interstellar_state(colonized: Dictionary, missions: Array, energy: float) -> void:
+## The calendar the flight tracks are placed against, advanced every frame in _process and
+## resynced to the simulation on each push.  Game.year_continuous() is the authority; this only
+## carries it between refreshes, which arrive on events rather than on a timer.
+var _flight_year: float = 0.0
+
+func set_interstellar_state(colonized: Dictionary, missions: Array, energy: float,
+		now_year: float = -1.0) -> void:
 	_colonized = colonized
 	_marked_stars = not _colonized.is_empty() or not _factions.is_empty()
 	_missions = missions
 	_avail_energy = energy
+	if now_year >= 0.0:
+		_flight_year = now_year
 	_update_launch_ui()
 	queue_redraw()
+
+## Where anything in flight — craft or weapon — is on its path right now.
+##
+## A track that carries its flight window is placed off _flight_year, which moves every frame, so
+## it travels instead of holding the position it had when the map was last refreshed.  Anything
+## without a window falls back to the pushed figure, which is also the guard against a
+## zero-length flight.
+##
+## A craft under power carries its accel→coast→decel fractions and is placed along that profile,
+## so it visibly slows into the target.  A laser pulse or a relativistic round does not: it is
+## already at speed when it leaves and crosses the gap linearly.
+func _track_progress(d: Dictionary) -> float:
+	if not d.has("end_year"):
+		return float(d.get("progress", 0.0))
+	var sy: float = float(d.get("start_year", 0.0))
+	var ey: float = float(d.get("end_year", 0.0))
+	if ey <= sy:
+		return float(d.get("progress", 0.0))
+	var tf: float = clampf((_flight_year - sy) / (ey - sy), 0.0, 1.0)
+	if not d.has("accel_time_frac"):
+		return tf
+	return flight_progress(tf, float(d["accel_time_frac"]), float(d["accel_dist_frac"]))
+
+## Whether the home cluster may be picked at all.  Game latches this the first time the player
+## holds a star outside the home cell; until then the Sol cluster is territory the player is
+## standing in rather than an object to inspect, and a click near the Sun should fall through to
+## the Sun.  A selection already standing is dropped if the right is withdrawn (a new run).
+func set_home_cluster_selectable(v: bool) -> void:
+	if _home_cluster_selectable == v:
+		return
+	_home_cluster_selectable = v
+	if not v and _selected_cluster >= 0 \
+			and bool((star_clusters()[_selected_cluster] as Dictionary).get("is_home", false)):
+		_selected_cluster = -1
+		_update_launch_ui()
+	queue_redraw()
+
+## Whether a cluster index is one the player may select.
+func _cluster_pickable(ci: int) -> bool:
+	var cl: Array = star_clusters()
+	if ci < 0 or ci >= cl.size():
+		return false
+	if not layer_shown("clusters"):
+		return false
+	return _home_cluster_selectable or not bool((cl[ci] as Dictionary).get("is_home", false))
 
 ## Push alien presence (star name → "aggressive"/"peaceful") for the red/blue highlights.
 func set_star_factions(factions: Dictionary) -> void:
@@ -2221,34 +2950,40 @@ func _selected_accel() -> float:
 func _update_launch_ui() -> void:
 	if _launch_ui == null:
 		return
-	var name := selected_star()
-	if name == "":
+	var star := selected_star()
+	if star == "":
 		_launch_ui.hide()
 		return
 	_launch_ui.show()
 	# Known-infrastructure listing for a detected alien system (shown for any selection above).
 	if _intel_label:
-		var block := _intel_block(name)
+		var block := _intel_block(star)
 		_intel_label.text = block
 		_intel_label.visible = block != ""
 	var dist: float = _selected_dist()
-	if _colonized.has(name):
-		_launch_title.text = "%s  —  colonised" % name
-		_launch_info.text = "A human colony orbits this star.\n%s" % _colony_infra_block(name)
+	if _colonized.has(star):
+		_launch_title.text = "%s  —  colonised" % star
+		_launch_info.text = "A human colony orbits this star.\n%s" % _colony_infra_block(star)
 		_launch_btn.disabled = true
 		_launch_btn.text = "Colonised"
+		_show_lineage_block(true)
 		_update_weapon_buttons(dist, true)
 		return
-	_launch_title.text = "%s  —  %.2f ly" % [name, dist]
-	_launch_info.text = "Energy available: %s.  Pick an action to set speed / acceleration / number and confirm." % \
-		Units.format_si(_avail_energy, "J")
+	_show_lineage_block(false)
+	_launch_title.text = "%s  —  %.2f ly" % [star, dist]
+	# No energy figure here.  The reserve is the home grid's, and it has nothing to do with the
+	# star being looked at: it is a property of the civilisation, not of the target, and shown on
+	# an uncolonised system it read as a fact about that system.  What a launch costs and whether
+	# it can be paid for belong to the action dialog, where the speed and count that set the cost
+	# are actually chosen — see _update_dialog_info.
+	_launch_info.text = "Pick an action to set speed / acceleration / number and confirm."
 	# A detected civilisation makes the system a neighbour, not a site.  Blocked here rather
 	# than refused on confirm, so the map says why before the player commits to anything.
-	var inhabited: bool = _intel.has(name)
+	var inhabited: bool = _intel.has(star)
 	if inhabited:
 		_launch_btn.disabled = true
 		_launch_btn.text = "Inhabited — cannot be colonised"
-		_launch_btn.tooltip_text = "%s already holds a civilisation." % name
+		_launch_btn.tooltip_text = "%s already holds a civilisation." % star
 	elif not _can_colonize:
 		# Interstellar flight not yet unlocked — show the target's data but block the launch.
 		_launch_btn.disabled = true
@@ -2272,16 +3007,84 @@ func _update_launch_ui() -> void:
 	if _dialog_backdrop and _dialog_backdrop.visible:
 		_update_dialog_info()
 
+## Game's answer about the selected world's lineage — see Game.lineage_ui_state.
+func set_lineage_state(state: Dictionary) -> void:
+	_lineage_state = state
+	_update_launch_ui()
+
+
+## Show or hide the lineage block, and fill it for the selected colony.
+##
+## The button carries the WAIT, because the wait is the price: a request is two years per
+## light-year, out and back at the speed of light, and on a frontier colony that is most of a
+## millennium.  Shown on the button rather than in a tooltip for exactly that reason.
+func _show_lineage_block(on: bool) -> void:
+	if _lineage_label == null:
+		return
+	var st: Dictionary = _lineage_state
+	if not on or st.is_empty():
+		_lineage_label.hide()
+		_lineage_btn.hide()
+		_breed_opt.hide()
+		return
+	_lineage_label.text = str(st.get("text", ""))
+	_lineage_label.show()
+
+	var why: String = str(st.get("why", ""))
+	var years: float = float(st.get("years", 0.0))
+	_lineage_btn.show()
+	if bool(st.get("in_flight", false)):
+		_lineage_btn.disabled = true
+		_lineage_btn.text = "Lineage data in transit…"
+		_lineage_btn.tooltip_text = why
+	elif why != "":
+		_lineage_btn.disabled = true
+		_lineage_btn.text = why
+		_lineage_btn.tooltip_text = "Only a colony that has written a sequence of its own has anything to send, and only once it has been isolated long enough to be a lineage of its own."
+	else:
+		_lineage_btn.disabled = false
+		_lineage_btn.text = "Request lineage data  (%s round trip)" \
+			% Units.format_si(years, "yr")
+		_lineage_btn.tooltip_text = "The request goes out and the data comes back at the speed of light, and everything that colony has written comes back together. What arrives is the SEQUENCE: colony ships can be founded carrying it, and any settled world can be spliced for it in a few decades."
+
+	# Splicing a sequence this world does not already carry.
+	var targets: Array = st.get("targets", []) as Array
+	_breed_ids = []
+	_breed_opt.clear()
+	if targets.is_empty():
+		_breed_opt.hide()
+		return
+	_breed_opt.add_item("Splice in…")
+	for t: Dictionary in targets:
+		_breed_opt.add_item(str(t["label"]))
+		_breed_ids.append(str(t["id"]))
+	_breed_opt.selected = 0
+	_breed_opt.show()
+
+
 ## Enable/label the weapon, probe, and diplomacy buttons for the current target.  These now
 ## only gate on AVAILABILITY (research / crafted stock / not-colonised); the actual energy cost
 ## and affordability are computed live in the configuration dialog each button opens.
 func _update_weapon_buttons(_dist: float, colonised: bool) -> void:
 	if _laser_btn == null:
 		return
-	var name := selected_star()
-	var has_intel: bool = _intel.has(name)
+	var star := selected_star()
+	var has_intel: bool = _intel.has(star)
 	# Diplomacy is available only with a DETECTED alien system; probes/weapons need the tech.
-	for db: Button in [_contact_btn, _ally_btn, _trade_btn, _war_btn]:
+	# A colony of ours can be traded with — it has been mining its own system for centuries and
+	# is far too distant to be managed any other way.  Diplomacy stays shut: there is nobody
+	# over there to make contact with, ally with or declare war on.
+	if _trade_btn:
+		# Named for what it is in each case: a consignment to a world of ours, a trade with
+		# somebody else's.
+		_trade_btn.text = "Ship…" if colonised else "Trade…"
+		if colonised:
+			_trade_btn.disabled = false
+			_trade_btn.tooltip_text = "Send a consignment to this colony and ask for one back. The round trip is two years per light-year."
+		else:
+			_trade_btn.tooltip_text = ""
+	for db: Button in [_contact_btn, _ally_btn, _war_btn] if colonised \
+			else [_contact_btn, _ally_btn, _trade_btn, _war_btn]:
 		if db:
 			db.disabled = colonised or not has_intel
 	# A cluster is a volume holding thousands of stars, not a polity.  There is nobody in
@@ -2327,14 +3130,14 @@ func _update_weapon_buttons(_dist: float, colonised: bool) -> void:
 ## Multi-line intel block for a detected alien system: alignment/diplomacy header plus a list
 ## of its known infrastructure (fields the telescopes can't yet resolve read "unknown"; a
 ## returned probe reveals everything).  Returns "" for a system with no intel.
-func _intel_block(name: String) -> String:
-	if not _intel.has(name):
+func _intel_block(star_name: String) -> String:
+	if not _intel.has(star_name):
 		return ""
-	var d: Dictionary = _intel[name]
+	var d: Dictionary = _intel[star_name]
 	var probed: bool = bool(d.get("probed", false))
 	var detail: float = float(d.get("detail", 0.0))
 	var lines: Array = []
-	# Identity first, temperament second: a detected neighbour has a name and a species long
+	# Identity first, temperament second: a detected neighbour has a star_name and a species long
 	# before anyone knows whether it means harm.
 	var who: String = str(d.get("faction", ""))
 	var race: String = str(d.get("race", ""))
@@ -2364,10 +3167,10 @@ func _intel_block(name: String) -> String:
 	return "\n".join(lines)
 
 ## Infrastructure readout for one of the player's own colonies (full detail — it's ours).
-func _colony_infra_block(name: String) -> String:
-	if not _colony_intel.has(name):
+func _colony_infra_block(star_name: String) -> String:
+	if not _colony_intel.has(star_name):
 		return "Colony infrastructure: developing…"
-	var d: Dictionary = _colony_intel[name]
+	var d: Dictionary = _colony_intel[star_name]
 	return "Colony infrastructure:\n  • Dyson swarm: %d%%\n  • Orbital telescopes: %d\n  • Defensive lasers: %d" % [
 		int(round(float(d.get("dyson", 0.0)) * 100.0)),
 		int(d.get("telescopes", 0)), int(d.get("lasers", 0))]
@@ -2416,8 +3219,8 @@ func focus_star(star_name: String) -> bool:
 			if str(clusters[ci]["name"]) == star_name:
 				found = ci
 				break
-		if found < 0:
-			return false
+		if found < 0 or not _cluster_pickable(found):
+			return false      # the home cluster is not a place to be sent before it is pickable
 		_selected = -1
 		_selected_cluster = found
 		target = _rel(clusters[found]["pos"])
@@ -2445,16 +3248,16 @@ const FOCUS_VIEW_FRAC: float = 0.66
 
 
 ## Index of a star by name (-1 if not found).
-func _star_index(name: String) -> int:
+func _star_index(star_name: String) -> int:
 	all_stars()   # ensures the catalogue and its index are current
-	return int(_name_to_idx.get(name, -1))
+	return int(_name_to_idx.get(star_name, -1))
 
 ## Map position of anything a mission can be addressed to — a catalogued star OR a cluster in
-## the outer shell.  Game.gd already indexes both by name, so a launch at a cluster works; only
+## the outer shell.  Game.gd already indexes both by star_name, so a launch at a cluster works; only
 ## the RENDERER could not resolve one, which is why those flights drew no path at all.
-## Returns false when the name matches nothing (an in-flight target that no longer exists).
-func _target_pos(name: String, out: Array) -> bool:
-	var idx := _star_index(name)
+## Returns false when the star_name matches nothing (an in-flight target that no longer exists).
+func _target_pos(target_name: String, out: Array) -> bool:
+	var idx := _star_index(target_name)
 	if idx >= 0:
 		out.append(all_stars()[idx]["pos"])
 		return true
@@ -2462,24 +3265,78 @@ func _target_pos(name: String, out: Array) -> bool:
 	if _cluster_pos.is_empty():
 		for c: Dictionary in star_clusters():
 			_cluster_pos[str(c["name"])] = c["pos"]
-	if _cluster_pos.has(name):
-		out.append(_cluster_pos[name])
+	if _cluster_pos.has(target_name):
+		out.append(_cluster_pos[target_name])
 		return true
 	return false
 
+## Whether a mission endpoint is somewhere the eye can actually resolve: a catalogued star
+## inside STATUS_COLOR_LY of the reference frame.
+##
+## Past that cutoff a star is not drawn as a star at all, only as a status point, and a cluster
+## never earns a body at any range.  A probe flying between two such places is a chevron over
+## blank sky — it marks a craft at a position the map is not drawing anything at, and in the late
+## game the swarm puts thousands of them across the view.  The route itself still draws, so the
+## flight is not hidden; only the glyph claiming to be the probe goes away.
+func _endpoint_resolved(endpoint_name: String, pos: Vector3) -> bool:
+	if endpoint_name != "" and _star_index(endpoint_name) < 0:
+		return false   # a cluster: a shell on the map, never a body
+	return pos.distance_to(_ref_pos) <= STATUS_COLOR_LY
+
 ## Dashed line from `from` to `to` whose dashes flow toward `to`; the leg already
 ## traversed (≤ progress) is tinted green, the remainder blue, with a ship marker.
+## How much of the segment a→b lies inside the panel, as the parameter range [t0, t1] along it.
+## False when none of it does.  Liang–Barsky against the padded panel rect.
+##
+## This is what stops a track being WALKED off-screen.  The map is log-radial, so at any real
+## zoom a flight between two stars projects tens of thousands of pixels across a panel sixteen
+## hundred wide — and the dash loop below steps the whole of it in fourteen-pixel periods
+## whether or not any of it can be seen.  Measured at forty thousand pixels for one track, which
+## is three thousand draw calls for a line nobody is looking at.
+func _clip_segment(a: Vector2, b: Vector2, pad: float, out: Array) -> bool:
+	var t0: float = 0.0
+	var t1: float = 1.0
+	var dx: float = b.x - a.x
+	var dy: float = b.y - a.y
+	for side in range(4):
+		var pp: float = [-dx, dx, -dy, dy][side]
+		var qq: float = [a.x + pad, size.x + pad - a.x, a.y + pad, size.y + pad - a.y][side]
+		if absf(pp) < 1.0e-9:
+			if qq < 0.0:
+				return false          # parallel to this edge and outside it
+			continue
+		var r: float = qq / pp
+		if pp < 0.0:
+			if r > t1:
+				return false
+			t0 = maxf(t0, r)
+		else:
+			if r < t0:
+				return false
+			t1 = minf(t1, r)
+	if t1 <= t0:
+		return false
+	out.append(t0)
+	out.append(t1)
+	return true
+
+
 func _draw_travel_dashes(from: Vector2, to: Vector2, progress: float) -> void:
 	var d := to - from
 	var total := d.length()
 	if total < 1.0:
 		return
+	var span: Array = []
+	if not _clip_segment(from, to, 16.0, span):
+		return                      # none of this track is on the panel
 	var dir := d / total
 	var period := 14.0          # dash(8) + gap(6)
 	var ahead := Color(0.55, 0.80, 1.0, 0.55)
 	var done := Color(0.45, 0.95, 0.65, 0.85)
-	var s := fmod(_dash_phase, period) - period   # increasing phase → dashes shift toward `to`
-	while s < total:
+	var vis0: float = float(span[0]) * total
+	var vis1: float = float(span[1]) * total
+	var s := _dash_start(fmod(_dash_phase, period) - period, period, vis0)
+	while s < total and s < vis1:
 		var a := maxf(s, 0.0)
 		var bend := minf(s + 8.0, total)
 		if bend > a:
@@ -2487,7 +3344,25 @@ func _draw_travel_dashes(from: Vector2, to: Vector2, progress: float) -> void:
 			draw_line(from + dir * a, from + dir * bend, done if mid <= progress else ahead, 1.5)
 		s += period
 	var ship := from + dir * (total * clampf(progress, 0.0, 1.0))
-	draw_circle(ship, 3.0, Color(0.85, 0.97, 1.0, 0.95))
+	if _on_panel(ship, 16.0):
+		draw_circle(ship, 3.0, Color(0.85, 0.97, 1.0, 0.95))
+
+
+## Where the dash walk starts, given the pattern's origin and the first visible offset.
+##
+## Whole periods from the ORIGIN, never from the clip boundary.  That is the whole of what keeps
+## clipping invisible: the dashes have to land exactly where they would have landed had the
+## track been walked from one end, or the pattern crawls along the line every time the view
+## moves and the visible stretch starts somewhere else.
+static func _dash_start(origin: float, period: float, vis0: float) -> float:
+	if period <= 0.0 or vis0 <= origin:
+		return origin
+	return origin + period * floorf((vis0 - origin) / period)
+
+
+## Whether a projected point is near enough the panel to be worth drawing.
+func _on_panel(p: Vector2, pad: float) -> bool:
+	return p.x >= -pad and p.y >= -pad and p.x <= size.x + pad and p.y <= size.y + pad
 
 ## Colour per probe mission, so a swarm's purpose is readable from the map alone: a survey
 ## front, a relay network, and a colonisation wave look like three different things because
@@ -2501,10 +3376,19 @@ const PROBE_COLOURS: Dictionary = {
 ## A von Neumann probe in transit.  Deliberately NOT the colony ship's dashed lane: a solid
 ## hairline with a forward-pointing chevron at the probe, because the thing that matters about
 ## a probe is its heading — it is going somewhere and will not stop when it gets there.
-func _draw_probe_track(from: Vector2, to: Vector2, progress: float, mission: String) -> void:
+## `show_ship` draws the chevron pair that marks the probe itself.  It is turned off for a flight
+## whose two ends are both unresolved — see _endpoint_resolved.
+func _draw_probe_track(from: Vector2, to: Vector2, progress: float, mission: String,
+		show_ship: bool = true) -> void:
 	var d := to - from
 	var total := d.length()
 	if total < 1.0:
+		return
+	# Nothing of this track is on the panel — and at a deep zoom that is almost all of them.
+	# The rasteriser would clip the three lines below anyway, but the chevrons are polylines
+	# built per probe and the whole call is wasted either way.
+	var span: Array = []
+	if not _clip_segment(from, to, 16.0, span):
 		return
 	var dir := d / total
 	var col: Color = PROBE_COLOURS.get(mission, PROBE_COLOURS["colonize"])
@@ -2516,6 +3400,9 @@ func _draw_probe_track(from: Vector2, to: Vector2, progress: float, mission: Str
 	# A short bright wake trailing the probe, so direction reads even when it is barely moving.
 	var wake := maxf(0.0, total * p - 14.0)
 	draw_line(from + dir * wake, head, Color(col.r, col.g, col.b, 0.95), 1.6, true)
+	# The chevrons mark where the probe IS, so they are worth nothing when that is off screen.
+	if not show_ship or not _on_panel(head, 24.0):
+		return
 	# Chevron at the probe, pointing along the heading.
 	var n := Vector2(-dir.y, dir.x)
 	var tip := head + dir * 5.0
@@ -2543,21 +3430,77 @@ const STATUS_COL_UNKNOWN:  Color = Color(1.00, 0.88, 0.30)   # inhabited, alignm
 const STATUS_COL_PEACEFUL: Color = Color(0.50, 0.70, 1.00)   # inhabited, friendly
 const STATUS_COL_HOSTILE:  Color = Color(1.00, 0.35, 0.35)   # inhabited, hostile
 
+# ── What a star IS, in one place ──────────────────────────────────────────────
+# The filter and the palette ask the same question and must never disagree about the answer, so
+# they both go through star_class().  "peaceful" is the word the simulation uses and "friendly"
+# is the word on the checkbox; this is where the two meet.
+const STAR_CLASS_HUMAN:    String = "human"
+const STAR_CLASS_HOSTILE:  String = "aggressive"
+const STAR_CLASS_FRIENDLY: String = "friendly"
+const STAR_CLASS_UNKNOWN:  String = "unknown"
+## Nobody there, or nothing known about it — which is almost the whole catalogue.  It is a class
+## like the others because without it the filter cannot answer "show me only my holdings": the
+## four inhabited classes are a few dozen stars against six thousand empty ones.
+const STAR_CLASS_EMPTY:    String = "empty"
+
+## Every class, in the order the filter lists them, with the label and the colour each one is
+## drawn in.  The panel reads this, so the checkbox list IS the legend.
+const STAR_CLASSES: Array[Dictionary] = [
+	{"id": STAR_CLASS_HUMAN,    "label": "Human",       "color": STATUS_COL_HUMAN},
+	{"id": STAR_CLASS_HOSTILE,  "label": "Aggressive",  "color": STATUS_COL_HOSTILE},
+	{"id": STAR_CLASS_FRIENDLY, "label": "Friendly",    "color": STATUS_COL_PEACEFUL},
+	{"id": STAR_CLASS_UNKNOWN,  "label": "Unknown",     "color": STATUS_COL_UNKNOWN},
+	{"id": STAR_CLASS_EMPTY,    "label": "Uninhabited", "color": STATUS_COL_EMPTY},
+]
+
+## Which class a star falls in, from the two facts the culling pass has already established.
+static func star_class(colonised: bool, faction: String) -> String:
+	if colonised:
+		return STAR_CLASS_HUMAN
+	match faction:
+		"aggressive":
+			return STAR_CLASS_HOSTILE
+		"peaceful":
+			return STAR_CLASS_FRIENDLY
+		"unknown":
+			return STAR_CLASS_UNKNOWN
+	return STAR_CLASS_EMPTY
+
 ## The colour of any star drawn as a point: what is there, not what it is.  The hues are the ones
 ## the rings around a drawn body already use, so the two halves of the map agree.  Takes facts the
 ## culling pass has already established — it looks both of them up anyway, to decide whether a
 ## star earns a body at all.
 func _status_color_of(colonised: bool, faction: String) -> Color:
-	if colonised:
-		return STATUS_COL_HUMAN
-	match faction:
-		"aggressive":
-			return STATUS_COL_HOSTILE
-		"peaceful":
-			return STATUS_COL_PEACEFUL
-		"unknown":
-			return STATUS_COL_UNKNOWN
+	return _class_color(star_class(colonised, faction))
+
+## The colour one class is drawn in.
+static func _class_color(cls: String) -> Color:
+	for c: Dictionary in STAR_CLASSES:
+		if str(c["id"]) == cls:
+			return c["color"]
 	return STATUS_COL_EMPTY
+
+## Whether a star is named: the frame's chosen set — the name range, the inner band and
+## STAR_NAME_BUDGET — or the selection, and nothing else.
+##
+## WHAT IS LIVING THERE DOES NOT ENTER INTO IT, which is why neither a colonised flag nor a
+## faction is a parameter.  The signature is the claim: a label cannot depend on who settled a
+## star or who lives there, because the rule is given no way to ask.
+##
+## Both exemptions were real and both outgrew their reasoning.  A colony was named everywhere on
+## the grounds that one cannot act on a system one cannot identify, and that stops holding once
+## the swarm has settled tens of thousands of them.  A known civilisation was named everywhere
+## because there were a handful and they are what the player is deciding about — true early, and
+## not true of a galaxy the simulation has been filling in for a million years.  Either one
+## alone buries the map under its own labels, the few worth reading among them.
+##
+## The selection carries both: it is named whatever the band says, which it was not before.
+## That is the escape hatch the whole rule needs — a star outside the name range has no label
+## now, so clicking it has to produce one or there is no telling which dot the info box is
+## describing.
+static func _star_label_shown(selected: bool, in_named_set: bool, alpha: float) -> bool:
+	return selected or (in_named_set and alpha > 0.0)
+
 
 ## A star drawn as the sphere it is, from one pre-baked sprite.
 ##
@@ -2631,6 +3574,49 @@ const STAR_ZOOM_POW: float = 0.5
 const STAR_ZOOM_MIN: float = 0.30
 const STAR_ZOOM_MAX: float = 2.20
 
+## At most this many flights are drawn as tracks; the rest are not drawn.  Chosen so a busy
+## frontier still reads as busy without the map costing more than the simulation behind it.
+const FLIGHT_TRACK_BUDGET: int = 250
+
+## Distance from the view frame of the BUDGET-th nearest flight target — everything beyond it is
+## dropped.  INF while there are fewer flights than the budget, which is most of a run.
+##
+## Cached behind the same movement tolerance the other cuts use, and behind the mission list
+## itself: Game pushes that every simulated day, and re-deriving the cut from three thousand
+## targets on every push would cost more than it saves.
+var _fl_cut: float = INF
+var _fl_cut_ref: Vector3 = Vector3(INF, INF, INF)
+var _fl_cut_n: int = -1
+
+func _flight_distance_cut() -> float:
+	var n: int = _missions.size()
+	if n <= FLIGHT_TRACK_BUDGET:
+		return INF
+	var tol: float = maxf(_fl_cut if is_finite(_fl_cut) else 1.0, 1.0) * 0.02
+	if n == _fl_cut_n and _ref_pos.distance_squared_to(_fl_cut_ref) < tol * tol:
+		return _fl_cut
+	_fl_cut_ref = _ref_pos
+	_fl_cut_n = n
+	# The k-th nearest by a short insertion buffer, the same shape _kth_nearest uses: the
+	# budget is a threshold question and a threshold needs no ordering of the rest.
+	var best: PackedFloat32Array = PackedFloat32Array()
+	for m: Dictionary in _missions:
+		var tp: Array = []
+		if not _target_pos(str(m.get("target", "")), tp):
+			continue
+		var d: float = (tp[0] as Vector3).distance_to(_ref_pos)
+		if best.size() >= FLIGHT_TRACK_BUDGET and d >= best[best.size() - 1]:
+			continue
+		var at: int = best.size()
+		while at > 0 and best[at - 1] > d:
+			at -= 1
+		best.insert(at, d)
+		if best.size() > FLIGHT_TRACK_BUDGET:
+			best.remove_at(best.size() - 1)
+	_fl_cut = best[best.size() - 1] if best.size() >= FLIGHT_TRACK_BUDGET else INF
+	return _fl_cut
+
+
 ## Below this zoom no flight tracks are drawn.  Set low on purpose: watching a von Neumann swarm
 ## work is done from a WIDE view — that is the whole scale of the thing — and forty tracks is a
 ## couple of hundred draw calls, nothing beside the clusters.  It only exists to stop the tracks
@@ -2642,6 +3628,28 @@ const CLUSTER_GLYPH_MIN_ZOOM: float = 3.0
 ## At most this many clusters are drawn with their grain glyph; the rest are batched points.
 ## Eight draw calls apiece is affordable for the ones nearest the view and nothing else.
 const CLUSTER_GLYPH_BUDGET: int = 60
+
+# ── The cluster shell is sorted into its two tiers ONCE PER VIEW, not once per frame ──
+# The patch holds eight thousand clusters and all but a handful of them end up as one entry in a
+# batched point cloud.  Their screen positions are a function of the VIEW — the frame's origin,
+# the zoom, the two view angles and the panel's size — and of nothing that the simulation
+# touches, so while the player is neither panning nor zooming the whole sort produces the same
+# answer it produced last frame.
+#
+# That mattered because the map redraws continuously while the simulation runs: Game pushes
+# mission progress and the energy readout every simulated day, each push queues a redraw, and
+# the cluster sort was half the resulting frame.  Holding the point cloud and the short list of
+# glyph-tier indices across frames takes it out of the frame entirely until the view moves.
+var _cl_pts := PackedVector2Array()
+var _cl_pt_col := PackedColorArray()
+## Indices into star_clusters() of the clusters that get a full grain glyph: Sol's neighbourhood,
+## the selection, and whatever the distance budget admits.  Short — tens, not thousands — so
+## these are re-projected every frame and only the SORT is cached.
+var _cl_glyph_idx := PackedInt32Array()
+## The frame origin the three buffers above were sorted at, and everything else about the view
+## and the galaxy that could change the answer.  INF so the first frame always rebuilds.
+var _cl_ref: Vector3 = Vector3(INF, INF, INF)
+var _cl_key: Array = []
 
 ## Margin, in pixels, around the panel within which a star still counts as on screen — room for
 ## its corona and any ring drawn around it.
@@ -2874,9 +3882,28 @@ func _decade_label(k: int) -> String:
 		sup += str(SUPERSCRIPT[int(ch)])
 	return "10%s ly" % sup
 
+## How far outside the panel a galaxy may sit and still be drawn — enough to keep a glyph whose
+## label is on screen, and nothing beyond that.
+const GALAXY_SCREEN_PAD: float = 140.0
+## Beyond this distance from the origin a small polygon cannot be triangulated reliably; see
+## _draw_galaxy_glyph.  Far outside any real panel, so it only ever catches the pathological
+## case that the screen cull below has somehow missed.
+const POLY_SAFE_PX: float = 50_000.0
+
 ## A small tilted-ellipse "disk + core" glyph so galaxies read distinctly from stars.
 ## `alpha` dims the whole glyph (used as galaxies recede toward the horizon).
+##
+## Refuses to draw at a position it cannot draw correctly.  draw_colored_polygon triangulates in
+## 32-bit floats on ABSOLUTE coordinates, so a 6-pixel ellipse centred a few hundred thousand
+## pixels away loses its own area to cancellation and the call fails with "triangulation failed",
+## taking the rest of the canvas item's output with it.  At zoom 80 the farthest galaxies project
+## to ±300 000 px, which is where this was coming from — the caller culls them now, and this is
+## the backstop for any other caller.
 func _draw_galaxy_glyph(sp: Vector2, rad: float, col: Color, tilt: float, alpha: float = 1.0) -> void:
+	if rad <= 0.0 or not (is_finite(sp.x) and is_finite(sp.y)):
+		return
+	if absf(sp.x) > POLY_SAFE_PX or absf(sp.y) > POLY_SAFE_PX:
+		return
 	var pts := PackedVector2Array()
 	var ct := cos(tilt)
 	var st := sin(tilt)
@@ -2892,7 +3919,7 @@ func _draw_galaxy_glyph(sp: Vector2, rad: float, col: Color, tilt: float, alpha:
 ##   cluster   — a small scatter of dots (a knot of stars)
 ##   nebula    — a soft translucent blob
 ##   structure — a faint open ring (spiral arm / bulge region)
-func _draw_landmark(sp: Vector2, kind: String, col: Color, alpha: float, name: String) -> void:
+func _draw_landmark(sp: Vector2, kind: String, col: Color, alpha: float, label_text: String) -> void:
 	var c := _fade(col, alpha)
 	match kind:
 		"cluster":
@@ -2904,7 +3931,7 @@ func _draw_landmark(sp: Vector2, kind: String, col: Color, alpha: float, name: S
 			draw_circle(sp, 1.2, c)
 		_:  # structure — spiral arm / bulge
 			draw_arc(sp, 7.0, 0.0, TAU, 28, _fade(col, alpha * 0.6), 1.0, true)
-	draw_string(_font, sp + Vector2(9.0, 4.0), name,
+	draw_string(_font, sp + Vector2(9.0, 4.0), label_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(col.r, col.g, col.b, 0.8 * alpha))
 
 ## Orthographic projection of a world point onto the camera's right/up axes.
@@ -2927,8 +3954,58 @@ func _persp(p: Vector3, b: Basis) -> float:
 	var d: float = maxf(cam - p.dot(b.z), near)
 	return cam / d
 
-func _project(p: Vector3, b: Basis, center: Vector2, scale: float) -> Vector2:
-	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * scale * _persp(p, b)
+func _project(p: Vector3, b: Basis, center: Vector2, px_per_unit: float) -> Vector2:
+	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * px_per_unit * _persp(p, b)
+
+
+## How far the view frame may drift before the cached cluster point cloud is stale.
+##
+## A cluster r light-years away sits at log₁₀r on the radial scale, so moving the frame by δ
+## shifts it by δ/(r·ln10) scale units, which is that times px_per_unit times the perspective
+## factor in pixels.  The nearest cluster that is drawn AT ALL sits at the inner edge of the
+## detail band — anything closer has faded to nothing — so that bounds the worst case, and the
+## perspective factor is at most the camera distance over the near clip.  Solving for half a
+## pixel of error gives the tolerance below, which tightens on its own as the player zooms in.
+func _cluster_pt_tol(px_per_unit: float) -> float:
+	var r_min: float = pow(10.0, (_max_display_radius() / _zoom) * LABEL_INNER_FRAC)
+	var persp_max: float = CAMERA_DIST_VR / NEAR_CLIP_VR
+	return (0.5 * r_min / INV_LN10) / maxf(px_per_unit * persp_max, 1.0e-6)
+
+
+## One cluster drawn in full: a ring of grains around a brighter core, so it reads as a GROUP of
+## suns and never gets mistaken for one.
+##
+## Called off the cached glyph list, which is tens of entries, so the transform is redone here
+## every frame rather than cached with the point cloud — and the colour with it, which is why a
+## colony landing in the player's own neighbourhood shows up immediately.
+##
+## The home cluster owns the ground the Sun is standing on, so it draws no grains — they would
+## just read as a smudge over the Sol marker.  It stays selectable, and still takes the selection
+## ring, so its territory can be read like any other cluster's.
+func _draw_cluster_glyph(cl: Dictionary, csel: bool, b: Basis, center: Vector2,
+		px_per_unit: float) -> void:
+	var cp := _project(_rel(cl["pos"]), b, center, px_per_unit)
+	if bool(cl.get("is_home", false)):
+		if csel:
+			draw_arc(cp, 13.0, 0.0, TAU, 28, Color(1.0, 0.95, 0.6, 0.85), 1.5, true)
+		return
+	var ccol: Color = cl["color"]
+	if _colonized.has(str(cl["name"])):
+		ccol = STATUS_COL_HUMAN
+	var ca: float = _detail_alpha(_display_radius((cl["pos"] as Vector3).distance_to(_ref_pos)))
+	var a: float = 1.0 if csel else maxf(ca, 0.25)
+	var seed_h: int = hash(str(cl["name"]))
+	for k in range(7):
+		var ang: float = float((seed_h >> (k * 3)) % 360) * PI / 180.0
+		var rad: float = 2.5 + float((seed_h >> (k * 2)) % 5)
+		draw_rect(Rect2(cp + Vector2(cos(ang), sin(ang)) * rad - Vector2(0.8, 0.8),
+			Vector2(1.6, 1.6)), Color(ccol.r, ccol.g, ccol.b, 0.45 * a))
+	draw_circle(cp, 2.2, Color(ccol.r, ccol.g, ccol.b, 0.9 * a))
+	if csel:
+		draw_arc(cp, 11.0, 0.0, TAU, 28, Color(1.0, 0.95, 0.6, 0.95), 1.5, true)
+	# No label.  Most of them are "Cluster q:r-nnn" and the name tells the player nothing a glyph
+	# does not — the selection ring says which one is picked and the info box says what it is,
+	# which is where the name was actually being read from anyway.
 
 ## View radius for the current zoom.  Computed rather than cached: _persp runs during picking
 ## as well as drawing, and a per-frame cache would be stale for the first click after a zoom.
@@ -2949,12 +4026,12 @@ func _draw() -> void:
 
 	var center: Vector2 = size * 0.5
 	var b := _view_basis()
-	var scale := _fit_scale(center)
+	var px_per_unit := _fit_scale(center)
 	var star_maxdr := _max_star_display_radius()
 
 	# Order-of-magnitude reference rings: one per decade of light-years, out to the
-	# Hubble horizon.  On the log scale they're evenly spaced (log₁₀(10ᵏ) = k), so each
-	# step outward is ×10 the distance — the map's way of showing the scale of the void.
+	# Hubble horizon.  On the log px_per_unit they're evenly spaced (log₁₀(10ᵏ) = k), so each
+	# step outward is ×10 the distance — the map's way of showing the px_per_unit of the void.
 	var max_k: int = int(ceil(_display_radius(HUBBLE_HORIZON_LY)))
 	for k in range(0, max_k + 1):
 		var r_ly := pow(10.0, float(k))
@@ -2964,9 +4041,9 @@ func _draw() -> void:
 		var pts := PackedVector2Array()
 		for i in range(65):
 			var a := TAU * float(i) / 64.0
-			pts.append(_project(Vector3(cos(a), sin(a), 0.0) * rd, b, center, scale))
+			pts.append(_project(Vector3(cos(a), sin(a), 0.0) * rd, b, center, px_per_unit))
 		draw_polyline(pts, RING_COLOR, 1.0, true)
-		draw_string(_font, _project(Vector3(rd, 0.0, 0.0), b, center, scale) + Vector2(3, -3),
+		draw_string(_font, _project(Vector3(rd, 0.0, 0.0), b, center, px_per_unit) + Vector2(3, -3),
 			_decade_label(k), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, RING_LABEL)
 
 	# The Hubble horizon itself — the outermost ring, in its own colour.
@@ -2974,17 +4051,17 @@ func _draw() -> void:
 	var hpts := PackedVector2Array()
 	for i in range(65):
 		var ha := TAU * float(i) / 64.0
-		hpts.append(_project(Vector3(cos(ha), sin(ha), 0.0) * horizon_rd, b, center, scale))
+		hpts.append(_project(Vector3(cos(ha), sin(ha), 0.0) * horizon_rd, b, center, px_per_unit))
 	draw_polyline(hpts, HORIZON_COLOR, 1.5, true)
 	# Raised by the label's own height so it sits clear above the horizon ring.
 	var horizon_label_y: float = -3.0 - _font.get_height(10)
-	draw_string(_font, _project(Vector3(horizon_rd, 0.0, 0.0), b, center, scale) + Vector2(3, horizon_label_y),
+	draw_string(_font, _project(Vector3(horizon_rd, 0.0, 0.0), b, center, px_per_unit) + Vector2(3, horizon_label_y),
 		"Hubble horizon", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, HORIZON_COLOR)
 
 	# Nearby galaxies — out in the far decades, drawn as tilted disk glyphs.  Unbound
-	# galaxies recede with cosmic expansion (proper distance × scale), fading as they
+	# galaxies recede with cosmic expansion (proper distance × px_per_unit), fading as they
 	# near the Hubble horizon and dropping out entirely once they cross it.
-	for g: Dictionary in _galaxies:
+	for g: Dictionary in (_galaxies if layer_shown("galaxies") else [] as Array):
 		var eff_d: float = float(g["base_dist"])
 		if not bool(g["bound"]):
 			eff_d *= _cosmic_scale
@@ -2992,17 +4069,24 @@ func _draw() -> void:
 			continue   # receded beyond the observable horizon — gone for good
 		var gpos: Vector3 = (g["dir"] as Vector3) * eff_d
 		var glp := _rel(gpos)
-		var gsp := _project(glp, b, center, scale)
+		var gsp := _project(glp, b, center, px_per_unit)
+		# Off the panel entirely.  The log-radial px_per_unit spans ten decades, so at a deep zoom most
+		# of the extragalactic layer projects hundreds of thousands of pixels away — drawn anyway
+		# until now, glyph, drop-line and label alike, for nothing anyone could see.
+		if gsp.x < -GALAXY_SCREEN_PAD or gsp.y < -GALAXY_SCREEN_PAD \
+				or gsp.x > size.x + GALAXY_SCREEN_PAD or gsp.y > size.y + GALAXY_SCREEN_PAD:
+			continue
 		var gcol: Color = g["color"]
 		# Dim as it approaches the horizon (redshifting out of sight).
 		var horizon_fade: float = clampf(
 			(HUBBLE_HORIZON_LY - eff_d) / (HUBBLE_HORIZON_LY * 0.3), 0.0, 1.0)
 		var g_alpha := _detail_alpha(glp.length()) * horizon_fade
 		if g_alpha > 0.0:
-			var gfoot := _project(Vector3(glp.x, glp.y, 0.0), b, center, scale)
+			var gfoot := _project(Vector3(glp.x, glp.y, 0.0), b, center, px_per_unit)
 			draw_line(gfoot, gsp, _fade(DROP_COLOR, g_alpha), 1.0)
 		var tilt: float = float(hash(str(g["name"])) % 360) * (PI / 360.0)
 		_draw_galaxy_glyph(gsp, 6.0, gcol, tilt, horizon_fade)
+
 		if g_alpha > 0.0:
 			draw_string(_font, gsp + Vector2(9.0, 4.0), str(g["name"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(gcol.r, gcol.g, gcol.b, 0.80 * g_alpha))
@@ -3015,7 +4099,7 @@ func _draw() -> void:
 		var ma: float = _detail_alpha(mlp.length())
 		if ma <= 0.0:
 			continue
-		_draw_landmark(_project(mlp, b, center, scale), str(m["kind"]), m["color"], ma, str(m["name"]))
+		_draw_landmark(_project(mlp, b, center, px_per_unit), str(m["kind"]), m["color"], ma, str(m["name"]))
 
 	# The generated cluster shell: everything the player can reach but cannot resolve star by
 	# star.  Near enough, each is a soft cloud of grains around a brighter core, so it reads as a
@@ -3023,58 +4107,91 @@ func _draw() -> void:
 	# expensive thing on the map — eight draw calls apiece across six hundred clusters, which is
 	# several times the whole star field — and at that size they are a smear anyway.  So below
 	# CLUSTER_GLYPH_MIN_ZOOM a cluster is one batched point, coloured by whether it has been taken.
-	# Both distance orderings are refreshed here, before anything reads one: a no-op unless the
-	# frame or the catalogue moved, and the cluster loop below needs it on the very first frame.
-	_rank_by_distance(_ref_pos)
-	var cl_all: Array = star_clusters()
-	var cl_glyphs: bool = _zoom >= CLUSTER_GLYPH_MIN_ZOOM and _cl_rank.size() == cl_all.size()
-	var cl_seg := PackedVector2Array()
-	var cl_col := PackedColorArray()
-	for ci in range(cl_all.size()):
-		var cl: Dictionary = cl_all[ci]
-		var clp: Vector3 = _rel(cl["pos"])
-		var ca: float = _detail_alpha(clp.length())
-		var csel: bool = ci == _selected_cluster
-		if ca <= 0.0 and not csel:
-			continue
-		var cp := _project(clp, b, center, scale)
-		if cp.x < -20.0 or cp.y < -20.0 or cp.x > size.x + 20.0 or cp.y > size.y + 20.0:
-			continue
-		# The home cluster owns the ground the Sun is standing on, so it draws no glyph — grains
-		# scattered over the Sol marker would just read as a smudge.  It stays selectable, and
-		# still takes the selection ring, so its territory can be read like any other cluster's.
-		if bool(cl.get("is_home", false)):
-			if csel:
-				draw_arc(cp, 13.0, 0.0, TAU, 28, Color(1.0, 0.95, 0.6, 0.85), 1.5, true)
-			continue
-		var ccol: Color = cl["color"]
-		var settled: bool = _colonized.has(str(cl["name"]))
-		if settled:
-			ccol = STATUS_COL_HUMAN
-		var a: float = 1.0 if csel else maxf(ca, 0.25)
-		# Nearest first, capped.  Between roughly zoom 3 and 6 the whole tile fits on the panel and
-		# every one of six hundred clusters passed the bounds test, so the budget is what stops
-		# the grains from costing five thousand draw calls at the zoom the map is most used at.
-		if not csel and (not cl_glyphs or _cl_rank[ci] >= CLUSTER_GLYPH_BUDGET):
-			cl_seg.append(cp)
-			cl_seg.append(cp + Vector2(1.0, 0.0))
-			cl_col.append(Color(ccol.r, ccol.g, ccol.b, maxf(a, 0.45)))
-			continue
-		# A ring of grains around a brighter core — a cluster, not a star.
-		var seed_h: int = hash(str(cl["name"]))
-		for k in range(7):
-			var ang: float = float((seed_h >> (k * 3)) % 360) * PI / 180.0
-			var rad: float = 2.5 + float((seed_h >> (k * 2)) % 5)
-			draw_rect(Rect2(cp + Vector2(cos(ang), sin(ang)) * rad - Vector2(0.8, 0.8),
-				Vector2(1.6, 1.6)), Color(ccol.r, ccol.g, ccol.b, 0.45 * a))
-		draw_circle(cp, 2.2, Color(ccol.r, ccol.g, ccol.b, 0.9 * a))
-		if csel:
-			draw_arc(cp, 11.0, 0.0, TAU, 28, Color(1.0, 0.95, 0.6, 0.95), 1.5, true)
-		# No label.  Six hundred of them are "Cluster C-nnn" and the name tells the player nothing
-		# a glyph does not — the selection ring says which one is picked and the info box says
-		# what it is, which is where the name was actually being read from anyway.
-	if cl_seg.size() >= 2:
-		draw_multiline_colors(cl_seg, cl_col, 1.6)
+	#
+	# The sort into those two tiers is CACHED — see _cl_pts — so what follows runs on the frames
+	# where the view moved and not on the rest.
+	#
+	# The distance cuts are refreshed here, before anything reads one: a no-op unless the frame
+	# or the catalogue moved, and the sort below needs the cluster cut on the very first frame.
+	_refresh_lod_cuts(_ref_pos)
+	# Filtered out entirely rather than drawn and discarded: the sort is the expensive half and
+	# there is nothing to sort for a layer nobody is looking at.
+	var cl_all: Array = star_clusters() if layer_shown("clusters") else ([] as Array)
+	var glyphs_ok: bool = _zoom >= CLUSTER_GLYPH_MIN_ZOOM
+	# Everything the sort below depends on besides the frame origin, which gets its own
+	# tolerance.  The glyph CUT is in here as well as the patch it was computed from: it has its
+	# own, much looser movement tolerance, so it can move on a frame where _ref_pos has not.
+	#
+	# Colonisation enters as a COUNT.  The colour of a settled cluster is baked into the cached
+	# point cloud, and the only thing that can change it is a name entering or leaving
+	# _colonized — which moves the count, except in the one case where a colony is lost and
+	# another gained between two frames.  That leaves a one-pixel point the wrong colour until
+	# the next time the view moves; the glyph tier, which is the neighbourhood the player is
+	# actually reading, re-derives its colours every frame and is never stale.  The alternative
+	# is a value compare of sixteen thousand entries per frame, for that.
+	var cl_key: Array = [_zoom, _yaw, _pitch, size.x, size.y, glyphs_ok, cl_all.size(),
+		_patch_version, _focus_version, _cluster_glyph_cut, _selected_cluster, _colonized.size()]
+	var cl_tol: float = _cluster_pt_tol(px_per_unit)
+	if cl_key != _cl_key or _ref_pos.distance_squared_to(_cl_ref) >= cl_tol * cl_tol:
+		_cl_ref = _ref_pos
+		_cl_key = cl_key
+		_cl_pts = PackedVector2Array()
+		_cl_pt_col = PackedColorArray()
+		_cl_glyph_idx = PackedInt32Array()
+		# Which clusters are drawn IN FULL: Sol's own and the ones bordering it, whose cells
+		# have been carved.  Everything else in the patch — the rest of Sol's tile and the whole
+		# of the six tiles around it — is one batched point.  The set changes the moment Sol
+		# crosses a cluster border, so the detailed neighbourhood travels with the star, and
+		# _focus_version above is what tells this cache that it has.
+		var focus: Dictionary = {}
+		for fi: int in focus_cluster_indices():
+			focus[fi] = true
+		for ci in range(cl_all.size()):
+			var cl: Dictionary = cl_all[ci]
+			# Visibility decided from a PLAIN DISTANCE, before any transform.  _rel rotates into
+			# the galactic basis and then remaps onto the log radial scale; _detail_alpha only
+			# ever wanted the LENGTH of that result, and the length is _display_radius of the
+			# plain distance — the rotation preserves length and _log_pos sets it outright.
+			#
+			# It buys nothing at a wide view, where every cluster is inside the detail band and
+			# goes on to be transformed anyway.  It buys a third of a rebuild at a deep zoom,
+			# where none of eight thousand clusters is visible and every one of them used to be
+			# rotated and log-remapped before being thrown away.
+			var ca: float = _detail_alpha(
+				_display_radius((cl["pos"] as Vector3).distance_to(_ref_pos)))
+			var csel: bool = ci == _selected_cluster
+			if ca <= 0.0 and not csel:
+				continue
+			var cp := _project(_rel(cl["pos"]), b, center, px_per_unit)
+			if cp.x < -20.0 or cp.y < -20.0 or cp.x > size.x + 20.0 or cp.y > size.y + 20.0:
+				continue
+			# A grain ring costs eight draw calls, and the patch holds sixteen thousand clusters,
+			# so only the ones that are actually the player's neighbourhood get one.  The focus
+			# set is drawn at any zoom — it is a handful of clusters and it is the thing the
+			# player is in the middle of — while the rest fall back to the distance budget that
+			# keeps a wide view from costing five thousand draw calls.
+			#
+			# The home cluster is glyph tier too, even though its glyph is only ever a selection
+			# ring: see _draw_cluster_glyph.
+			if csel or focus.has(ci) or bool(cl.get("is_home", false)) \
+					or (glyphs_ok
+						and _ref_pos.distance_to(cl["pos"] as Vector3) <= _cluster_glyph_cut):
+				_cl_glyph_idx.append(ci)
+				continue
+			var ccol: Color = cl["color"]
+			if _colonized.has(str(cl["name"])):
+				ccol = STATUS_COL_HUMAN
+			_cl_pts.append(cp)
+			_cl_pts.append(cp + Vector2(1.0, 0.0))
+			_cl_pt_col.append(Color(ccol.r, ccol.g, ccol.b, maxf(ca, 0.45)))
+	# Glyphs first and the cloud over them, which is the order the single interleaved loop
+	# produced: every glyph was drawn as the loop reached it and the batch went out at the end.
+	for ci: int in _cl_glyph_idx:
+		if ci < cl_all.size():
+			_draw_cluster_glyph(cl_all[ci] as Dictionary, ci == _selected_cluster,
+				b, center, px_per_unit)
+	if _cl_pts.size() >= 2:
+		draw_multiline_colors(_cl_pts, _cl_pt_col, 1.6)
 
 	# Stars: six thousand of them now that the whole home cell is charted, so the pass that picks
 	# what to draw matters more than the drawing.  Three things keep it cheap.
@@ -3096,6 +4213,12 @@ func _draw() -> void:
 	# a sort of a couple of hundred entries instead of six thousand, and a couple of hundred
 	# per-frame Array allocations instead of six thousand.
 	var star_list: Array = all_stars()
+	# Nothing drawn, nothing walked.  With the layer off there is no star to draw at all; and
+	# while nothing anywhere is marked every star is Uninhabited, so that one checkbox answers
+	# for the whole catalogue without six thousand lookups to confirm it.
+	if not layer_shown("stars") \
+			or (not _marked_stars and not star_class_shown(STAR_CLASS_EMPTY)):
+		star_list = []
 	var star_n: int = star_list.size()
 	var vis: Array = []
 	var pt_seg := PackedVector2Array()      # the point cloud: two vertices per star
@@ -3112,8 +4235,10 @@ func _draw() -> void:
 		var d0: float = (s0["pos"] as Vector3).distance_to(_ref_pos)
 		if not selected and d0 > STAR_RENDER_MAX_LY:
 			continue
-		var lp0: Vector3 = _rel(s0["pos"])
-		var a0: float = 1.0 if selected else _detail_alpha(lp0.length())
+		# Same as the cluster loop above: the test wants the length of _rel(pos), which is
+		# _display_radius of the distance already in hand, so the transform waits until the
+		# star has survived the discard below.
+		var a0: float = 1.0 if selected else _detail_alpha(_display_radius(d0))
 		# Who is THERE, which decides both whether the star earns a body and what colour it is
 		# drawn in once it is too far away to be drawn as a star.  The name conversion and the two
 		# dictionary probes are skipped entirely while nothing anywhere is marked — the whole
@@ -3124,15 +4249,22 @@ func _draw() -> void:
 			var nm0: String = str(s0["name"])
 			col0 = _colonized.has(nm0)
 			fac0 = str(_factions.get(nm0, ""))
+		# The layer filter, applied on the two facts just established and before anything is
+		# transformed.  While nothing anywhere is marked every star is Uninhabited, which is
+		# why the whole loop can be skipped outright above rather than tested six thousand
+		# times for an answer that cannot vary.
+		if not _star_shown(col0, fac0):
+			continue
 		var important: bool = selected or col0 or fac0 != ""
 		# Within the cutoff, colonised/alien/near stars always draw (at any zoom); far anonymous
 		# ones only draw when in the current zoom band.
 		if a0 <= 0.0 and not (important or d0 < STAR_ALWAYS_LY):
 			continue
-		# Off the panel entirely.  The log scale puts a colossal distance range on screen at
+		var lp0: Vector3 = _rel(s0["pos"])
+		# Off the panel entirely.  The log px_per_unit puts a colossal distance range on screen at
 		# once, so at any real zoom most of the catalogue projects well outside it — and until
 		# now every one of those was drawn anyway, glyph, rings and all.
-		var sp0 := _project(lp0, b, center, scale)
+		var sp0 := _project(lp0, b, center, px_per_unit)
 		if sp0.x < -STAR_SCREEN_PAD or sp0.y < -STAR_SCREEN_PAD \
 				or sp0.x > size.x + STAR_SCREEN_PAD or sp0.y > size.y + STAR_SCREEN_PAD:
 			continue
@@ -3143,10 +4275,10 @@ func _draw() -> void:
 		# overwhelming majority of the catalogue: the evolved state and the screen radius below
 		# are never even computed for them, and they cost one shared draw call between the lot.
 		if not selected and d0 > STATUS_COLOR_LY:
-			var fc: Color = _status_color_of(col0, fac0)
+			var status_col: Color = _status_color_of(col0, fac0)
 			pt_seg.append(sp0)
 			pt_seg.append(sp0 + Vector2(1.0, 0.0))
-			pt_col.append(Color(fc.r, fc.g, fc.b, maxf(a0, 0.4)))
+			pt_col.append(Color(status_col.r, status_col.g, status_col.b, maxf(a0, 0.4)))
 			continue
 		# Evolved state and screen radius are resolved HERE and carried forward, so the draw loop
 		# below never asks for either a second time.  Both are needed to decide the star's tier.
@@ -3154,16 +4286,17 @@ func _draw() -> void:
 		var rad0: float = _star_screen_radius(lp0, b, star_maxdr, st0)
 		# Point tier: too small for a body, or past the body budget, and with no ring or label to
 		# hang off it — so it needs neither sorting nor a draw call of its own.  The budget is
-		# what keeps a deep zoom affordable: the log scale can put the whole neighbourhood on
+		# what keeps a deep zoom affordable: the log px_per_unit can put the whole neighbourhood on
 		# screen at a size that earns every star a body, and six thousand bodies is eighty
-		# thousand circles.  Bodies go to the nearest stars, by a rank fixed with the catalogue,
-		# so the choice is stable frame to frame and never flickers.
+		# thousand circles.  Bodies go to the nearest stars, by a distance cut that is only
+		# redone when the viewpoint has moved appreciably, so the choice is stable frame to
+		# frame and never flickers.
 		# Being a colony or an alien system is no longer a reason to keep a body.  A settled world
 		# still has to be big enough on screen to be worth drawing as a world, and when it is not
 		# it becomes a green point like any other holding — which is the whole reason the status
 		# palette exists.  It stays exempt from the ZOOM BAND above, so it never disappears; it
 		# just stops pretending to be a sphere at a zoom where nothing could be.
-		if not selected and (rad0 < STAR_POINT_PX or _dist_rank[si] >= STAR_BODY_BUDGET):
+		if not selected and (rad0 < STAR_POINT_PX or d0 > _star_body_cut):
 			pt_seg.append(sp0)
 			pt_seg.append(sp0 + Vector2(1.0, 0.0))
 			# A point reports STATUS, near or far.  A one-pixel dot cannot say anything useful
@@ -3213,7 +4346,7 @@ func _draw() -> void:
 		var show_line: bool = i == _selected or float(e[7]) <= LINE_RANGE_LY
 		if alpha > 0.0 and show_line:
 			# Drop line to the reference plane conveys the star's height above/below it.
-			var foot := _project(Vector3(lp.x, lp.y, 0.0), b, center, scale)
+			var foot := _project(Vector3(lp.x, lp.y, 0.0), b, center, px_per_unit)
 			draw_line(foot, sp, _fade(DROP_COLOR, alpha), 1.0)
 			draw_circle(foot, 1.5, _fade(DROP_COLOR, alpha))
 
@@ -3228,7 +4361,8 @@ func _draw() -> void:
 			draw_arc(sp, rad + 6.0, 0.0, TAU, 40, Color(0.9, 0.95, 1.0, 0.9), 1.5, true)
 		_draw_star_body(sp, rad, col)
 		# Alien presence highlight: red = aggressive, blue = peaceful, yellow = alignment
-		# still unknown (always named so the player can see who's out there).
+		# still unknown.  The HIGHLIGHT is unconditional — it costs one ring and says somebody
+		# is there; the NAME is not, and goes by the same band every star's does.
 		var fac: String = str(_factions.get(str(s["name"]), ""))
 		if fac == "aggressive":
 			draw_circle(sp, rad + 3.0, Color(1.0, 0.30, 0.30, 0.28))
@@ -3243,12 +4377,19 @@ func _draw() -> void:
 		var colonised: bool = _colonized.has(str(s["name"]))
 		if colonised:
 			draw_arc(sp, rad + 4.0, 0.0, TAU, 32, Color(0.4, 0.95, 0.55, 0.9), 1.5, true)
-		var always: bool = colonised or fac != ""
-		# A colony or a known civilisation is always worth naming, wherever it is and whatever the
-		# zoom — you cannot act on a system you cannot identify.  Everything else goes by the
-		# frame's chosen set; the sky outside it stays anonymous until selected, which the info
-		# box answers.
-		if (i == _selected or always or named.has(i)) and (alpha > 0.0 or always):
+		# A known civilisation is named wherever it is: there are a handful of them, they are
+		# the thing the player is deciding about, and one cannot be acted on without being
+		# identified.
+		#
+		# A COLONY OF OURS IS NOT EXEMPT.  It used to be, on the same reasoning, and that
+		# reasoning stops holding the moment there is more than a handful: the swarm settles
+		# tens of thousands of systems, and naming every one of them at every zoom and every
+		# distance buries the map under its own labels — including the few names that were
+		# worth reading.  Settling a star is not a reason to see its name from the far side of
+		# the galaxy, so a colony earns its label on exactly the terms any other star does: the
+		# name range, the inner band and the budget.  Selecting one still names it, which is how
+		# a colony outside the band is identified.
+		if _star_label_shown(i == _selected, named.has(i), alpha):
 			var lbl_col: Color = Color(0.88, 0.93, 1.0, 0.95) if i == _selected \
 				else Color(0.78, 0.84, 0.96, 0.6)
 			if fac == "aggressive":
@@ -3259,13 +4400,22 @@ func _draw() -> void:
 				lbl_col = Color(1.0, 0.90, 0.50, 0.95)
 			if colonised:
 				lbl_col = Color(0.6, 0.95, 0.7, 0.95)
-			var la: float = 1.0 if (i == _selected or always) else alpha
+			# Brightness follows the band like any other star's.  A civilisation's label is
+			# already red, blue or yellow; the colour carries the distinction and does not need
+			# the label held at full strength to make it.
+			var la: float = 1.0 if i == _selected else alpha
 			draw_string(_font, sp + Vector2(rad + 4.0, 4.0), str(s["name"]),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _fade(lbl_col, la))
 
 	# Sol's projected position under the current reference frame — the origin of our own missions
 	# and the default target of incoming attacks (only at screen centre in the Sol frame).
-	var sol_px := _project(_rel(Vector3.ZERO), b, center, scale)
+	#
+	# SolarSystem.sol_position(), not Vector3.ZERO.  Those are the same point only until a
+	# Shkadov thruster runs: after that the origin is where Sol STARTED and sol_position() is
+	# where it is now.  Drawn at the origin, the Sun slid off the centre of its own map while the
+	# frame stayed correctly locked to the moving star — 391 px adrift after 5 ly, 1 876 px after
+	# 200 — and every launch and incoming strike was drawn from the place Sol used to be.
+	var sol_px := _project(_rel(SolarSystem.sol_position()), b, center, px_per_unit)
 
 	# In-transit colony missions: an animated dashed line from Sol to the target star,
 	# with dashes flowing toward the destination and a marker at the ship's progress.
@@ -3275,26 +4425,43 @@ func _draw() -> void:
 	# they collapse into a scribble over the middle of the map that says nothing about where
 	# anything is going, while costing more than the entire star field.
 	var show_flights: bool = _zoom >= FLIGHT_MIN_ZOOM
+	# Only the nearest FLIGHT_TRACK_BUDGET flights are drawn as tracks.
+	#
+	# A track is a handful of draw calls — a dashed lane or a hairline with chevrons — and that
+	# is already close to the floor for what it is.  Measured at about 45 microseconds each, so
+	# three thousand of them is a seventh of a second a frame, and the late-game swarm runs to
+	# tens of thousands.  There is no drawing them all: a budget is the only thing that bounds
+	# it, and it is the same answer the star field and the cluster shell already give.
+	#
+	# The cut is the BUDGET-th nearest target, by distance from the view's own frame — so it is
+	# the flights around whatever the player is looking at that survive, not the ones that
+	# happen to be early in the list.  One pass, no sort.
+	var fl_cut: float = _flight_distance_cut() if show_flights else 0.0
 	for m: Dictionary in (_missions if show_flights else []):
 		var tpos: Array = []
 		if not _target_pos(str(m.get("target", "")), tpos):
 			continue
-		var dst := _project(_rel(tpos[0]), b, center, scale)
+		if (tpos[0] as Vector3).distance_to(_ref_pos) > fl_cut:
+			continue
+		var dst := _project(_rel(tpos[0]), b, center, px_per_unit)
+		var dst_res: bool = _endpoint_resolved(str(m.get("target", "")), tpos[0])
 		# A probe replicated at a colony departs from THAT star, not from Sol.  Empty origin
 		# means it was launched from home, which is every mission the player sends directly.
 		var src_px := sol_px
+		var src_res: bool = _endpoint_resolved("", SolarSystem.sol_position())
 		var origin := str(m.get("origin", ""))
 		if origin != "":
 			var opos: Array = []
 			if _target_pos(origin, opos):
-				src_px = _project(_rel(opos[0]), b, center, scale)
+				src_px = _project(_rel(opos[0]), b, center, px_per_unit)
+				src_res = _endpoint_resolved(origin, opos[0])
 		# A colony ship and a self-replicating probe are not the same object and should not
 		# read as the same line.
 		if str(m.get("kind", "colony")) == "vn":
-			_draw_probe_track(src_px, dst, float(m.get("progress", 0.0)),
-				str(m.get("mission", "colonize")))
+			_draw_probe_track(src_px, dst, _track_progress(m),
+				str(m.get("mission", "colonize")), src_res or dst_res)
 		else:
-			_draw_travel_dashes(src_px, dst, float(m.get("progress", 0.0)))
+			_draw_travel_dashes(src_px, dst, _track_progress(m))
 
 	# In-flight attacks: a white laser pulse racing out at light speed, or a red von
 	# Neumann berserker swarm crawling toward its target.
@@ -3302,8 +4469,8 @@ func _draw() -> void:
 		var apos: Array = []
 		if not _target_pos(str(atk.get("target", "")), apos):
 			continue
-		var adst := _project(_rel(apos[0]), b, center, scale)
-		var ap := float(atk.get("progress", 0.0))
+		var adst := _project(_rel(apos[0]), b, center, px_per_unit)
+		var ap := _track_progress(atk)
 		var an: int = int(atk.get("count", 1))
 		match str(atk.get("kind", "")):
 			"laser":
@@ -3319,14 +4486,14 @@ func _draw() -> void:
 		var ipos: Array = []
 		if not _target_pos(str(inc.get("source", "")), ipos):
 			continue
-		var src_px := _project(_rel(ipos[0]), b, center, scale)
+		var src_px := _project(_rel(ipos[0]), b, center, px_per_unit)
 		var tgt_name := str(inc.get("target", "sol"))
 		var tgt_px := sol_px
 		if tgt_name != "sol":
 			var itg: Array = []
 			if _target_pos(tgt_name, itg):
-				tgt_px = _project(_rel(itg[0]), b, center, scale)
-		var ip := float(inc.get("progress", 0.0))
+				tgt_px = _project(_rel(itg[0]), b, center, px_per_unit)
+		var ip := _track_progress(inc)
 		var inn: int = int(inc.get("count", 1))
 		match str(inc.get("kind", "missile")):
 			"berserker":
@@ -3339,7 +4506,7 @@ func _draw() -> void:
 	# The Sun — rendered exactly like every other star (its live evolved state), at its position
 	# in the current reference frame (map centre only while the frame IS Sol).  A G2V, ~4.6 Gyr
 	# old, so it reads main-sequence yellow now and swells to a red giant far in the future.
-	var sol_lp := _rel(Vector3.ZERO)
+	var sol_lp := _rel(SolarSystem.sol_position())
 	var sol_star := {"mass": 1.0, "age": 4.6, "color": Color(1.0, 0.95, 0.82)}
 	var sol_st := _star_state(sol_star)
 	# Same radius rule and the same shaded body as everything else in the catalogue, so the Sun
@@ -3370,10 +4537,10 @@ func _draw() -> void:
 	draw_string(_font, Vector2(14, 90),
 		"Frame: %s%s" % [_ref_name, "" if _ref_name == "Sol" else "  ·  right-click empty space to reset"],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, frame_col)
-	var fc := _project(_rel(_ref_pos), b, center, scale)
-	draw_line(fc - Vector2(7, 0), fc + Vector2(7, 0), _fade(frame_col, 0.7), 1.0)
-	draw_line(fc - Vector2(0, 7), fc + Vector2(0, 7), _fade(frame_col, 0.7), 1.0)
-	draw_arc(fc, 10.0, 0.0, TAU, 24, _fade(frame_col, 0.5), 1.0, true)
+	var frame_px := _project(_rel(_ref_pos), b, center, px_per_unit)
+	draw_line(frame_px - Vector2(7, 0), frame_px + Vector2(7, 0), _fade(frame_col, 0.7), 1.0)
+	draw_line(frame_px - Vector2(0, 7), frame_px + Vector2(0, 7), _fade(frame_col, 0.7), 1.0)
+	draw_arc(frame_px, 10.0, 0.0, TAU, 24, _fade(frame_col, 0.5), 1.0, true)
 	# Cosmic expansion readout — once space has stretched noticeably.
 	if _cosmic_scale > 1.01:
 		draw_string(_font, Vector2(14, 74),
@@ -3474,6 +4641,7 @@ func _draw() -> void:
 		_draw_info_box(lines)
 
 ## The bottom-left readout, shared by the star and cluster selections so they cannot drift apart.
+
 func _draw_info_box(lines: Array) -> void:
 	var box := Rect2(Vector2(12, size.y - (16.0 * lines.size() + 16.0) - 12.0),
 		Vector2(320, 16.0 * lines.size() + 16.0))
@@ -3539,20 +4707,20 @@ func _gui_input(event: InputEvent) -> void:
 func _try_set_frame(mouse: Vector2) -> void:
 	var center: Vector2 = size * 0.5
 	var b := _view_basis()
-	var scale := _fit_scale(center)
+	var px_per_unit := _fit_scale(center)
 	var best_pos: Vector3 = Vector3.ZERO
 	var best_name: String = ""
 	var best_d: float = INF
 	# Stars (tight tolerance — they're dense).
 	for i in range(all_stars().size()):
-		var dd := _project(_rel(all_stars()[i]["pos"]), b, center, scale).distance_to(mouse)
+		var dd := _project(_rel(all_stars()[i]["pos"]), b, center, px_per_unit).distance_to(mouse)
 		if dd < PICK_PX and dd < best_d:
 			best_d = dd
 			best_pos = all_stars()[i]["pos"]
 			best_name = str(all_stars()[i]["name"])
 	# Nebulae / clusters (labelled markers — looser tolerance).
 	for m: Dictionary in _landmarks:
-		var dm := _project(_rel(m["pos"]), b, center, scale).distance_to(mouse)
+		var dm := _project(_rel(m["pos"]), b, center, px_per_unit).distance_to(mouse)
 		if dm < FRAME_PICK_PX and dm < best_d:
 			best_d = dm
 			best_pos = m["pos"]
@@ -3565,7 +4733,7 @@ func _try_set_frame(mouse: Vector2) -> void:
 		if eff_d >= HUBBLE_HORIZON_LY:
 			continue
 		var gpos: Vector3 = (g["dir"] as Vector3) * eff_d
-		var dg := _project(_rel(gpos), b, center, scale).distance_to(mouse)
+		var dg := _project(_rel(gpos), b, center, px_per_unit).distance_to(mouse)
 		if dg < FRAME_PICK_PX and dg < best_d:
 			best_d = dg
 			best_pos = gpos
@@ -3585,7 +4753,10 @@ func _try_set_frame(mouse: Vector2) -> void:
 func _sync_sol_frame() -> void:
 	if _ref_name == "Sol" and not _ref_pos.is_equal_approx(SolarSystem.sol_position()):
 		_ref_pos = SolarSystem.sol_position()
-		_rank_ref = Vector3(INF, INF, INF)   # distances changed; the ordering has to be rebuilt
+		# The level-of-detail cuts are NOT invalidated here.  They used to be, and that was the
+		# whole problem: Sol drifting a hundredth of a light-year forced a full redo every
+		# frame.  _refresh_lod_cuts compares against its own tolerance and will redo them when
+		# the reference has actually moved far enough to change which objects are selected.
 
 
 ## Show or hide the aiming button, and say where the star is headed.  Called by Game whenever the
@@ -3602,11 +4773,22 @@ func set_thruster_state(has_mirrors: bool, drift_ly: float, aim: String) -> void
 func _try_select(mouse: Vector2) -> void:
 	var center: Vector2 = size * 0.5
 	var b := _view_basis()
-	var scale := _fit_scale(center)
+	var px_per_unit := _fit_scale(center)
 	var best: int = -1
 	var best_d: float = PICK_PX
-	for i in range(all_stars().size()):
-		var dd := _project(_rel(all_stars()[i]["pos"]), b, center, scale).distance_to(mouse)
+	# A hidden star is not clickable.  The filter has to reach the pick as well as the draw, or
+	# clicking apparently empty space selects something that is not on screen — and the launch
+	# panel then opens on a target the player cannot see.
+	var pick_list: Array = all_stars() if layer_shown("stars") else ([] as Array)
+	for i in range(pick_list.size()):
+		var sp: Dictionary = pick_list[i]
+		if _marked_stars:
+			var pnm: String = str(sp["name"])
+			if not _star_shown(_colonized.has(pnm), str(_factions.get(pnm, ""))):
+				continue
+		elif not star_class_shown(STAR_CLASS_EMPTY):
+			break
+		var dd := _project(_rel(sp["pos"]), b, center, px_per_unit).distance_to(mouse)
 		if dd < best_d:
 			best_d = dd
 			best = i
@@ -3616,7 +4798,9 @@ func _try_select(mouse: Vector2) -> void:
 	var best_cd: float = CLUSTER_PICK_PX
 	var clusters: Array = star_clusters()
 	for ci in range(clusters.size()):
-		var cd := _project(_rel(clusters[ci]["pos"]), b, center, scale).distance_to(mouse)
+		if not _cluster_pickable(ci):
+			continue
+		var cd := _project(_rel(clusters[ci]["pos"]), b, center, px_per_unit).distance_to(mouse)
 		if cd < best_cd:
 			best_cd = cd
 			best_c = ci

@@ -392,7 +392,7 @@ func _create_node_button(node: ResearchNode, pos: Vector2) -> void:
 	btn.custom_minimum_size = Vector2(NODE_W, NODE_H)
 	btn.position = pos
 	btn.size = Vector2(NODE_W, NODE_H)
-	btn.text = node.display_name
+	btn.text = _node_button_text(node)
 	btn.clip_text = true
 
 	_style_button(btn, node)
@@ -427,6 +427,14 @@ func _create_node_button(node: ResearchNode, pos: Vector2) -> void:
 	_node_rects[node.id] = Rect2(pos, Vector2(NODE_W, NODE_H))
 
 
+## A repeatable line carries its progress along it in the button label, because that is the one
+## thing about such a node the tree view cannot otherwise show — every level looks identical.
+func _node_button_text(node: ResearchNode) -> String:
+	if not node.is_repeatable():
+		return node.display_name
+	return "%s  %d/%d" % [node.display_name, node.level, node.max_level]
+
+
 func _style_button(btn: Button, node: ResearchNode) -> void:
 	var s: StyleBoxFlat = StyleBoxFlat.new()
 	s.set_corner_radius_all(6)
@@ -452,6 +460,10 @@ func _style_button(btn: Button, node: ResearchNode) -> void:
 			s.bg_color = Color(0.06, 0.34, 0.14)
 			s.border_color = Color(0.25, 0.90, 0.45)
 			btn.modulate = Color.WHITE
+			# Known but with passes left: still green, because it IS known and everything it
+			# gates is open, but outlined in the available-blue to say there is more to take.
+			if node.has_next_level():
+				s.border_color = Color(0.55, 0.82, 1.0)
 
 	btn.add_theme_stylebox_override("normal", s)
 	btn.add_theme_stylebox_override("focus", s)
@@ -482,14 +494,14 @@ func _draw_connections() -> void:
 			var child_node: ResearchNode = ResearchTree.get_research_node(child_id)
 			var col: Color = Color(0.33, 0.33, 0.33)
 
-			if child_node.state == ResearchNode.State.UNLOCKED:
+			if child_node.is_known():
 				# Both ends done — full green
 				col = Color(0.35, 0.92, 0.50, 0.90)
 			elif child_node.state == ResearchNode.State.RESEARCHING:
 				col = Color(1.0, 0.78, 0.20, 0.95)
 			elif child_node.state == ResearchNode.State.AVAILABLE:
 				col = Color(0.45, 0.78, 1.0, 0.95)
-			elif node.state == ResearchNode.State.UNLOCKED:
+			elif node.is_known():
 				# Parent is done but child still needs other prerequisites —
 				# dim green so the line lights up along the numerical_methods
 				# path even when the child is waiting on a second prerequisite.
@@ -536,8 +548,9 @@ func _on_node_pressed(node_id: String) -> void:
 	var unlocks_text: String = _format_unlocks(node)
 	_info_unlocks.text = unlocks_text
 	_info_unlocks.visible = not unlocks_text.is_empty()
-	_info_cost.text = _format_cost(node.cost)
-	_info_boosts.text = _format_boosts(node.boosts)
+	# The bill for the pass the player would actually be buying, not the first one.
+	_info_cost.text = _format_cost(node.cost_shown())
+	_info_boosts.text = _format_level_boosts(node)
 	_info_boosts.visible = not node.boosts.is_empty()
 	# Deferred so the labels have recomputed their minimum sizes from the new text before the
 	# panel measures them — calling it inline would size to the PREVIOUS node's content.
@@ -566,8 +579,15 @@ func _on_node_pressed(node_id: String) -> void:
 			_research_btn.text = "Cancel Research"
 			_research_btn.disabled = false
 		ResearchNode.State.UNLOCKED:
-			_research_btn.text = "Unlocked ✓"
-			_research_btn.disabled = true
+			if node.has_next_level():
+				_research_btn.text = "Research Level %d" % (node.level + 1)
+				_research_btn.disabled = false
+			elif node.is_repeatable():
+				_research_btn.text = "Fully Researched ✓"
+				_research_btn.disabled = true
+			else:
+				_research_btn.text = "Unlocked ✓"
+				_research_btn.disabled = true
 
 	if in_queue:
 		_research_btn.text = "Remove from Queue (#%d)" % (queue_pos + 2)
@@ -600,7 +620,9 @@ func _on_research_button_pressed() -> void:
 		ResearchTree.cancel_research()
 	elif in_queue:
 		ResearchTree.remove_from_queue(_selected_id)
-	elif node.state == ResearchNode.State.AVAILABLE or ResearchTree.can_queue(_selected_id):
+	elif node.state == ResearchNode.State.AVAILABLE \
+			or (node.state == ResearchNode.State.UNLOCKED and node.has_next_level()) \
+			or ResearchTree.can_queue(_selected_id):
 		ResearchTree.start_research(_selected_id)
 
 	_on_node_pressed(_selected_id)
@@ -616,6 +638,9 @@ func _on_pause_button_pressed() -> void:
 func _on_node_state_changed(node: ResearchNode) -> void:
 	if _node_controls.has(node.id):
 		var btn: Button = _node_controls[node.id] as Button
+		# The label carries a repeatable line's level count, so it is rewritten here too — a
+		# completed pass changes the text as well as the colour.
+		btn.text = _node_button_text(node)
 		_style_button(btn, node)
 
 	if _conn_layer != null and is_instance_valid(_conn_layer):
@@ -639,6 +664,7 @@ func _on_tree_loaded() -> void:
 	for id: String in _node_controls:
 		var node: ResearchNode = ResearchTree.get_research_node(id)
 		if node != null:
+			(_node_controls[id] as Button).text = _node_button_text(node)
 			_style_button(_node_controls[id] as Button, node)
 	if _conn_layer != null and is_instance_valid(_conn_layer):
 		_conn_layer.queue_redraw()
@@ -697,7 +723,8 @@ func _format_boosts(boosts: Dictionary) -> String:
 	if boosts.is_empty():
 		return ""
 	var label_map: Dictionary = {
-		"research_speed":    "Research Speed",
+		"human_research_efficiency": "Human Research Efficiency",
+		"ai_research_efficiency":    "Machine Research Efficiency",
 		"matter_production": "Matter Output",
 		"energy_production": "Energy Output",
 		"science_production":"Compute Output",
@@ -712,6 +739,22 @@ func _format_boosts(boosts: Dictionary) -> String:
 
 ## The research this node depends on, each marked by whether it is already done.  Returns ""
 ## for root nodes so the line disappears rather than reading "Requires: nothing".
+## What a node's boosts are worth NOW and what one more pass would add.  A repeatable line's
+## single-pass figures are meaningless on their own once it has been taken three times.
+func _format_level_boosts(node: ResearchNode) -> String:
+	if node.boosts.is_empty():
+		return ""
+	if not node.is_repeatable():
+		return _format_boosts(node.boosts)
+	var held: String = _format_boosts(node.boosts_at_level())
+	var per: String = _format_boosts(node.boosts)
+	if node.level <= 0:
+		return "%s  (per level)" % per
+	if not node.has_next_level():
+		return "%s  (all %d levels)" % [held, node.max_level]
+	return "%s  (level %d of %d)\nNext level adds: %s" % [held, node.level, node.max_level, per]
+
+
 func _format_prerequisites(node: ResearchNode) -> String:
 	if node.prerequisites.is_empty():
 		return ""
@@ -720,7 +763,7 @@ func _format_prerequisites(node: ResearchNode) -> String:
 		var prereq_id: String = prereq_id_v as String
 		var prereq: ResearchNode = ResearchTree.get_research_node(prereq_id)
 		var label: String = prereq.display_name if prereq != null else prereq_id
-		var done: bool = prereq != null and prereq.state == ResearchNode.State.UNLOCKED
+		var done: bool = prereq != null and prereq.is_known()
 		lines.append("  %s %s" % ["✓" if done else "•", label])
 	return "\n".join(lines)
 

@@ -1,6 +1,9 @@
 extends PanelContainer
 
 signal launch_requested(params: Dictionary)
+## The player has chosen a different founding population for colony ships.  Game is the
+## authority (see set_colony_stock there) and pushes the accepted order back.
+signal colony_stock_changed(founders_id: String, traits: Array)
 
 # Valid launch *origins* — you can only depart from a planet.
 ## Launch endpoints.  These START as the planets and are REPLACED by Game via set_bodies()
@@ -181,6 +184,7 @@ func _ready() -> void:
 	# Inject the CalendarPicker between the form grid and the Launch button.
 	var vbox: VBoxContainer = $MarginContainer/VBoxContainer
 	_build_cargo_ui(vbox)   # manifest editor, shown only for cargo missions
+	_build_stock_ui(vbox)   # founding population, shown only for a colony ship
 	var date_section := VBoxContainer.new()
 	date_section.add_theme_constant_override("separation", 2)
 
@@ -225,6 +229,21 @@ func _ready() -> void:
 	vbox.move_child(fuel_section, date_section.get_index())
 	_populate_fuels()
 
+	# The two mission-specific editors sit directly under the form grid, which puts each against
+	# the Cost line it is the explanation for: a colony ship's vehicle count is mostly the people
+	# in it, and a supply run's is mostly the hold.  Both are built earlier — they have to exist
+	# before the refreshes that show and hide them — and moved here, the same way the two
+	# sections above are.
+	#
+	# add_child alone appends past the launch list, which is where both of them first landed and
+	# where nothing would ever have seen them — the cargo editor had been sitting below "Active
+	# Launches" since it was written.  Only one is ever visible at a time (no mission both
+	# carries people and takes a manifest), so their order between themselves decides nothing.
+	if _stock_box:
+		vbox.move_child(_stock_box, fuel_section.get_index())
+	if _cargo_box:
+		vbox.move_child(_cargo_box, fuel_section.get_index())
+
 	# Swap each body option button for a hierarchical picker in the same grid cell.
 	_origin_picker = _replace_with_picker(origin_option)
 	_target_picker = _replace_with_picker(planet_option)
@@ -239,10 +258,11 @@ func _ready() -> void:
 	planet_option.item_selected.connect(func(_i):
 		_refresh_validity(); _update_duration(); _update_cost())
 	mission_option.item_selected.connect(func(_i):
-		_refresh_cargo(); _refresh_validity(); _update_cost())
+		_refresh_cargo(); _refresh_stock_ui(); _refresh_validity(); _update_cost())
 	arrival_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
 	launch_button.pressed.connect(_on_launch_pressed)
 	_update_arrival_options()
+	_refresh_stock_ui()
 	_update_duration()
 	_update_cost()
 
@@ -326,12 +346,206 @@ func set_launch_mods(mods: Dictionary) -> void:
 	_update_duration()
 	_update_cost()
 
+## The standing order for what a colony ship carries, pushed by Game: how many founders go,
+## multiplied into the vehicle count, and a line of plain text saying what the group is.
+##
+## Only a Colony Ship pays it — a probe or a cargo run carries nobody — so it is folded into the
+## cost multiplier in _mission_rockets rather than into _launch_mods, which is per ORIGIN.
+var _colony_mass_mult: float = 1.0
+var _colony_stock_text: String = ""
+
+## Game owns the order; this panel only asks for it to change.  Pushing the result back is what
+## moves the dropdowns, so the panel never shows a selection the simulation has not accepted —
+## and _stock_quiet stops that push from being mistaken for the player touching the control.
+var _stock_quiet: bool = false
+
+func set_colony_stock(founders_id: String, traits: Array, available: Array,
+		mass_mult: float, text: String) -> void:
+	_colony_mass_mult = maxf(mass_mult, 0.01)
+	_colony_stock_text = text
+	_stock_quiet = true
+	_select_by_id(_founders_option, _founders_ids, founders_id)
+	_set_traits(traits, available)
+	_stock_quiet = false
+	if _stock_effects:
+		_stock_effects.text = text
+	_update_cost()
+
+
+## Point an option button at the entry whose id matches, leaving it alone if none does.
+func _select_by_id(opt: OptionButton, ids: Array, id: String) -> void:
+	if opt == null:
+		return
+	for i in range(ids.size()):
+		if str(ids[i]) == id:
+			opt.selected = i
+			return
+
+
+## Whether the mission at `mission_idx` carries a founding population.
+func _is_colony_mission(mission_idx: int) -> bool:
+	if mission_idx < 0 or mission_idx >= MissionData.MISSION_TYPES.size():
+		return false
+	return str(MissionData.MISSION_TYPES[mission_idx].get("name", "")) == "Colony Ship"
+
 ## Cost & duration multipliers for the currently-selected origin planet.
 func _origin_mods() -> Dictionary:
 	var o_idx := origin_option.selected
 	if o_idx < 0:
 		return {"cost": 1.0, "duration": 1.0}
 	return _launch_mods.get(_origin_id(o_idx), {"cost": 1.0, "duration": 1.0})
+
+## ── Founding population (Colony Ship) ─────────────────────────────────────────
+## Who is aboard, and what that costs. Shown only for a Colony Ship — every other mission
+## carries machinery, and a founder group it does not have cannot be chosen for it.
+##
+## The choice is a STANDING ORDER, not a property of this launch: by the late game the von
+## Neumann swarm founds tens of thousands of colonies and nobody curates those, so the same
+## order governs what a probe carries. The label says so, because a control that looks per-
+## launch and is not would be a trap.
+var _stock_box:        VBoxContainer = null
+var _founders_option:  OptionButton  = null
+var _traits_button:    MenuButton    = null
+var _stock_effects:    Label         = null
+var _founders_ids:     Array         = []
+var _trait_ids:        Array         = []
+## Ticked in the menu — the order this panel is asking for, which is only what Game accepted.
+var _traits_on:        Dictionary    = {}
+
+func _build_stock_ui(parent: Control) -> void:
+	_stock_box = VBoxContainer.new()
+	_stock_box.add_theme_constant_override("separation", 2)
+	parent.add_child(_stock_box)
+
+	var title := Label.new()
+	title.text = "Founding population (von Neumann probes carry it too):"
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(0.75, 0.75, 0.75)
+	# A Label's minimum width is its whole line, so an unwrapped one longer than the column does
+	# not merely overflow — it pushes the column open from the inside and carries every other
+	# row with it.  This one fits the 400px panel today; wrapping is what stops a narrower
+	# window, or a longer sentence, from being a layout bug somewhere else entirely.
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.tooltip_text = "Settlers are drawn from the origin world, so what they ARE is decided there. This order says how many go and which sequences are spliced into them before they leave — and a small group carries less of its parent's variation, so it expresses an edit less fully whatever is written into it."
+	_stock_box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	# Two dropdowns sharing one row in a 400px column.  fit_to_longest_item is on by default and
+	# sizes an OptionButton to its widest ENTRY whether that entry is showing or not, so a pair
+	# of them reserves the width of the longest label in each list; clip_text is what lets the
+	# one that is showing give way once it has.  Both off, the row asks for 32px instead of 93
+	# and the column decides the width rather than its contents.
+	_founders_option = OptionButton.new()
+	_founders_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_founders_option.fit_to_longest_item = false
+	_founders_option.clip_text = true
+	for f: Dictionary in StockData.FOUNDERS:
+		_founders_option.add_item(str(f["label"]))
+		_founders_option.set_item_tooltip(_founders_ids.size(), str(f.get("blurb", "")))
+		_founders_ids.append(str(f["id"]))
+	_founders_option.item_selected.connect(func(_i): _emit_stock())
+	row.add_child(_founders_option)
+
+	# A MENU of checkboxes and not a dropdown, because a stock now holds a SET of traits and a
+	# dropdown can only say one thing.  It keeps the one-row layout a 400px column has room for:
+	# the button shows the count, the sequences themselves are behind it.
+	_traits_button = MenuButton.new()
+	_traits_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_traits_button.flat = false
+	_traits_button.clip_text = true
+	_traits_button.text = "No traits"
+	var menu: PopupMenu = _traits_button.get_popup()
+	menu.hide_on_checkable_item_selection = false
+	for t: Dictionary in StockData.TRAITS:
+		var i: int = _trait_ids.size()
+		menu.add_check_item(str(t["label"]), i)
+		menu.set_item_tooltip(i, str(t.get("blurb", "")))
+		_trait_ids.append(str(t["id"]))
+	menu.id_pressed.connect(_on_trait_toggled)
+	row.add_child(_traits_button)
+	_stock_box.add_child(row)
+
+	# What the ship would actually carry, which is not the order: the origin world's own
+	# population decides how much of it is realised.  Pushed back by Game.
+	_stock_effects = Label.new()
+	_stock_effects.add_theme_font_size_override("font_size", 10)
+	_stock_effects.modulate = Color(0.68, 0.72, 0.78)
+	_stock_effects.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_stock_box.add_child(_stock_effects)
+
+
+## A trait was ticked or unticked.  The menu is left as the player set it only for as long as
+## it takes Game to answer — set_colony_stock pushes the accepted order straight back over it,
+## so an order that is refused (a sequence nobody holds, a fourth trait) simply snaps back.
+func _on_trait_toggled(id: int) -> void:
+	if id < 0 or id >= _trait_ids.size():
+		return
+	var tid: String = str(_trait_ids[id])
+	if _traits_on.has(tid):
+		_traits_on.erase(tid)
+	else:
+		_traits_on[tid] = true
+	_emit_stock()
+
+
+## Show the order Game accepted: which boxes are ticked, which are available to tick at all,
+## and what the button says.
+func _set_traits(traits: Array, available: Array) -> void:
+	if _traits_button == null:
+		return
+	_traits_on = {}
+	for v in traits:
+		_traits_on[str(v)] = true
+	var held: Dictionary = {}
+	for v in available:
+		held[str(v)] = true
+	var menu: PopupMenu = _traits_button.get_popup()
+	var on: Array = []
+	for i in range(_trait_ids.size()):
+		var tid: String = str(_trait_ids[i])
+		var ticked: bool = _traits_on.has(tid)
+		menu.set_item_checked(i, ticked)
+		# A sequence nobody holds cannot be ordered, and greying it is the honest way to say so
+		# — a tick that silently snapped back would read as a bug.  One already ticked stays
+		# live so it can be taken off again.
+		menu.set_item_disabled(i, not ticked and not held.has(tid))
+		if ticked:
+			on.append(StockData.trait_label(tid))
+	# One name fits the column; three do not, and clip_text would cut the third off mid-word
+	# with no way to see it.  Past one the button counts them and the tooltip lists them.
+	if on.is_empty():
+		_traits_button.text = "No traits"
+	elif on.size() == 1:
+		_traits_button.text = str(on[0])
+	else:
+		_traits_button.text = "%d traits" % on.size()
+	_traits_button.tooltip_text = "%sSequences spliced into the founders before they leave. At most %d — a genome holds no more." % [
+		"" if on.is_empty() else "%s.\n" % ", ".join(on), StockData.MAX_TRAITS]
+
+
+## Ask Game for the order the controls are showing.  Silent while Game is pushing a result
+## back into them, which would otherwise echo straight out again.
+func _emit_stock() -> void:
+	if _stock_quiet or _founders_option == null or _traits_button == null:
+		return
+	var f: int = _founders_option.selected
+	if f < 0 or f >= _founders_ids.size():
+		return
+	# Emitted in TRAITS order rather than tick order, so the same set is always the same list.
+	var want: Array = []
+	for tid: String in _trait_ids:
+		if _traits_on.has(tid):
+			want.append(tid)
+	colony_stock_changed.emit(str(_founders_ids[f]), want)
+
+
+## Show the selector only for the mission that carries people.
+func _refresh_stock_ui() -> void:
+	if _stock_box == null:
+		return
+	_stock_box.visible = _is_colony_mission(mission_option.selected)
+
 
 ## ── Cargo manifest (Supply Run) ───────────────────────────────────────────────
 ## What is in the hold: compound → grams.  Only a mission flagged "cargo" in MissionData shows
@@ -365,6 +579,12 @@ func _build_cargo_ui(parent: Control) -> void:
 	row.add_theme_constant_override("separation", 6)
 	_cargo_pick = OptionButton.new()
 	_cargo_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Same pair as the founding-population dropdowns, and with more reason: the entries here are
+	# whatever the origin world happens to be holding, so the widest of them is not something
+	# this panel gets to know in advance.  Sizing itself to the longest compound name is how a
+	# row in a fixed-width column ends up deciding how wide the column is.
+	_cargo_pick.fit_to_longest_item = false
+	_cargo_pick.clip_text = true
 	row.add_child(_cargo_pick)
 	_cargo_amt = LineEdit.new()
 	_cargo_amt.placeholder_text = "grams"
@@ -458,9 +678,9 @@ func _on_cargo_remove(res: String) -> void:
 func _refresh_cargo() -> void:
 	if _cargo_box == null:
 		return
-	var show: bool = _mission_has_cargo()
-	_cargo_box.visible = show
-	if not show:
+	var has_cargo: bool = _mission_has_cargo()
+	_cargo_box.visible = has_cargo
+	if not has_cargo:
 		return
 	_refresh_cargo_choices()
 	for c in _cargo_list.get_children():
@@ -664,6 +884,9 @@ func _update_duration() -> void:
 
 func _format_days(days: int) -> String:
 	if days >= 365:
+		# Whole years and the days left over — the pair only makes sense if the division
+		# truncates, which is what the % on the next line assumes.
+		@warning_ignore("integer_division")
 		var years := days / 365
 		var rem   := days % 365
 		if rem == 0:
@@ -703,6 +926,8 @@ func _update_cost() -> void:
 		Units.format_si(rk_need, "g"), Units.format_si(have_rk, "g"),
 		("" if have_rk >= rk_need else "  ✗"),
 		Units.format_si(e_cost, "J")]
+	# What the vehicles are FOR is said once, by the selector immediately below this block —
+	# repeating the whole line here put the same sentence twice in adjacent paragraphs.
 	# Surface the launch-window quality so the player can see why fuel varies and
 	# can pick a better start date.
 	if not _is_local_orbit():
@@ -743,7 +968,10 @@ func _mission_rockets(mission_idx: int) -> int:
 	var t := _target_name()
 	if o == "" or t == "":
 		return 1
-	return LaunchPlanner.rockets(mission_idx, o, t, float(_origin_mods().get("cost", 1.0)))
+	var cost: float = float(_origin_mods().get("cost", 1.0))
+	if _is_colony_mission(mission_idx):
+		cost *= _colony_mass_mult      # ten million founders are ten times a million to lift
+	return LaunchPlanner.rockets(mission_idx, o, t, cost)
 
 ## Fuel units the mission burns, via LaunchPlanner; consumed as the selected propellant.
 ## Grams of the selected propellant this launch burns — derived from its energy requirement.
@@ -755,12 +983,16 @@ func _mission_fuel(mission_idx: int) -> float:
 	return LaunchPlanner.propellant_mass(mission_idx, o, t, _planet_angles, _offset_days(),
 		float(_origin_mods().get("cost", 1.0)), str(_selected_fuel().get("id", "")))
 
-## Stock of a good (rockets or a fuel) at the currently-selected origin.
-func _origin_stock(key: String) -> int:
+## Stock of a good (rockets or a fuel) at the currently-selected origin, in grams.
+##
+## A FLOAT, and every caller already wanted one.  These are gram and joule figures that run past
+## 2^63 in a developed run, and int() saturates there to INT64_MIN — so the gates below read a
+## full stockpile as a large negative and refused launches the origin could easily pay for.
+func _origin_stock(key: String) -> float:
 	var o := origin_option.selected
 	if o < 0 or o >= PLANETS.size():
-		return 0
-	return int((_launch_stock.get(_origin_id(o), {}) as Dictionary).get(key, 0))
+		return 0.0
+	return float((_launch_stock.get(_origin_id(o), {}) as Dictionary).get(key, 0.0))
 
 ## Push the per-origin rocket + fuel stock (from Game.gd) for the cost readout / gate.
 func set_launch_stock(stock: Dictionary) -> void:
@@ -775,7 +1007,6 @@ func _on_launch_pressed() -> void:
 	var o_idx := origin_option.selected
 	if m_idx < 0 or p_idx < 0 or o_idx < 0:
 		return
-	var origin_name: String = PLANETS[o_idx]
 	var target_name: String = TARGETS[p_idx]
 	var duration := _selected_duration_days()
 	if duration <= 0:

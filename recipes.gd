@@ -350,13 +350,46 @@ const RECIPES: Array = [
 	},
 	# Microchips: photolithographic fabrication on silicon wafers with copper
 	# interconnects and plastic packaging — the most energy-intensive recipe.
+	#
+	# THREE PROCESSES, THREE PRODUCTS.  A better chip is a different item that has to be
+	# fabricated, not a quality the old one silently acquires — so reaching the next rung of the
+	# ladder means standing up a new production line for it, and the research alone buys nothing.
+	#
+	# What each grade is FOR:
+	#   Microchip        craft, robots, missiles, probes, and every first-tier structure
+	#   AdiabaticChip    second-tier structures (BuildingData._scaled substitutes it)
+	#   ReversibleChip   third-tier structures
+	# So none of the three ever becomes dead data: the base chip is still what a rocket is built
+	# from after reversible logic is in hand.
+	#
+	# Each is gated a step deeper in the tree, and the ladder is a real one: CMOS dumps ~1e5 kT
+	# per logic transition, adiabatic logic recovers the charge and approaches the Landauer bound
+	# of kT ln 2, and reversible logic erases nothing so that bound does not apply to it.  Fewer
+	# joules per chip and more dies off the same wafer at each step, which a finer and less
+	# dissipative process genuinely does buy.
 	{
 		"name":        "Microchip Fabrication",
 		"category":    "electronics",
-		"description": "Photolithographic fabrication of integrated circuits on silicon wafers with copper interconnects and plastic packaging.",
+		"description": "Photolithographic fabrication of integrated circuits on silicon wafers with copper interconnects and plastic packaging. Each logic transition dumps its charge to ground as heat.",
 		"requires":    "microprocessors",
 		"inputs":  {"Si": 5.0, "Cu": 1.0, "Plastic": 1.0, "energy": 1_500.0},
 		"outputs": {"Microchip": 2.0},
+	},
+	{
+		"name":        "Adiabatic Microchip Fabrication",
+		"category":    "electronics",
+		"description": "Charge-recovery fabrication: gates return their energy to the supply instead of dumping it, so a die dissipates a fraction of what a CMOS one does and the process itself runs cold enough to pack far more logic onto the same wafer.",
+		"requires":    "adiabatic_logic",
+		"inputs":  {"Si": 5.0, "Cu": 1.0, "Plastic": 1.0, "energy": 900.0},
+		"outputs": {"AdiabaticChip": 6.0},
+	},
+	{
+		"name":        "Reversible Microchip Fabrication",
+		"category":    "electronics",
+		"description": "Fabrication of invertible logic that erases no bits, so the Landauer bound does not apply to it at all. Dissipation is set by how hard the machine is driven rather than by thermodynamics, and the wafer yields more logic again.",
+		"requires":    "reversible_computing",
+		"inputs":  {"Si": 5.0, "Cu": 1.0, "Plastic": 1.0, "energy": 600.0},
+		"outputs": {"ReversibleChip": 16.0},
 	},
 	# Steel: carburise molten iron with coal to make the primary structural alloy.
 	{

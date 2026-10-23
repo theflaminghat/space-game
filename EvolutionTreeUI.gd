@@ -47,6 +47,12 @@ func _ready() -> void:
 	_build_info_panel()
 	reset_to_baseline()
 	tree.node_selected.connect(_on_node_selected)
+	resized.connect(_on_resized)
+	# The measurement itself changing is the signal that matters: it fires when the labels settle
+	# at a real width, which is exactly when an early relayout's answer was wrong.  Setting
+	# offset_top does not move a minimum, so this cannot feed back into itself.
+	_info.minimum_size_changed.connect(_on_resized)
+	_relayout_info.call_deferred()
 
 # ── Public API (called by Game.gd) ────────────────────────────────────────────
 
@@ -59,8 +65,13 @@ func reset_to_baseline() -> void:
 	_selected_id = "homo_sapiens"
 	_refresh_info()
 
-## Height of the readout strip under the tree.
+## Floor on the readout strip's height.  It is no longer a fixed size — the strip is pinned to
+## the bottom edge and grows UPWARD to fit whatever it has to say, which varies: an automated
+## civilisation's readout carries two extra lines that a 1945 one does not, and they used to be
+## clipped off the bottom of a 150-pixel box.
 const INFO_H: float = 150.0
+## The most of the panel the readout may take, so a long entry cannot squeeze the tree out.
+const INFO_MAX_FRAC: float = 0.6
 
 ## The lineage tree says how humanity has SPLIT; this says what each of those populations
 ## actually is right now.  Without it the panel is a diagram of names — the numbers that make a
@@ -68,12 +79,17 @@ const INFO_H: float = 150.0
 ## that never mention evolution at all.
 func _build_info_panel() -> void:
 	_info = PanelContainer.new()
+	# Pinned to the bottom edge and sized by its content, growing upward: both vertical anchors
+	# sit at 1.0 so offset_bottom is the bottom edge itself, and offset_top is minus the height.
+	# GROW_DIRECTION_BEGIN is what makes a resize move the TOP edge rather than the bottom one,
+	# so the strip never slides off the bottom of the panel when its content changes.
 	_info.anchor_left = 0.0
 	_info.anchor_right = 1.0
 	_info.anchor_top = 1.0
 	_info.anchor_bottom = 1.0
 	_info.offset_top = -INFO_H
 	_info.offset_bottom = 0.0
+	_info.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.07, 0.09, 0.13, 0.96)
 	sb.border_color = Color(0.30, 0.40, 0.55)
@@ -99,7 +115,10 @@ func _build_info_panel() -> void:
 	_info_body = Label.new()
 	_info_body.add_theme_font_size_override("font_size", 11)
 	_info_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_info_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# FILL, not EXPAND_FILL: the body used to stretch to fill a fixed-height box, which is the
+	# opposite of what is wanted now — the box is sized from the body, so the body has to report
+	# the height its text actually needs.
+	_info_body.size_flags_vertical = Control.SIZE_FILL
 	box.add_child(_info_body)
 
 ## Push the per-capita rates from Game: what a person eats, and what a person can staff.  These
@@ -160,6 +179,38 @@ func _refresh_info() -> void:
 	_info_title.text = str(node.get("name", "Homo sapiens"))
 	_info_sub.text = str(node.get("subtitle", ""))
 	_info_body.text = _rate_lines(node)
+	# Deferred so the labels have recomputed their minimum sizes from the new text before the
+	# strip is measured against them; inline it would size to the PREVIOUS entry's content.
+	_relayout_info.call_deferred()
+
+
+## Size the readout strip to its content and keep the tree clear of it.
+##
+## Both edges move together: the strip's top edge is set from the height it needs, and the
+## ScrollContainer's bottom edge is pulled up to match, so the tree never ends up underneath it.
+func _relayout_info() -> void:
+	if _info == null:
+		return
+	# An autowrapped label asked for its minimum height before it has a width reports the height
+	# of its text wrapped at nothing, which is far too tall — the readout opened at 258 pixels
+	# for a one-line "No data yet." that needs 68.  Skipped rather than guessed at: the strip is
+	# remeasured from `resized` and from _info's own minimum_size_changed, both of which fire
+	# once the layout is real.
+	if size.x <= 1.0:
+		return
+	var want: float = _info.get_combined_minimum_size().y
+	var cap: float = maxf(INFO_H, size.y * INFO_MAX_FRAC)
+	var h: float = clampf(want, INFO_H, cap)
+	_info.offset_top = -h
+	_info.offset_bottom = 0.0
+	var scroll := get_node_or_null("ScrollContainer") as ScrollContainer
+	if scroll:
+		scroll.offset_bottom = -h
+
+
+## The panel itself changed size, so the cap above moved and the strip may need remeasuring.
+func _on_resized() -> void:
+	_relayout_info.call_deferred()
 
 ## What one member of this lineage takes in and puts out.  A node on this tree is a KIND of
 ## human, not a headcount — the tree already shows how many worlds there are, and the population

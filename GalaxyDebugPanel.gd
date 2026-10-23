@@ -183,6 +183,34 @@ func _scale_px(center: Vector2) -> float:
 	return (minf(center.x, center.y) * 0.9 / DEFAULT_VIEW_LY) * _zoom
 
 ## Straight orthographic projection — light-years × pixels-per-ly, no log remap.
+## The least screen area a polygon must cover before it is worth — and safe — to fill.
+## Below about a pixel there is nothing to see anyway, so refusing is free.
+const MIN_FILL_AREA_PX: float = 1.0
+## Beyond this distance from the origin a small polygon cannot be triangulated reliably: the
+## triangulator works in 32-bit on ABSOLUTE coordinates, so a few hundred thousand pixels out
+## its own area is lost to cancellation.  The same limit the star map uses.
+const POLY_SAFE_PX: float = 50_000.0
+
+## Whether `poly` can be handed to draw_colored_polygon without the triangulator refusing it.
+##
+## Two ways it fails, and both abort the whole canvas item's remaining output rather than just
+## dropping the shape: a sliver whose area rounds to zero, and a shape so far from the origin
+## that 32-bit cancellation eats the area instead.
+func _polygon_fillable(poly: PackedVector2Array) -> bool:
+	if poly.size() < 3:
+		return false
+	var area: float = 0.0
+	for i in range(poly.size()):
+		var p: Vector2 = poly[i]
+		var q: Vector2 = poly[(i + 1) % poly.size()]
+		if not (is_finite(p.x) and is_finite(p.y)):
+			return false
+		if absf(p.x) > POLY_SAFE_PX or absf(p.y) > POLY_SAFE_PX:
+			return false
+		area += p.x * q.y - q.x * p.y
+	return absf(area) * 0.5 >= MIN_FILL_AREA_PX
+
+
 func _project(p: Vector3, b: Basis, center: Vector2, s: float) -> Vector2:
 	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * s
 
@@ -240,11 +268,15 @@ func _draw() -> void:
 				var f: float = float(rg["frac"])
 				var sel: bool = str(rg["id"]) == _selected_region
 				# Fill the top face; vertical edges + bottom outline convey the prism's height.
-				draw_colored_polygon(top, Color(0.40, 0.52, 0.72, 0.04 + 0.10 * dens))  # density wash
-				if f > 0.0:
-					draw_colored_polygon(top, Color(0.35, 0.95, 0.55, 0.15 + 0.45 * f))  # colonised overlay
-				if sel:
-					draw_colored_polygon(top, Color(1.0, 0.85, 0.35, 0.14))              # selection tint
+				# A hexagon seen edge-on projects to a sliver the triangulator will refuse, the
+				# same way a territory cross-section does, so all three fills are gated on one
+				# check — the edges below are lines and need no guard.
+				if _polygon_fillable(top):
+					draw_colored_polygon(top, Color(0.40, 0.52, 0.72, 0.04 + 0.10 * dens))  # density wash
+					if f > 0.0:
+						draw_colored_polygon(top, Color(0.35, 0.95, 0.55, 0.15 + 0.45 * f))  # colonised overlay
+					if sel:
+						draw_colored_polygon(top, Color(1.0, 0.85, 0.35, 0.14))              # selection tint
 				for i in range(6):
 					draw_line(top[i], bot[i], Color(0.45, 0.60, 0.85, 0.08), 1.0)        # vertical edge
 				top.append(top[0])
@@ -312,7 +344,18 @@ func _draw() -> void:
 					continue
 				var fill_a: float = 0.20 if home_cell else 0.10
 				var edge_a: float = 0.75 if home_cell else 0.45
-				draw_colored_polygon(scr, Color(tc.r, tc.g, tc.b, fill_a))
+				# The FILL is skipped for a cell the projection has flattened; the outline is
+				# still drawn, so the cell does not vanish.
+				#
+				# draw_colored_polygon triangulates, and a cross-section caught nearly edge-on
+				# projects to a sliver whose area rounds to nothing — Godot then refuses it with
+				# "triangulation failed", which aborts the rest of this canvas item's output
+				# rather than just dropping the one cell.  It is not an extreme-zoom problem: the
+				# cells are a Voronoi partition sliced at an arbitrary plane, so at any scale
+				# some cell can be clipped to a sliver, and this reproduced at zoom 10 while 0.15
+				# and 500 were clean.  draw_polyline does not triangulate, so the edge is safe.
+				if _polygon_fillable(scr):
+					draw_colored_polygon(scr, Color(tc.r, tc.g, tc.b, fill_a))
 				var loop := scr.duplicate()
 				loop.append(scr[0])
 				draw_polyline(loop, Color(tc.r, tc.g, tc.b, edge_a), 1.0)

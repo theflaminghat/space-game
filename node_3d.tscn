@@ -3,7 +3,6 @@
 [ext_resource type="Script" uid="uid://1yr2gr3hwj45" path="res://Game.gd" id="1_s0gvp"]
 [ext_resource type="Script" uid="uid://cee8q3xh7034x" path="res://camera_3d.gd" id="2_6iypd"]
 [ext_resource type="Script" uid="uid://bwixcgejmawaf" path="res://planet.gd" id="2_a0tk4"]
-[ext_resource type="Texture2D" uid="uid://d3els1phlgod2" path="res://my_image.png" id="2_noarx"]
 [ext_resource type="Script" uid="uid://cyalbtwe5bu3w" path="res://init_planets.gd" id="2_wlxy5"]
 [ext_resource type="Script" uid="uid://621s2gy68mxp" path="res://pausemenu.gd" id="3_jsk3o"]
 [ext_resource type="Texture2D" uid="uid://cms75r1t1ya08" path="res://mercury.svg" id="3_tcnuu"]
@@ -31,15 +30,12 @@
 [ext_resource type="Script" uid="uid://cx0f1a1o1ijdq" path="res://settings_menu.gd" id="51_settmn"]
 [ext_resource type="Script" uid="uid://co0ktaol4cvex" path="res://ProductionPanel.gd" id="52_prodpnl"]
 
-[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_noarx"]
-panorama = ExtResource("2_noarx")
-
-[sub_resource type="Sky" id="Sky_r3fl7"]
-sky_material = SubResource("PanoramaSkyMaterial_noarx")
-
 [sub_resource type="Environment" id="Environment_jka67"]
-background_mode = 2
-sky = SubResource("Sky_r3fl7")
+background_mode = 1
+background_color = Color(0.0321569, 0.0578824, 0.135059, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.0771765, 0.106118, 0.176863, 1)
+ambient_light_energy = 0.4
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_imku0"]
 

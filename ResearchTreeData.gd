@@ -43,6 +43,31 @@ const LANE_NAMES: Dictionary = {
 ## Row spacing build() lays lanes out at, so a node's lane can be read back from its position.
 const LANE_ROW_SPACING: float = 100.0
 
+# ── Repeatable research ──────────────────────────────────────────────────────
+## How many times each repeatable node can be researched.  A node absent from this table is an
+## ordinary one-shot discovery (max_level 1), and the counts here deliberately differ: a line of
+## work with a lot of headroom left in it gets more passes than one close to its physical limit.
+##
+## These are the lines where another pass means something — better telescopes, better radiators,
+## better forecasting models, better institutions.  Nodes whose value is the thing they UNLOCK
+## rather than a boost are not here, because taking them twice would add nothing.
+const LEVELS: Dictionary = {
+	"radio_astronomy":      5,   # aperture and correlation processing: a long way still to go
+	"thermal_management":   4,   # emissivity and heat cycles, up against the Stefan-Boltzmann wall
+	"predictive_modeling":  3,   # better models of a chaotic system, with a hard ceiling
+	"institutional_science": 3,  # how a civilisation organises its own thinking
+	"machine_learning_systems": 5,  # the long climb from a FLOP being nearly useless to it not being
+	"energy_storage":       3,   # round-trip efficiency, which cannot pass 1
+}
+
+## Science multiplier per additional pass.  Doubling each time means a five-level node's last
+## pass costs sixteen times its first for the same boost increment, so there is a point on every
+## line where the next pass is no longer worth the science — which is the decision.
+const DEFAULT_LEVEL_COST_GROWTH: float = 2.0
+
+## Per-node overrides of the curve above, for a line that should get cheap or expensive faster.
+const LEVEL_COST_GROWTH: Dictionary = {}
+
 # ── Cost philosophy ─────────────────────────────────────────────────────────
 # Research has ONE currency: science, which tick() pours in over time.  A project therefore
 # takes as long as it takes to think through, and the only way to go faster is to be able to
@@ -98,13 +123,18 @@ static func build() -> Array:
 	const BIO:       float = 6.0
 	const CIV:       float = 7.0
 
+## `_time` is vestigial: research is paid for in SCIENCE and nothing else (see the cost-
+## philosophy note above), so a project takes as long as it takes to fill its requirement and
+## there is no duration to carry.  ResearchNode has no field for it and nothing reads it.  The
+## parameter is kept — underscored, so it reads as deliberately unused — only because 94 call
+## sites below still pass a number for it positionally.
 	var make = func(
 		id: String,
 		name: String,
 		desc: String,
 		prereqs: Array,
 		cost: Dictionary,
-		time: float,
+		_time: float,
 		pos: Vector2
 	) -> ResearchNode:
 		var n: ResearchNode = ResearchNode.new()
@@ -1169,17 +1199,57 @@ static func build() -> Array:
 		lane_pos(7, ESTORAGE, X_SPACING, Y_SPACING)
 	))
 
+	# ── Microchip grades ─────────────────────────────────────────────────────
+	# Three processes, each a step closer to what thermodynamics allows a computer to be, and
+	# each gated deeper in the tree.  Game.chip_grade() reads which of them is known; see there
+	# for what the grade actually buys.
+	#
+	#   1  microprocessors      photolithographic CMOS, ~1e5 kT per logic transition
+	#   2  adiabatic_logic      charge recovered instead of dumped; the Landauer bound itself
+	#   3  reversible_computing no bits erased, so Landauer does not apply at all
+	#
+	# Level 3 is deliberately not "the physical limit".  A chip cannot reach one: the
+	# Margolus-Levitin bound on operations per joule-second and the Bremermann bound on a mass
+	# of matter sit many orders beyond any lithographic device, and reversible logic buys its
+	# low dissipation by running slowly and spending the savings on error correction.  What
+	# level 3 is, is the last rung physics leaves for something still recognisably a chip.
+	nodes.append(make.call(
+		"adiabatic_logic",
+		"Adiabatic Logic",
+		"Charge-recovery logic that returns a gate's energy to the supply rather than dumping it as heat, pushing dissipation per operation down towards the Landauer bound of kT ln 2 — the thermodynamic floor for erasing one bit.",
+		["high_performance_computing", "superconducting_systems"],
+		{"science": 700},
+		24.0,
+		lane_pos(6, QCOMP, X_SPACING, Y_SPACING)
+	))
+
+	nodes.append(make.call(
+		"reversible_computing",
+		"Reversible Computing",
+		"Logic that erases nothing: every operation is invertible, so the Landauer bound does not apply and dissipation is set only by how fast the machine is driven and what error correction costs. The last rung physics leaves for a fabricated chip.",
+		["adiabatic_logic", "quantum_computing"],
+		{"science": 1_600},
+		30.0,
+		lane_pos(8, QCOMP, X_SPACING, Y_SPACING)
+	))
+
 	# ── Boost assignments ────────────────────────────────────────────────────
 	var boost_map: Dictionary = {
-		# Compute lane → research speed
-		"integrated_circuits":        {"research_speed": 0.10},
-		"semiconductor_manufacturing":{"research_speed": 0.15},
-		"microprocessors":            {"research_speed": 0.15},
-		"high_performance_computing": {"research_speed": 0.20},
-		"machine_learning_systems":   {"research_speed": 0.25},
-		"automated_science_systems":  {"research_speed": 0.30},
-		# NEW — Quantum Computing gives a large research speed jump
-		"quantum_computing":          {"research_speed": 0.25},
+		# Compute lane → how much SCIENCE a machine gets out of a FLOP.
+		#
+		# These used to grant "research_speed", which multiplied the civilisation's whole compute
+		# pool — people included — so a better transistor made human beings think faster.  They
+		# now raise the efficiency of MACHINE research only, which is what they are about.
+		"integrated_circuits":        {"ai_research_efficiency": 0.10},
+		"semiconductor_manufacturing":{"ai_research_efficiency": 0.15},
+		"microprocessors":            {"ai_research_efficiency": 0.15},
+		"high_performance_computing": {"ai_research_efficiency": 0.20},
+		# The line that decides whether machines out-think their builders.  Five passes: with the
+		# chip lane in hand the first of them already takes a machine past a person (0.85 -> 1.20
+		# against a human 1.00), and the fifth ends at 2.60.
+		"machine_learning_systems":   {"ai_research_efficiency": 0.35},
+		"automated_science_systems":  {"ai_research_efficiency": 0.30},
+		"quantum_computing":          {"ai_research_efficiency": 0.25},
 		# Energy lane → energy production
 		"advanced_reactor_systems":   {"energy_production": 0.10},
 		"grid_infrastructure":        {"energy_production": 0.15},
@@ -1202,7 +1272,8 @@ static func build() -> Array:
 		"additive_manufacturing":     {"matter_production": 0.20, "automation": 0.5},
 		# NEW — Theory / forecasting lane → science production
 		"predictive_modeling":        {"science_production": 0.20},
-		"institutional_science":      {"research_speed":    0.12},
+		# How a civilisation organises its own thinking — this one is about PEOPLE.
+		"institutional_science":      {"human_research_efficiency": 0.12},
 		"global_governance":          {"science_production": 0.15},
 		# NEW — Detection lane (SETI) and waste-heat management, feeding the boosts
 		# read by Game._telescope_power and Game._recompute_production_cache.
@@ -1212,6 +1283,23 @@ static func build() -> Array:
 	for n: ResearchNode in nodes:
 		if boost_map.has(n.id):
 			n.boosts = boost_map[n.id]
+
+	# ── Repeatable research ──────────────────────────────────────────────────
+	# Most nodes are a single discovery.  The ones listed here are a line of work that keeps
+	# paying, and can be taken more than once: each pass costs LEVEL_COST_GROWTH times the last
+	# and adds its boosts again, so a five-level node's final pass costs sixteen times its first
+	# for the same increment.  That curve, not a cap, is what decides when pushing a line further
+	# stops being worth the science.
+	#
+	# Only boost-granting nodes are listed, because a boost is the one thing a second pass can
+	# meaningfully add — taking "Transistors" twice would mean nothing.  Nothing a node UNLOCKS
+	# depends on its level: is_unlocked() is true from the first pass.
+	#
+	# Adding to this table is the whole cost of making another line repeatable.
+	for n: ResearchNode in nodes:
+		if LEVELS.has(n.id):
+			n.max_level = int(LEVELS[n.id])
+			n.level_cost_growth = float(LEVEL_COST_GROWTH.get(n.id, DEFAULT_LEVEL_COST_GROWTH))
 
 	# ── Layout correction ────────────────────────────────────────────────────
 	# Push every node right until its X > all prerequisites' X + X_SPACING.

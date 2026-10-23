@@ -45,7 +45,8 @@ const FEATURE_UNLOCKS: Dictionary = {
 }
 
 const BOOST_TEXT: Dictionary = {
-	"research_speed":     "compute (and so science)",
+	"human_research_efficiency": "science per unit of the population's own thinking",
+	"ai_research_efficiency":    "science per unit of machine thinking",
 	"science_production": "science produced from compute",
 	"energy_production":  "energy output of every generator",
 	"matter_production":  "mine and condenser output",
@@ -714,7 +715,7 @@ static func _mechanics_page(key: String, game: Node) -> String:
 		"swarm":
 			t += _p("Solar Deployment launches carry collector arrays to lanes inside Mercury's orbit. Each deployed array is %s collectors; one innermost-lane collector delivers %s at today's solar output, and each lane further out delivers less by the inverse square of its distance." % [
 				_n(float(g.SWARM_COLLECTORS_PER_PANEL)), Units.format_si(float(g.SWARM_SAT_POWER), "W")])
-			t += _li("Capacity: %d arrays across %d lanes. Deployed now: %d." % [int(g._swarm_max()), int(g.SWARM_LANES), int(g.solar_satellites_deployed)])
+			t += _li("Capacity: %d arrays across %d lanes. Deployed now: %d." % [int(g._swarm_max()), int(g.SWARM_LANES), int(g.swarm_panels())])
 			t += _li("Output scales with the Sun's luminosity: larger on the giant branches, almost nothing after the white dwarf forms.")
 			t += _li("All of it must cross the %s and be radiated as %s." % [_link("Mechanics", "transmission", "power-beam network"), _link("Mechanics", "heat", "waste heat")])
 		"matter":

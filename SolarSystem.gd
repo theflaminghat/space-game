@@ -101,12 +101,45 @@ var star_shade_fraction: float = 0.0
 ## Sol, so moving the star moves the whole neighbourhood relative to it — flights, messages and
 ## trade round-trips all shorten towards wherever it is aimed and lengthen behind it.
 var star_drift_ly: Vector3 = Vector3.ZERO
+## The same journey as a scalar, and the AUTHORITATIVE one.
+##
+## Vector3 is 32-bit per component whatever the engine's own float precision is, so
+## star_drift_ly.length() squares the components in float32 and returns `inf` once any of them
+## passes about 1.8e19 ly — the stored vector is fine, it is the magnitude that blows up.  A
+## thruster held at near-c for 1e19 years covers that, and the run goes to 1e100, so it is
+## reachable by simply letting it run: every readout of how far the star had come, and the
+## "crossed another light-year" announcement, turned into infinity.
+##
+## This is a 64-bit float and is what every distance-travelled readout reads.  The vector is
+## still the POSITION, because that is what the spatial systems need and what they can use; see
+## sol_position() for what happens to it out there.
+var star_drift_dist_ly: float = 0.0
+## The largest magnitude the POSITION vector is allowed to reach.  Vector3 squares its
+## components in 32-bit inside length(), which overflows past ~1.8e19, so the position is held
+## below that and saturates there rather than becoming inf and then nan.  Saturating is the
+## graceful failure: distances out of it come back enormous but finite, so the map reports
+## nothing nearby, where a nan would silently poison every comparison that touched it.
+const DRIFT_POSITION_MAX_LY: float = 1.0e18
 var star_velocity_ms: float = 0.0
 ## Unit vector the mirrors push along, and the star it is aimed at ("" for a bare heading).
 var star_thrust_dir: Vector3 = Vector3.ZERO
 var star_thrust_target: String = ""
 ## Mirror coverage: the share of the sky the statites cover, derived from what is standing.
 var star_mirror_coverage: float = 0.0
+
+## Debug multiplier on the thruster's acceleration — the `shkadov` console command.
+##
+## A real Shkadov thruster is appallingly slow: a full mirror shell on a 1 L☉ star gives about
+## 1e-13 m/s², which is roughly a light-year per hundred million years.  That is the correct
+## number and the game should keep it, but it makes the engine impossible to TEST — and
+## impossible to see working at all without fast-forwarding past the point where the solar
+## system stops being drawn.
+##
+## Applied to the acceleration rather than to the distance, so the velocity and the position stay
+## consistent with each other: it is a bigger engine, not a teleport.  Deliberately not saved and
+## reset by reset_star(), because a cheat that survived into a loaded game would silently change
+## how that run behaves.
+var star_thrust_mult: float = 1.0
 
 ## Emitted when the star changes, so panels and visuals can refresh.
 signal star_changed
@@ -146,10 +179,12 @@ func reset_star() -> void:
 	star_age_offset_years = 0.0
 	star_shade_fraction = 0.0
 	star_drift_ly = Vector3.ZERO
+	star_drift_dist_ly = 0.0
 	star_velocity_ms = 0.0
 	star_thrust_dir = Vector3.ZERO
 	star_thrust_target = ""
 	star_mirror_coverage = 0.0
+	star_thrust_mult = 1.0
 	set_star_mass(1.0)
 
 
@@ -157,7 +192,7 @@ func reset_star() -> void:
 func star_is_engineered() -> bool:
 	return not is_equal_approx(star_mass_msun, 1.0) or star_age_offset_years > 0.0 \
 		or star_shade_fraction > 0.0 or star_mirror_coverage > 0.0 \
-		or star_drift_ly.length_squared() > 0.0
+		or star_drift_dist_ly > 0.0
 
 
 ## Set the shade fraction (clamped to what the model allows).
@@ -185,8 +220,38 @@ func rejuvenate_star(years: float) -> float:
 
 ## Where Sol is now, in light-years from where it started — the origin every star distance is
 ## measured against.
+##
+## A position, not a distance travelled: for that use star_drift_dist_ly, which is 64-bit and
+## stays exact however far the engine runs.  This vector is 32-bit per component and saturates
+## around 1.8e19 ly, which is nine orders past anything the spatial model has content in — the
+## galaxy is 1e5 ly across and the Hubble horizon 1.4e10 — so a star that has gone that far has
+## left every catalogue behind and the honest answer to "what is near it" is nothing at all.
 func sol_position() -> Vector3:
 	return star_drift_ly
+
+
+## How far the star has travelled, in light-years.  Exact at any magnitude.
+func star_distance_travelled_ly() -> float:
+	return star_drift_dist_ly
+
+
+## `pos` advanced by `step` light-years along `dir`, held inside DRIFT_POSITION_MAX_LY.
+##
+## Both halves of this have to dodge 32-bit overflow, and in the right order.  A single slice in
+## fast mode can be 1e100 light-years wide, so `dir * step` on its own puts inf into the vector
+## before anything has a chance to clamp it — the step is capped FIRST.  And the magnitude is
+## summed from the components as 64-bit doubles rather than read from length(), which squares
+## them in 32-bit and returns inf past ~1.8e19; clamping on an infinite length called
+## normalized() on an infinite vector and produced nan, which is how the position went from
+## merely wrong to poisoning every distance computed against it.
+func _clamp_position(pos: Vector3, dir: Vector3, step: float) -> Vector3:
+	var capped: float = clampf(step, -DRIFT_POSITION_MAX_LY * 2.0, DRIFT_POSITION_MAX_LY * 2.0)
+	var p: Vector3 = pos + dir * capped
+	var mag: float = sqrt(float(p.x) * float(p.x) + float(p.y) * float(p.y)
+		+ float(p.z) * float(p.z))
+	if mag > DRIFT_POSITION_MAX_LY and mag > 0.0:
+		p *= DRIFT_POSITION_MAX_LY / mag
+	return p
 
 
 ## Aim the thruster along a heading (any non-zero vector; it is normalised here).  Aiming does
@@ -200,20 +265,63 @@ func aim_star_thrust(dir: Vector3, target_name: String = "") -> void:
 
 
 ## Push the star for `days` at the current mirror coverage.  Returns the light-years moved.
+##
+## RELATIVISTIC, because this engine runs for geological time and a Newtonian `v += a*t` does not
+## survive that.  A full mirror shell accelerates Sol at ~1e-15 m/s², which sounds harmless and
+## reaches c in 9.2e15 years — well inside a run that ends at the heat death.  Measured before
+## this was fixed: v/c = 0.108 at 1e15 years and 1.081 at 1e16, i.e. the star went faster than
+## light on its own, with no console multiplier involved.
+##
+## Hyperbolic motion, the standard constant-proper-acceleration result.  Carrying the PROPER
+## velocity u = γv is what makes it tractable: under constant a, u grows linearly without bound
+## exactly as Newtonian velocity used to, while the coordinate speed v = u/γ approaches c and
+## never reaches it.
+##
+##     u2 = u1 + a·Δt        γ = sqrt(1 + (u/c)²)        v = u/γ
+##     Δx = Δt·(u1 + u2) / (γ1 + γ2)
+##
+## That Δx is the exact integral of v dt across the slice, not an approximation of it: with
+## du = a·dt and dγ/du = u/(c²γ), ∫v dt = (1/a)∫(u/γ)du = (c²/a)(γ2 − γ1), and since
+## γ2² − γ1² = (u2² − u1²)/c² that rearranges to the form above.  So a slice a billion years wide
+## is as accurate as a slice of one day, which matters here — fast mode hands this function
+## enormous steps.
+##
+## The rearrangement is not cosmetic.  Computed as (c²/a)(γ2 − γ1) this returns exactly ZERO at
+## ordinary speeds: u/c is around 1e-16 after a year of thrust, so (u/c)² is 1e-32, and
+## sqrt(1 + 1e-32) is 1.0 in a double — both gammas are 1 and their difference cancels to
+## nothing.  The star simply stopped moving.  The form above never subtracts two near-equal
+## numbers, needs no division by a tiny acceleration, and degenerates to the Newtonian
+## Δt·(v1 + v2)/2 at low speed, which for constant acceleration is itself exact.
 func advance_star_thrust(days: float) -> float:
 	if star_mirror_coverage <= 0.0 or days <= 0.0 or star_thrust_dir.length_squared() <= 0.0:
 		return 0.0
 	var accel: float = StarModel.shkadov_accel_ms2(
-		star_mirror_coverage, sun_luminosity_lsun(), star_mass_msun)
+		star_mirror_coverage, sun_luminosity_lsun(), star_mass_msun) * maxf(star_thrust_mult, 0.0)
 	if accel <= 0.0:
 		return 0.0
 	var secs: float = days * 86400.0
-	# Constant acceleration over the slice: the distance covered counts the speed it already had,
-	# which is the whole point of an engine that never stops.
-	var moved_m: float = star_velocity_ms * secs + 0.5 * accel * secs * secs
-	star_velocity_ms += accel * secs
+	var c: float = StarModel.LIGHT_SPEED_MS
+	# star_velocity_ms is the COORDINATE speed — what the player is shown and what the save
+	# carries — so the proper velocity is recovered from it rather than stored alongside.  The
+	# clamp is for a save written before this was fixed, which can hold a superluminal figure
+	# that would otherwise take the square root of a negative number.
+	var v0: float = clampf(star_velocity_ms, 0.0, c * 0.999999999)
+	var u0: float = v0 / sqrt(maxf(1.0 - (v0 / c) * (v0 / c), 1.0e-18))
+	var u1: float = u0 + accel * secs
+	var g0: float = sqrt(1.0 + (u0 / c) * (u0 / c))
+	var g1: float = sqrt(1.0 + (u1 / c) * (u1 / c))
+	var moved_m: float = secs * (u0 + u1) / (g0 + g1)
+	star_velocity_ms = u1 / g1
 	var moved_ly: float = moved_m / StarModel.LY_M
-	star_drift_ly += star_thrust_dir * moved_ly
+	# Accumulated separately and in full precision, so the figure the player is shown never
+	# depends on whether a Vector3 can still hold it.
+	star_drift_dist_ly += moved_ly
+	# Past DRIFT_POSITION_MAX_LY the two deliberately part company: star_drift_dist_ly goes on
+	# counting the real journey, and the position stops at the edge of what a 32-bit coordinate
+	# can hold.  Nothing is lost that the spatial model could have used — the galaxy is 1e5 ly
+	# across and the Hubble horizon 1.4e10, so a star a billion billion light-years out has left
+	# every catalogue behind and "nothing is near it" is the true answer at any larger number.
+	star_drift_ly = _clamp_position(star_drift_ly, star_thrust_dir, moved_ly)
 	star_changed.emit()
 	return moved_ly
 

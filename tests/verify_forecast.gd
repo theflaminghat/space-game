@@ -27,73 +27,124 @@ func _run() -> void:
 	# ── Gated on the research ──
 	check(not rt.is_unlocked(g.FORECAST_RESEARCH), "forecasting starts locked")
 	check(is_equal_approx(g.forecast_horizon_years(), 0.0), "and sees nothing until it is known")
-	# A share set before the research exists must not quietly tax science for nothing.
-	g.compute_forecast_share = 0.5
+	# A budget set before the research exists must not quietly tax science for nothing.
+	g._on_compute_alloc_changed("asteroid", "human", 1.0)
+	g._on_compute_alloc_changed("pandemic", "ai", 1.0)
+	var sci_locked: float = float(g._get_total_production().get("science", 0.0))
+	g._init_compute_alloc()
 	g._mark_prod_dirty()
-	check(is_equal_approx(g.forecast_compute_share(), 0.0),
-		"a share set before the research is inert: %s" % str(g.forecast_compute_share()))
-	g.compute_forecast_share = 0.0
-	g._mark_prod_dirty()
+	check(is_equal_approx(sci_locked, float(g._get_total_production().get("science", 0.0))),
+		"a budget set before the research is inert")
 	for n: ResearchNode in load("res://ResearchTreeData.gd").build():
 		rt.force_unlock(str(n.id))
 	check(is_equal_approx(g.forecast_horizon_years(), 0.0),
 		"and still sees nothing until compute is assigned to it")
 
-	# ── The split is the decision ──
-	# Nothing is forecast for free: the horizon comes out of the same pool research draws on.
-	g.compute_forecast_share = 0.0
+	# ── The budget is the decision ──
+	# Nothing is forecast for free: a simulation's compute comes out of the same pools research
+	# draws on, so pointing thinking at the future costs exactly its share of the tree.
+	g._init_compute_alloc()
 	g._mark_prod_dirty()
 	var science_all: float = float(g._get_total_production().get("science", 0.0))
-	g.compute_forecast_share = 0.5
-	g._mark_prod_dirty()
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("asteroid", pool, 1.0)
+		g._on_compute_alloc_changed("science", pool, 1.0)
 	var science_half: float = float(g._get_total_production().get("science", 0.0))
-	check(g.forecast_horizon_years() > 0.0, "assigning compute opens a horizon")
 	check(absf(science_half / maxf(science_all, 1.0) - 0.5) < 0.01,
-		"and costs research exactly its share: %.3f" % (science_half / maxf(science_all, 1.0)))
-	# Four times the assigned compute must buy twice the sight.
-	g.compute_forecast_share = 0.1
-	var h_low: float = g.forecast_horizon_years()
-	g.compute_forecast_share = 0.4
-	check(absf(g.forecast_horizon_years() / maxf(h_low, 1e-9) - 2.0) < 0.02,
-		"four times the share, twice the horizon: %.3f" % (g.forecast_horizon_years() / h_low))
-	check(g.forecast_compute_share() <= g.FORECAST_MAX_SHARE,
-		"and it can never take all of the thinking")
-	g.compute_forecast_share = 0.9
-	g._mark_prod_dirty()
+		"an even split costs research exactly half: %.3f" % (
+			science_half / maxf(science_all, 1.0)))
+	# Science's floor holds however the weights are set.
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("science", pool, 0.0)
 	check(float(g._get_total_production().get("science", 0.0)) > 0.0,
-		"so research never stops entirely")
-	g.compute_forecast_share = 0.5
+		"research never stops entirely")
+	var shares: Dictionary = g.compute_shares()
+	check(float((shares["science"] as Dictionary)["human"]) >= 1.0 - g.FORECAST_MAX_SHARE - 1e-9,
+		"science keeps its floor of every pool")
+
+	# ── Each simulation is budgeted on its own ──
+	g._init_compute_alloc()
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("asteroid", pool, 1.0)
 	g._mark_prod_dirty()
+	check(g.forecast_equilibrium_years("asteroid") > 0.0, "the funded simulation has a horizon")
+	check(is_equal_approx(g.forecast_equilibrium_years("pandemic"), 0.0),
+		"an unfunded one has none")
+	check(is_equal_approx(g.forecast_equilibrium_years("nuclear"), 0.0), "nor does the third")
 
-	# ── The curve ──
-	# Cost goes as the square of the horizon, so horizon goes as the square root of compute:
-	# four times the compute must buy exactly twice the sight.
-	var h0: float = g.forecast_horizon_years()
-	# The cost inverts the horizon against the ASSIGNED compute, which is what buys it — not
-	# the civilisation's whole pool.
-	var c0: float = g.forecast_compute()
-	check(is_equal_approx(g.forecast_cost_flops(h0) / c0, 1.0),
-		"the cost function inverts the horizon: %s vs %s" % [
-			str(g.forecast_cost_flops(h0)), str(c0)])
-	check(is_equal_approx(g.forecast_cost_flops(2.0 * h0) / g.forecast_cost_flops(h0), 4.0),
-		"twice the horizon costs four times the compute: %.3f" % (
-			g.forecast_cost_flops(2.0 * h0) / g.forecast_cost_flops(h0)))
-	check(g.forecast_horizon_years() <= g.FORECAST_LYAPUNOV_YEARS,
-		"and it never exceeds the Lyapunov wall")
+	# ── The curve: four times the compute, twice the sight ──
+	g._init_compute_alloc()
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("asteroid", pool, 1.0)
+		g._on_compute_alloc_changed("science", pool, 9.0)
+	var h_low: float = g.forecast_equilibrium_years("asteroid")
+	var c_low: float = g.track_compute("asteroid")
+	g._init_compute_alloc()
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("asteroid", pool, 4.0)
+		g._on_compute_alloc_changed("science", pool, 6.0)
+	var h_high: float = g.forecast_equilibrium_years("asteroid")
+	var c_high: float = g.track_compute("asteroid")
+	check(absf(c_high / maxf(c_low, 1e-9) - 4.0) < 0.02,
+		"four times the weight is four times the compute: %.3f" % (c_high / c_low))
+	check(absf(h_high / maxf(h_low, 1e-9) - 2.0) < 0.02,
+		"and buys exactly twice the sight: %.3f" % (h_high / h_low))
+	check(is_equal_approx(g.forecast_cost_flops(h_high) / c_high, 1.0),
+		"the cost function inverts the horizon")
+	check(is_equal_approx(
+		g.forecast_cost_flops(2.0 * h_high) / g.forecast_cost_flops(h_high), 4.0),
+		"twice the horizon costs four times the compute")
 
-	# More compute really does buy more sight.
-	var before_h: float = g.forecast_horizon_years()
+	# ── Foresight accumulates, and closes when it is not paid for ──
+	g.foresight_frontier["asteroid"] = float(g.year)
+	var settle: float = g.forecast_equilibrium_years("asteroid")
+	var walk := func(years: int) -> void:
+		for _y in range(years):
+			for _d in range(365):
+				g._advance_foresight(1.0)
+			g.year += 1
+	var h_seq: Array = []
+	for _step in range(4):
+		walk.call(1)
+		h_seq.append(g.forecast_horizon_years("asteroid"))
+	check(float(h_seq[0]) > 0.0, "a funded simulation starts seeing")
+	check(float(h_seq[1]) > float(h_seq[0]) and float(h_seq[2]) > float(h_seq[1]),
+		"and sees further the longer it is funded: %s" % str(h_seq))
+	check(float(h_seq[3]) <= settle + 1e-6,
+		"never past where that budget settles: %.3f vs %.3f" % [float(h_seq[3]), settle])
+	# The frontier is absolute, so cutting the budget closes the horizon at a year per year as
+	# the present walks towards it — nothing has to take it away.  The weights are zeroed
+	# directly rather than through _init_compute_alloc, which also resets the frontiers (it is
+	# what a NEW RUN does) and would throw away the very stock under test.
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("asteroid", pool, 0.0)
+	g._mark_prod_dirty()
+	var h_cut: float = g.forecast_horizon_years("asteroid")
+	walk.call(3)
+	check(absf((h_cut - g.forecast_horizon_years("asteroid")) - 3.0) < 1e-6,
+		"an unpaid horizon closes a year per year: %.4f" % (
+			h_cut - g.forecast_horizon_years("asteroid")))
+
+	# ── More machines really do buy more sight ──
+	g._init_compute_alloc()
+	for pool: String in g.COMPUTE_POOLS:
+		g._on_compute_alloc_changed("asteroid", pool, 1.0)
+	var before_h: float = g.forecast_equilibrium_years("asteroid")
 	var arr: Array = g.planet_buildings.get("earth", [])
 	for i in 2000:
 		arr.append("AI Research Hub III")
 	g.planet_buildings["earth"] = arr
 	g._mark_prod_dirty(); g._recompute_production_cache()
 	for _i in range(4): await process_frame
-	check(g.forecast_horizon_years() > before_h * 1.5,
+	check(g.forecast_equilibrium_years("asteroid") > before_h * 1.5,
 		"building compute extends the horizon: %.0f -> %.0f yr" % [
-			before_h, g.forecast_horizon_years()])
-	print("horizon %.0f yr on %s" % [g.forecast_horizon_years(),
-		Units.format_si(g._get_compute_rate(), "FLOP/s")])
+			before_h, g.forecast_equilibrium_years("asteroid")])
+	check(g.forecast_equilibrium_years("asteroid") <= g.FORECAST_LYAPUNOV_YEARS,
+		"and it never exceeds the Lyapunov wall")
+	# Open every frontier wide for the prediction checks below, which are about whether the
+	# forecast is TRUE rather than about how far it reaches.
+	for t: String in g.FORECAST_TRACKS:
+		g.foresight_frontier[t] = float(g.year) + g.forecast_equilibrium_years("asteroid")
 
 	# ── Nothing is predicted that cannot be seen ──
 	# Impacts are scheduled 60 000-400 000 years apart, so at this horizon the next one is

@@ -72,8 +72,9 @@ const STELLAR_LEVERS: Array = [
 
 ## Collectors in the Dyson swarm.  The swarm's real cap is Game._swarm_max(), which is lane
 ## geometry rather than a constant, so it cannot be read from here — tests/verify_sandbox.gd
-## asserts this still matches it.  It was 1409 until the lane spacing was halved.
-const SWARM_COLLECTORS: int = 1116
+## asserts this still matches it.  It was 1409 at the original lane spacing, 1116 once that was
+## halved, and 1155 after it was halved again and three more lanes were added.
+const SWARM_COLLECTORS: int = 1155
 
 ## Write the sandbox save to disk (creating user://saves/ if needed).
 static func write(path: String = SAVE_PATH) -> void:
@@ -238,20 +239,20 @@ static func _inventory() -> Dictionary:
 ## Every compound that can appear: recipe inputs/outputs plus crust/atmosphere ores,
 ## minus the global pools (energy/science/minerals) which live in "resources".
 static func _all_compounds() -> Array:
-	var set: Dictionary = {}
+	var seen: Dictionary = {}
 	for r: Dictionary in RecipeData.RECIPES:
 		for k: String in (r.get("inputs", {}) as Dictionary):
-			set[k] = true
+			seen[k] = true
 		for k: String in (r.get("outputs", {}) as Dictionary):
-			set[k] = true
+			seen[k] = true
 	for pname: String in PlanetData.PLANETS:
 		var comp: Dictionary = (PlanetData.PLANETS[pname] as Dictionary).get("composition_g", {})
 		for layer: String in comp:
 			for c: String in (comp[layer] as Dictionary):
-				set[c] = true
+				seen[c] = true
 	for skip: String in ["energy", "science", "minerals"]:
-		set.erase(skip)
-	return set.keys()
+		seen.erase(skip)
+	return seen.keys()
 
 ## Colonised worlds = everything except Earth (home).
 static func _colonized_planets() -> Array:
