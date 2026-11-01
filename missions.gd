@@ -25,6 +25,24 @@ const CARGO_PER_ROCKET_G: float = 2.0e8
 
 const ROCKET_UNIT_MASS_G: float = 5.0e8
 
+## What a hold may NOT carry, whatever the origin happens to be holding.
+##
+## science, minerals and energy are Game.GLOBAL_POOLS: one civilisation-wide figure rather than
+## something a particular world keeps on a shelf.  Flying one is a round trip to nowhere — the
+## executor deducts it from the global pool at launch and the arrival adds it straight back to
+## the same global pool, so the player pays for the rockets and nothing moves.  Worse, the mass
+## is counted in GRAMS, so manifesting a developed civilisation's joule reserve asks for more
+## lift than there are atoms in the solar system and the rule silently never fires.
+##
+## Which is also why a Supply Run used to offer energy and almost nothing else: it was the only
+## entry in the launch-stock map that is never zero.
+const HOLD_EXCLUDED: Array = ["science", "minerals", "energy"]
+
+## Whether a compound can be put in a hold.  Both manifest pickers and the launch itself ask
+## this, so what the player is offered and what the game will actually fly are one rule.
+static func can_hold(key: String) -> bool:
+	return not HOLD_EXCLUDED.has(key)
+
 ## Energy a launch campaign expends per gram of vehicle put on a trajectory.  Low Earth orbit
 ## costs ~33 MJ per kg of specific orbital energy; a real stack burns several times that once
 ## gravity losses, drag and staging inefficiency are counted, so ~44 kJ/g.  Interplanetary

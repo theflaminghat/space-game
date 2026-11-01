@@ -18,7 +18,9 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_PANEL, V_SPINE, V_MANIFOLD = 0.78, 0.45, 0.58
+V_PANEL    = (0.87, 0.87, 0.85)   # high-emissivity panels
+V_SPINE    = (0.40, 0.41, 0.44)   # spine
+V_MANIFOLD = (0.80, 0.64, 0.30)   # manifold
 
 parts = []
 

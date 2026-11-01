@@ -1973,7 +1973,13 @@ var _factions: Dictionary = {}       # star name → "aggressive" | "peaceful"
 ## Not saved.  It is a way of LOOKING at the map rather than a property of the run: a player who
 ## hid the empty stars to read their own holdings does not mean that every future session should
 ## open that way, and a save that came back with half the galaxy missing would read as a bug.
-var _layers: Dictionary = {"stars": true, "clusters": true, "galaxies": true}
+## Somebody else's volume: hot where it is theirs outright, dim where it is still contested.
+## Deliberately not any colour a star class or a diplomatic standing uses — this is not a
+## holding, it is ground that has been taken.
+const FRONT_HELD_COLOR: Color = Color(0.86, 0.26, 0.42, 0.85)
+const FRONT_CONTESTED_COLOR: Color = Color(0.70, 0.40, 0.55, 0.45)
+
+var _layers: Dictionary = {"stars": true, "clusters": true, "galaxies": true, "front": true}
 ## Which kinds of star, by STAR_CLASSES id.  Meaningful only while "stars" is on.
 var _star_classes: Dictionary = {}
 
@@ -1993,6 +1999,151 @@ var _berserker_stock: int = 0        # crafted Berserker seeds in the player's i
 var _can_colonize: bool = false      # Relativistic Navigation researched (interstellar flight)
 var _intel: Dictionary = {}          # star → {alignment, dyson, telescopes, lasers, detail, diplo, probed}
 var _colony_intel: Dictionary = {}   # colonised star → {dyson, telescopes, lasers} (own infrastructure)
+
+## The rival front, as Game hands it over: [[Vector3 pos, float share], …].
+##
+## POSITIONS, not hex ids.  Game owns the region grid and this panel has no business knowing
+## what a hex is; what it needs is somewhere to put a mark.  Empty until the front's signature
+## has reached Sol, so an undetected front draws nothing at all — see Game.front_state.
+var _front: Array = []
+var _front_version: int = 0
+# Cached like the stars and the clusters, behind the same camera key: the marks are a pure
+# function of the front, the camera and the frame origin.
+var _fr_pts: PackedVector2Array = PackedVector2Array()
+var _fr_col: PackedColorArray = PackedColorArray()
+var _fr_key: Array = []
+var _fr_ref: Vector3 = Vector3(INF, INF, INF)
+
+# ── The star pass, cached ─────────────────────────────────────────────────────
+#
+# The same treatment _cl_pts gives the clusters, and for the same reason.  Measured at six
+# thousand stars, the per-star loop WAS the map's entire frame cost — 31.5 ms, against 6.9 ms
+# for a frame with the map hidden — and it split three ways almost evenly:
+#
+#   _rel + _project                        11.3 ms
+#   name + two dictionary probes + filter  12.4 ms
+#   _display_radius + _detail_alpha         7.1 ms
+#
+# None of it depends on anything but the star, the camera, the frame origin, the selection, who
+# holds what, and the filter.  A frame that moves none of those is entitled to the previous
+# answer, and that is most frames: a map is read far more than it is turned.
+var _st_pts: PackedVector2Array = PackedVector2Array()
+var _st_col: PackedColorArray = PackedColorArray()
+var _st_vis: Array = []
+var _st_key: Array = []
+var _st_ref: Vector3 = Vector3(INF, INF, INF)
+
+## ── The view-INDEPENDENT half of the star pass ────────────────────────────────
+##
+## The cache above is keyed on the camera, so turning the map throws all of it away and the
+## whole pass is rebuilt sixty times a second. Measured at six thousand stars that was 32 ms a
+## frame, which is most of the reason a turning map ran at 16 fps.
+##
+## But almost none of that work depends on which way the camera is pointing. Per star the loop
+## was redoing:
+##
+##   pos.distance_to(_ref_pos)          a sqrt
+##   _rel(pos)                          three dots, a sqrt and a log
+##   _display_radius(d0)                a log
+##   _status_color_of(col, fac)         a LINEAR SCAN of STAR_CLASSES comparing strings
+##   _star_shown(col, fac)              the same scan again, through star_class_shown
+##
+## — and every one of those gives the same answer at every yaw. The genuinely camera-dependent
+## part is three dot products and a divide, which measured at 5.5 ms for the whole catalogue
+## against 32 ms for the loop around it.
+##
+## So it is split in two. This half is keyed on the catalogue, the frame origin, the selection,
+## who holds what and the filter — but NOT on zoom, yaw, pitch or panel size — and survives
+## everything the player does with the mouse short of recentring. The half above then projects
+## what it produced, and is all a turning frame pays.
+##
+## Parallel Packed arrays rather than an array of dictionaries: six thousand Dictionary
+## allocations per rebuild is the cost this is trying to avoid, and the loop reads them by index.
+var _sv_idx: PackedInt32Array = PackedInt32Array()      # index into all_stars()
+var _sv_lp: PackedVector3Array = PackedVector3Array()   # _rel(pos), the log-space position
+var _sv_d: PackedFloat32Array = PackedFloat32Array()    # distance from the reference frame, ly
+var _sv_dr: PackedFloat32Array = PackedFloat32Array()   # _display_radius of that
+var _sv_col: PackedColorArray = PackedColorArray()      # status colour, for the point tiers
+## 1 = draws whatever the zoom says (selected, ours, or somebody's), 0 = fades with the band.
+var _sv_imp: PackedByteArray = PackedByteArray()
+## 1 = too far to be drawn AS a star, so it is a status point and needs no evolved state at all.
+var _sv_far: PackedByteArray = PackedByteArray()
+var _sv_key: Array = []
+var _sv_ref: Vector3 = Vector3(INF, INF, INF)
+
+## Rebuild the view-independent half if anything it depends on has moved.
+##
+## `tol` is the frame-origin movement tolerance, and it is the one the CALLER is using, not a
+## looser one of this cache's own. What is held here is `_rel(pos)` — a position — so letting
+## this cache sit on a stale origin while the pass around it rebuilds would have it projecting
+## last frame's geometry into this frame's camera. The two have to go stale together.
+func _ensure_star_view_cache(star_list: Array, tol: float) -> void:
+	var n: int = star_list.size()
+	var key: Array = [n, _selected, _marked_stars, _colonized.size(), _factions.size(),
+		_marked_version, _filter_version, catalogue_version()]
+	if key == _sv_key and _ref_pos.distance_squared_to(_sv_ref) < tol * tol:
+		return
+	_sv_key = key
+	_sv_ref = _ref_pos
+	_ensure_star_holders(star_list)
+	_sv_idx.clear(); _sv_lp.clear(); _sv_d.clear(); _sv_dr.clear()
+	_sv_col.clear(); _sv_imp.clear(); _sv_far.clear()
+	for si in range(n):
+		var s0: Dictionary = star_list[si]
+		var selected: bool = si == _selected
+		var d0: float = (s0["pos"] as Vector3).distance_to(_ref_pos)
+		if not selected and d0 > STAR_RENDER_MAX_LY:
+			continue
+		var col0: bool = false
+		var fac0: String = ""
+		if _marked_stars:
+			col0 = _st_held[si] == 1
+			fac0 = _st_fac[si]
+		if not _star_shown(col0, fac0):
+			continue
+		_sv_idx.append(si)
+		_sv_lp.append(_rel(s0["pos"]))
+		_sv_d.append(d0)
+		_sv_dr.append(_display_radius(d0))
+		_sv_col.append(_status_color_of(col0, fac0))
+		_sv_imp.append(1 if (selected or col0 or fac0 != "") else 0)
+		_sv_far.append(1 if (not selected and d0 > STATUS_COLOR_LY) else 0)
+## Bumped whenever who-holds-what is pushed in, so a colony lost and another gained between two
+## frames — which secession makes an ordinary event rather than a theoretical one — invalidates
+## the cached pass even though the counts did not move.
+var _marked_version: int = 0
+## Who holds each star, by catalogue INDEX, rebuilt only when that changes.
+##
+## The loop did `str(s0["name"])` and two dictionary probes per star, on every frame on which
+## anything anywhere is marked.  None of that answer moves while nobody colonises anything, so
+## it is resolved once per change into two flat arrays the loop indexes.  It costs the same walk
+## it always did; it just stops paying it sixty times a second.
+var _st_held: PackedByteArray = PackedByteArray()   # 1 = ours, 0 = not
+var _st_fac: PackedStringArray = PackedStringArray()
+var _st_held_version: int = -1
+var _st_held_cat: int = -1
+
+
+## Resolve who holds what, by index, if it is out of date.
+func _ensure_star_holders(star_list: Array) -> void:
+	# Against the CATALOGUE VERSION as well as the marked one. Length is not enough: the field
+	# is filtered by live distance from Sol, so a rebuild can swap stars in and out and leave
+	# the count alone — and these arrays are indexed into that list.
+	if _st_held_version == _marked_version and _st_held_cat == catalogue_version() \
+			and _st_held.size() == star_list.size():
+		return
+	_st_held_version = _marked_version
+	_st_held_cat = catalogue_version()
+	var n: int = star_list.size()
+	_st_held.resize(n)
+	_st_fac.resize(n)
+	for i in range(n):
+		var nm: String = str((star_list[i] as Dictionary)["name"])
+		_st_held[i] = 1 if _colonized.has(nm) else 0
+		_st_fac[i] = str(_factions.get(nm, ""))
+## Bumped whenever the layer filter changes, so the pass invalidates on the fact rather than on
+## a proxy for it.
+var _filter_version: int = 0
 var _missile_btn: Button = null
 var _probe_btn: Button = null
 var _vn_btn:         Button = null
@@ -2086,6 +2237,7 @@ func set_star_class_shown(cls: String, on: bool) -> void:
 
 ## Everything that has to happen when the filter moves.
 func _on_filter_changed() -> void:
+	_filter_version += 1
 	# The sub-options mean nothing while the layer above them is off, and a live checkbox that
 	# does nothing is worse than a greyed one.
 	var stars_on: bool = bool(_layers.get("stars", true))
@@ -2163,6 +2315,8 @@ func _build_layer_ui() -> void:
 		"The generated cluster shell — everything too far to resolve star by star.")
 	_layer_boxes["galaxies"] = _layer_box(vb, "Galaxies", "galaxies",
 		"The extragalactic layer, out in the far decades.")
+	_layer_boxes["front"] = _layer_box(vb, "Rival front", "front",
+		"Volumes taken by somebody else's self-replicating probes. Solid where they hold it outright and your swarm will not fly there; faint where it is still contested and still yours to race for.")
 
 
 ## One top-level layer checkbox.
@@ -2827,6 +2981,7 @@ func set_interstellar_state(colonized: Dictionary, missions: Array, energy: floa
 		now_year: float = -1.0) -> void:
 	_colonized = colonized
 	_marked_stars = not _colonized.is_empty() or not _factions.is_empty()
+	_marked_version += 1
 	_missions = missions
 	_avail_energy = energy
 	if now_year >= 0.0:
@@ -2882,6 +3037,7 @@ func _cluster_pickable(ci: int) -> bool:
 ## Push alien presence (star name → "aggressive"/"peaceful") for the red/blue highlights.
 func set_star_factions(factions: Dictionary) -> void:
 	_factions = factions
+	_marked_version += 1
 	_marked_stars = not _colonized.is_empty() or not _factions.is_empty()
 	queue_redraw()
 
@@ -2921,6 +3077,14 @@ func set_arsenal(missiles: int, berserkers: int) -> void:
 func set_alien_intel(intel: Dictionary) -> void:
 	_intel = intel
 	_update_launch_ui()
+
+## Push the rival front: the cells it holds, as Sol-relative positions in light-years with the
+## share of each.  Pushed on refresh, which is event-driven, not per frame.
+func set_front(cells: Array) -> void:
+	_front = cells
+	_front_version += 1
+	queue_redraw()
+
 
 ## Push the player's own colony infrastructure (colonised star → {dyson, telescopes, lasers}).
 func set_colony_intel(intel: Dictionary) -> void:
@@ -3171,9 +3335,19 @@ func _colony_infra_block(star_name: String) -> String:
 	if not _colony_intel.has(star_name):
 		return "Colony infrastructure: developing…"
 	var d: Dictionary = _colony_intel[star_name]
-	return "Colony infrastructure:\n  • Dyson swarm: %d%%\n  • Orbital telescopes: %d\n  • Defensive lasers: %d" % [
-		int(round(float(d.get("dyson", 0.0)) * 100.0)),
+	# Dated, because it is.  Everything here is what the light leaving that colony carried, so a
+	# frontier system is described as it was centuries ago — and the allegiance line is the last
+	# thing it said about whether it still answers to anybody at Sol.
+	var age: float = float(d.get("report_age", 0.0))
+	var head: String = "Colony infrastructure" if age < 1.0 \
+		else "Colony infrastructure, as of %s ago" % Units.format_si(age, "yr")
+	var out: String = "%s:\n  • Dyson swarm: %d%%\n  • Orbital telescopes: %d\n  • Defensive lasers: %d" % [
+		head, int(round(float(d.get("dyson", 0.0)) * 100.0)),
 		int(d.get("telescopes", 0)), int(d.get("lasers", 0))]
+	var alle: String = str(d.get("allegiance", ""))
+	if alle != "":
+		out += "\n  • Allegiance: %s" % alle
+	return out
 
 ## Laser energy multiplier from the power slider (≥1).
 func _laser_power() -> float:
@@ -3651,6 +3825,64 @@ var _cl_glyph_idx := PackedInt32Array()
 var _cl_ref: Vector3 = Vector3(INF, INF, INF)
 var _cl_key: Array = []
 
+## ── The view-INDEPENDENT half of the cluster pass ─────────────────────────────
+##
+## The same split the star field gets, for the same reason and a bigger number: the shell is
+## eight thousand clusters and its rebuild measured 23.8 ms a frame while turning, against 0.6 ms
+## standing still. Per cluster the loop was redoing a distance, a _display_radius log, a full
+## _rel transform (three dots, a sqrt and a log) and a str()-and-probe into _colonized — none of
+## which can change when the camera turns.
+##
+## Everything here is keyed on the patch, the frame origin, the focus set, the selection and who
+## has been settled. Zoom, yaw, pitch and panel size are deliberately absent.
+##
+## All of them, not just the visible ones: the detail-band test that discards most of the shell
+## at a deep zoom is a ZOOM test, so it belongs in the per-frame half. Doing the transform here
+## for clusters that frame throws away is work the old loop skipped — but this runs when Sol
+## moves, and that one runs sixty times a second.
+var _cv_idx: PackedInt32Array = PackedInt32Array()      # index into star_clusters()
+var _cv_lp: PackedVector3Array = PackedVector3Array()   # _rel(pos)
+var _cv_dr: PackedFloat32Array = PackedFloat32Array()   # _display_radius of the distance
+var _cv_dist: PackedFloat32Array = PackedFloat32Array() # plain distance from the frame origin
+var _cv_col: PackedColorArray = PackedColorArray()      # resolved colour, settled ones included
+## 1 = always a full glyph (Sol's own cluster, or one bordering it), whatever the zoom says.
+var _cv_focus: PackedByteArray = PackedByteArray()
+var _cv_key: Array = []
+var _cv_ref: Vector3 = Vector3(INF, INF, INF)
+
+## Rebuild the cluster pass's view-independent half if anything it depends on has moved.
+##
+## `tol` is the caller's frame-origin tolerance, not a looser one of this cache's own — what is
+## held here includes _rel(pos), a position, so this going stale while the pass around it
+## rebuilds would project the previous origin's geometry into the current camera.
+func _ensure_cluster_view_cache(cl_all: Array, tol: float) -> void:
+	var key: Array = [cl_all.size(), _patch_version, _focus_version, _selected_cluster,
+		_colonized.size()]
+	if key == _cv_key and _ref_pos.distance_squared_to(_cv_ref) < tol * tol:
+		return
+	_cv_key = key
+	_cv_ref = _ref_pos
+	_cv_idx.clear(); _cv_lp.clear(); _cv_dr.clear(); _cv_dist.clear()
+	_cv_col.clear(); _cv_focus.clear()
+	# Which clusters are drawn IN FULL: Sol's own and the ones bordering it, whose cells have
+	# been carved.  The set changes the moment Sol crosses a cluster border, so the detailed
+	# neighbourhood travels with the star, and _focus_version is what says that it has.
+	var focus: Dictionary = {}
+	for fi: int in focus_cluster_indices():
+		focus[fi] = true
+	for ci in range(cl_all.size()):
+		var cl: Dictionary = cl_all[ci]
+		var dist: float = (cl["pos"] as Vector3).distance_to(_ref_pos)
+		var ccol: Color = cl["color"]
+		if _colonized.has(str(cl["name"])):
+			ccol = STATUS_COL_HUMAN
+		_cv_idx.append(ci)
+		_cv_lp.append(_rel(cl["pos"]))
+		_cv_dr.append(_display_radius(dist))
+		_cv_dist.append(dist)
+		_cv_col.append(ccol)
+		_cv_focus.append(1 if (focus.has(ci) or bool(cl.get("is_home", false))) else 0)
+
 ## Margin, in pixels, around the panel within which a star still counts as on screen — room for
 ## its corona and any ring drawn around it.
 const STAR_SCREEN_PAD: float = 24.0
@@ -4029,6 +4261,30 @@ func _draw() -> void:
 	var px_per_unit := _fit_scale(center)
 	var star_maxdr := _max_star_display_radius()
 
+	# ── Per-frame constants for the two hot loops ────────────────────────────────
+	#
+	# _project and _detail_alpha are called once per star and once per cluster — fifteen thousand
+	# times a frame on a charted map — and both recompute the same handful of frame constants on
+	# every single call. _persp alone re-derives the view radius, the camera distance and the
+	# near plane per point, through two nested calls, for three numbers that are fixed for the
+	# whole frame.
+	#
+	# Hoisted here and used INLINE in the two loops below. _project and _detail_alpha remain the
+	# definition of record and every other caller still goes through them; verify_starmap_project
+	# asserts the inlined arithmetic agrees with both exactly, so they cannot drift apart
+	# unnoticed.
+	var bx: Vector3 = b.x
+	var by: Vector3 = b.y
+	var bz: Vector3 = b.z
+	var vr_now: float = _view_radius_now()
+	var cam_d: float = vr_now * CAMERA_DIST_VR
+	var near_d: float = vr_now * NEAR_CLIP_VR
+	# _detail_alpha's band uses the UNCLAMPED view radius, which is what it computes itself.
+	var band_r: float = _max_display_radius() / _zoom
+	var band_hi: float = band_r * LABEL_OUTER_FRAC
+	var band_lo: float = band_r * LABEL_INNER_FRAC
+	var band_span: float = band_hi - band_lo
+
 	# Order-of-magnitude reference rings: one per decade of light-years, out to the
 	# Hubble horizon.  On the log px_per_unit they're evenly spaced (log₁₀(10ᵏ) = k), so each
 	# step outward is ×10 the distance — the map's way of showing the px_per_unit of the void.
@@ -4116,6 +4372,59 @@ func _draw() -> void:
 	_refresh_lod_cuts(_ref_pos)
 	# Filtered out entirely rather than drawn and discarded: the sort is the expensive half and
 	# there is nothing to sort for a layer nobody is looking at.
+	# ── The rival front, under everything else ──────────────────────────────────
+	#
+	# Drawn FIRST so it reads as territory the rest of the map sits on top of: a star inside the
+	# front still draws as a star, over the stain that says who holds the volume around it.
+	#
+	# Cached behind the same key the stars and clusters use, with the frame origin on the same
+	# movement tolerance — the marks are a pure function of the front, the camera and where Sol
+	# is, and a static view is most frames.
+	if not layer_shown("front") or _front.is_empty():
+		# CLEARED, not merely skipped.  A buffer left full is a stale frame's worth of marks
+		# waiting to be drawn the moment the layer comes back on at a different camera, and the
+		# key would say it was fresh.
+		if not _fr_pts.is_empty():
+			_fr_pts = PackedVector2Array()
+			_fr_col = PackedColorArray()
+			_fr_key = []
+	else:
+		var fr_key: Array = [_zoom, _yaw, _pitch, size.x, size.y, _front_version]
+		var fr_tol: float = _cluster_pt_tol(px_per_unit)
+		if fr_key != _fr_key or _ref_pos.distance_squared_to(_fr_ref) >= fr_tol * fr_tol:
+			_fr_key = fr_key
+			_fr_ref = _ref_pos
+			_fr_pts = PackedVector2Array()
+			_fr_col = PackedColorArray()
+			for e in _front:
+				var cell: Array = e
+				var cpos: Vector3 = cell[0]
+				var share: float = clampf(float(cell[1]), 0.0, 1.0)
+				if share <= 0.0:
+					continue
+				# Same early discard the cluster loop uses: _detail_alpha only wants the LENGTH
+				# of the transformed position, which is _display_radius of the plain distance.
+				var fa: float = _detail_alpha(_display_radius(cpos.distance_to(_ref_pos)))
+				if fa <= 0.0:
+					continue
+				var fp: Vector2 = _project(_rel(cpos), b, center, px_per_unit)
+				if fp.x < -STAR_SCREEN_PAD or fp.y < -STAR_SCREEN_PAD \
+						or fp.x > size.x + STAR_SCREEN_PAD or fp.y > size.y + STAR_SCREEN_PAD:
+					continue
+				# Solid where it is theirs outright and the swarm will not fly there; faint
+				# where the volume is still contested. The threshold is the same one
+				# FrontData.denies uses, so what is drawn solid is exactly what is closed.
+				var held: bool = share >= FrontData.DENIED_SHARE
+				var fc: Color = FRONT_HELD_COLOR if held else FRONT_CONTESTED_COLOR
+				# A mark two pixels wide rather than one, so a front reads as territory at a
+				# glance instead of as a sparse dusting of points.
+				_fr_pts.append(fp)
+				_fr_pts.append(fp + Vector2(2.0, 0.0))
+				_fr_col.append(Color(fc.r, fc.g, fc.b,
+					fc.a * fa * (0.45 + 0.55 * share)))
+		if _fr_pts.size() >= 2:
+			draw_multiline_colors(_fr_pts, _fr_col, 3.0)
+
 	var cl_all: Array = star_clusters() if layer_shown("clusters") else ([] as Array)
 	var glyphs_ok: bool = _zoom >= CLUSTER_GLYPH_MIN_ZOOM
 	# Everything the sort below depends on besides the frame origin, which gets its own
@@ -4138,31 +4447,24 @@ func _draw() -> void:
 		_cl_pts = PackedVector2Array()
 		_cl_pt_col = PackedColorArray()
 		_cl_glyph_idx = PackedInt32Array()
-		# Which clusters are drawn IN FULL: Sol's own and the ones bordering it, whose cells
-		# have been carved.  Everything else in the patch — the rest of Sol's tile and the whole
-		# of the six tiles around it — is one batched point.  The set changes the moment Sol
-		# crosses a cluster border, so the detailed neighbourhood travels with the star, and
-		# _focus_version above is what tells this cache that it has.
-		var focus: Dictionary = {}
-		for fi: int in focus_cluster_indices():
-			focus[fi] = true
-		for ci in range(cl_all.size()):
-			var cl: Dictionary = cl_all[ci]
-			# Visibility decided from a PLAIN DISTANCE, before any transform.  _rel rotates into
-			# the galactic basis and then remaps onto the log radial scale; _detail_alpha only
-			# ever wanted the LENGTH of that result, and the length is _display_radius of the
-			# plain distance — the rotation preserves length and _log_pos sets it outright.
-			#
-			# It buys nothing at a wide view, where every cluster is inside the detail band and
-			# goes on to be transformed anyway.  It buys a third of a rebuild at a deep zoom,
-			# where none of eight thousand clusters is visible and every one of them used to be
-			# rotated and log-remapped before being thrown away.
-			var ca: float = _detail_alpha(
-				_display_radius((cl["pos"] as Vector3).distance_to(_ref_pos)))
+		_ensure_cluster_view_cache(cl_all, cl_tol)
+		# What a turning frame actually pays. The distance, the log-space position and the
+		# colour were all settled above and survive any amount of turning and zooming.
+		for k in range(_cv_idx.size()):
+			var ci: int = _cv_idx[k]
 			var csel: bool = ci == _selected_cluster
+			# Decided from the cached radius, BEFORE the projection: at a deep zoom none of eight
+			# thousand clusters is in the band, and this is what stops them being projected.
+			var cdr: float = _cv_dr[k]
+			var ca: float = 0.0
+			if cdr > band_lo and cdr < band_hi:
+				var ct: float = (cdr - band_lo) / band_span
+				ca = clampf(ct / LABEL_FADE, 0.0, 1.0) * clampf((1.0 - ct) / LABEL_FADE, 0.0, 1.0)
 			if ca <= 0.0 and not csel:
 				continue
-			var cp := _project(_rel(cl["pos"]), b, center, px_per_unit)
+			var clp: Vector3 = _cv_lp[k]
+			var cs: float = px_per_unit * (cam_d / maxf(cam_d - clp.dot(bz), near_d))
+			var cp := Vector2(center.x + clp.dot(bx) * cs, center.y - clp.dot(by) * cs)
 			if cp.x < -20.0 or cp.y < -20.0 or cp.x > size.x + 20.0 or cp.y > size.y + 20.0:
 				continue
 			# A grain ring costs eight draw calls, and the patch holds sixteen thousand clusters,
@@ -4173,14 +4475,11 @@ func _draw() -> void:
 			#
 			# The home cluster is glyph tier too, even though its glyph is only ever a selection
 			# ring: see _draw_cluster_glyph.
-			if csel or focus.has(ci) or bool(cl.get("is_home", false)) \
-					or (glyphs_ok
-						and _ref_pos.distance_to(cl["pos"] as Vector3) <= _cluster_glyph_cut):
+			if csel or _cv_focus[k] == 1 \
+					or (glyphs_ok and _cv_dist[k] <= _cluster_glyph_cut):
 				_cl_glyph_idx.append(ci)
 				continue
-			var ccol: Color = cl["color"]
-			if _colonized.has(str(cl["name"])):
-				ccol = STATUS_COL_HUMAN
+			var ccol: Color = _cv_col[k]
 			_cl_pts.append(cp)
 			_cl_pts.append(cp + Vector2(1.0, 0.0))
 			_cl_pt_col.append(Color(ccol.r, ccol.g, ccol.b, maxf(ca, 0.45)))
@@ -4223,94 +4522,104 @@ func _draw() -> void:
 	var vis: Array = []
 	var pt_seg := PackedVector2Array()      # the point cloud: two vertices per star
 	var pt_col := PackedColorArray()
-	for si in range(star_n):
-		var s0: Dictionary = star_list[si]
-		var selected: bool = si == _selected
-		# Hard distance cutoff, measured from the current reference frame — beyond
-		# STAR_RENDER_MAX_LY nothing draws, INCLUDING colonised and alien systems; only the
-		# selected star is kept.  In the Sol frame this is just the Sol distance.
-		# Everything the renderer decides about a star is measured from the REFERENCE FRAME, not
-		# from Sol: recentre on a colony and its neighbours are the ones that get names, lines and
-		# drawn bodies, exactly as Sol's do while the frame is home.
-		var d0: float = (s0["pos"] as Vector3).distance_to(_ref_pos)
-		if not selected and d0 > STAR_RENDER_MAX_LY:
-			continue
-		# Same as the cluster loop above: the test wants the length of _rel(pos), which is
-		# _display_radius of the distance already in hand, so the transform waits until the
-		# star has survived the discard below.
-		var a0: float = 1.0 if selected else _detail_alpha(_display_radius(d0))
-		# Who is THERE, which decides both whether the star earns a body and what colour it is
-		# drawn in once it is too far away to be drawn as a star.  The name conversion and the two
-		# dictionary probes are skipped entirely while nothing anywhere is marked — the whole
-		# opening of a run, when the answer is "nobody" for all six thousand.
-		var col0: bool = false
-		var fac0: String = ""
-		if _marked_stars:
-			var nm0: String = str(s0["name"])
-			col0 = _colonized.has(nm0)
-			fac0 = str(_factions.get(nm0, ""))
-		# The layer filter, applied on the two facts just established and before anything is
-		# transformed.  While nothing anywhere is marked every star is Uninhabited, which is
-		# why the whole loop can be skipped outright above rather than tested six thousand
-		# times for an answer that cannot vary.
-		if not _star_shown(col0, fac0):
-			continue
-		var important: bool = selected or col0 or fac0 != ""
-		# Within the cutoff, colonised/alien/near stars always draw (at any zoom); far anonymous
-		# ones only draw when in the current zoom band.
-		if a0 <= 0.0 and not (important or d0 < STAR_ALWAYS_LY):
-			continue
-		var lp0: Vector3 = _rel(s0["pos"])
-		# Off the panel entirely.  The log px_per_unit puts a colossal distance range on screen at
-		# once, so at any real zoom most of the catalogue projects well outside it — and until
-		# now every one of those was drawn anyway, glyph, rings and all.
-		var sp0 := _project(lp0, b, center, px_per_unit)
-		if sp0.x < -STAR_SCREEN_PAD or sp0.y < -STAR_SCREEN_PAD \
-				or sp0.x > size.x + STAR_SCREEN_PAD or sp0.y > size.y + STAR_SCREEN_PAD:
-			continue
-		# Past STATUS_COLOR_LY a star stops being drawn AS a star.  At that range its spectral
-		# class is not the useful fact about it — whether anyone lives there is — so it becomes a
-		# single point coloured by who holds it, and nothing else: no body, no corona, no
-		# alien or colony ring.  That is also what makes the map affordable, because it is the
-		# overwhelming majority of the catalogue: the evolved state and the screen radius below
-		# are never even computed for them, and they cost one shared draw call between the lot.
-		if not selected and d0 > STATUS_COLOR_LY:
-			var status_col: Color = _status_color_of(col0, fac0)
-			pt_seg.append(sp0)
-			pt_seg.append(sp0 + Vector2(1.0, 0.0))
-			pt_col.append(Color(status_col.r, status_col.g, status_col.b, maxf(a0, 0.4)))
-			continue
-		# Evolved state and screen radius are resolved HERE and carried forward, so the draw loop
-		# below never asks for either a second time.  Both are needed to decide the star's tier.
-		var st0: Dictionary = _star_state(s0)
-		var rad0: float = _star_screen_radius(lp0, b, star_maxdr, st0)
-		# Point tier: too small for a body, or past the body budget, and with no ring or label to
-		# hang off it — so it needs neither sorting nor a draw call of its own.  The budget is
-		# what keeps a deep zoom affordable: the log px_per_unit can put the whole neighbourhood on
-		# screen at a size that earns every star a body, and six thousand bodies is eighty
-		# thousand circles.  Bodies go to the nearest stars, by a distance cut that is only
-		# redone when the viewpoint has moved appreciably, so the choice is stable frame to
-		# frame and never flickers.
-		# Being a colony or an alien system is no longer a reason to keep a body.  A settled world
-		# still has to be big enough on screen to be worth drawing as a world, and when it is not
-		# it becomes a green point like any other holding — which is the whole reason the status
-		# palette exists.  It stays exempt from the ZOOM BAND above, so it never disappears; it
-		# just stops pretending to be a sphere at a zoom where nothing could be.
-		if not selected and (rad0 < STAR_POINT_PX or d0 > _star_body_cut):
-			pt_seg.append(sp0)
-			pt_seg.append(sp0 + Vector2(1.0, 0.0))
-			# A point reports STATUS, near or far.  A one-pixel dot cannot say anything useful
-			# about a photosphere, and the spectral colours it used to carry made a wide view a
-			# field of indistinguishable specks — which is exactly the view the player is in when
-			# looking for who is out there.  So pulling the zoom back turns the neighbourhood
-			# from stars into holdings, one tier at a time, and pushing in resolves them again.
-			var pc: Color = _status_color_of(col0, fac0)
-			pt_col.append(Color(pc.r, pc.g, pc.b, maxf(a0, 0.4)))
-			continue
-		# Depth is carried in the entry, not recomputed inside the comparator: _depth on both
-		# sides of every comparison was thousands of calls a frame for a number that never
-		# changes during the sort.
-		vis.append([si, lp0, maxf(a0, 0.0), lp0.dot(b.z), rad0, st0, sp0, d0])
+	# Everything the pass below depends on, besides the frame origin, which gets its own
+	# movement tolerance the way the cluster cache's does.  Who holds what enters as two COUNTS:
+	# a name entering or leaving moves one of them, except in the single case where a colony is
+	# lost and another gained between two frames — the same trade the cluster cache documents,
+	# against a value compare of six thousand entries every frame.  _marked_version covers the
+	# swap, and is bumped by the pushes that can cause one.
+	var st_key: Array = [_zoom, _yaw, _pitch, size.x, size.y, _selected, star_n,
+		_marked_stars, _colonized.size(), _factions.size(), _marked_version,
+		_filter_version, _star_body_cut, star_maxdr, catalogue_version()]
+	# The frame origin gets a movement TOLERANCE rather than going in the key, exactly as the
+	# cluster cache does: a Shkadov-driven Sol moves _ref_pos every single frame, and an exact
+	# compare would rebuild the whole pass for a displacement far under one pixel.
+	var st_tol: float = _cluster_pt_tol(px_per_unit)
+	if st_key != _st_key or _ref_pos.distance_squared_to(_st_ref) >= st_tol * st_tol:
+		_st_key = st_key
+		_st_ref = _ref_pos
+		_ensure_star_view_cache(star_list, st_tol)
+		# Everything below is what a turning frame actually pays: the camera-dependent half.
+		# The distance, the log-space position, the status colour and the filter were all settled
+		# by _ensure_star_view_cache and survive any amount of turning and zooming.
+		for k in range(_sv_idx.size()):
+			var si: int = _sv_idx[k]
+			var d0: float = _sv_d[k]
+			var selected: bool = si == _selected
+			# Zoom-dependent, so it stays here. The band decides what has faded out entirely.
+			var a0: float = 1.0
+			if not selected:
+				a0 = 0.0
+				var sdr: float = _sv_dr[k]
+				if sdr > band_lo and sdr < band_hi:
+					var stt: float = (sdr - band_lo) / band_span
+					a0 = clampf(stt / LABEL_FADE, 0.0, 1.0) \
+						* clampf((1.0 - stt) / LABEL_FADE, 0.0, 1.0)
+			var important: bool = _sv_imp[k] == 1
+			if a0 <= 0.0 and not (important or d0 < STAR_ALWAYS_LY):
+				continue
+			var lp0: Vector3 = _sv_lp[k]
+			# Off the panel entirely.  The log scale puts a colossal distance range on screen at
+			# once, so at any real zoom most of the catalogue projects well outside it — a tenth
+			# of the catalogue survives this, which is why what happens ABOVE it is what matters.
+			var ss: float = px_per_unit * (cam_d / maxf(cam_d - lp0.dot(bz), near_d))
+			var sp0 := Vector2(center.x + lp0.dot(bx) * ss, center.y - lp0.dot(by) * ss)
+			if sp0.x < -STAR_SCREEN_PAD or sp0.y < -STAR_SCREEN_PAD \
+					or sp0.x > size.x + STAR_SCREEN_PAD or sp0.y > size.y + STAR_SCREEN_PAD:
+				continue
+			# Past STATUS_COLOR_LY a star stops being drawn AS a star.  At that range its spectral
+			# class is not the useful fact about it — whether anyone lives there is — so it becomes
+			# a single point coloured by who holds it, and nothing else: no body, no corona, no
+			# alien or colony ring.  That is also what makes the map affordable, because it is the
+			# overwhelming majority of the catalogue: the evolved state and the screen radius below
+			# are never even computed for them, and they cost one shared draw call between the lot.
+			if _sv_far[k] == 1:
+				pt_seg.append(sp0)
+				pt_seg.append(sp0 + Vector2(1.0, 0.0))
+				var fc: Color = _sv_col[k]
+				pt_col.append(Color(fc.r, fc.g, fc.b, maxf(a0, 0.4)))
+				continue
+			# Evolved state and screen radius are resolved HERE and carried forward, so the draw
+			# loop below never asks for either a second time.  Both are needed to decide the tier,
+			# and only the near stars — the ones still drawn AS stars — ever get this far.
+			var s0: Dictionary = star_list[si]
+			var st0: Dictionary = _star_state(s0)
+			var rad0: float = _star_screen_radius(lp0, b, star_maxdr, st0)
+			# Point tier: too small for a body, or past the body budget, and with no ring or label
+			# to hang off it — so it needs neither sorting nor a draw call of its own.  The budget
+			# is what keeps a deep zoom affordable: the log scale can put the whole neighbourhood
+			# on screen at a size that earns every star a body, and six thousand bodies is eighty
+			# thousand circles.  Bodies go to the nearest stars, by a distance cut that is only
+			# redone when the viewpoint has moved appreciably, so the choice is stable frame to
+			# frame and never flickers.
+			# Being a colony or an alien system is no longer a reason to keep a body.  A settled
+			# world still has to be big enough on screen to be worth drawing as a world, and when
+			# it is not it becomes a green point like any other holding — which is the whole
+			# reason the status palette exists.  It stays exempt from the ZOOM BAND above, so it
+			# never disappears; it just stops pretending to be a sphere at a zoom where nothing
+			# could be.
+			if not selected and (rad0 < STAR_POINT_PX or d0 > _star_body_cut):
+				pt_seg.append(sp0)
+				pt_seg.append(sp0 + Vector2(1.0, 0.0))
+				# A point reports STATUS, near or far.  A one-pixel dot cannot say anything useful
+				# about a photosphere, and the spectral colours it used to carry made a wide view a
+				# field of indistinguishable specks — which is exactly the view the player is in
+				# when looking for who is out there.
+				var pc: Color = _sv_col[k]
+				pt_col.append(Color(pc.r, pc.g, pc.b, maxf(a0, 0.4)))
+				continue
+			# Depth is carried in the entry, not recomputed inside the comparator: _depth on both
+			# sides of every comparison was thousands of calls a frame for a number that never
+			# changes during the sort.
+			vis.append([si, lp0, maxf(a0, 0.0), lp0.dot(b.z), rad0, st0, sp0, d0])
+		_st_vis = vis
+		_st_pts = pt_seg
+		_st_col = pt_col
+	# Reused when nothing the pass depends on has moved, which is most frames: a map is read far
+	# more often than it is turned.
+	vis = _st_vis
+	pt_seg = _st_pts
+	pt_col = _st_col
 	# The whole anonymous background in one call, at the debug map's own point size.
 	if pt_seg.size() >= 2:
 		draw_multiline_colors(pt_seg, pt_col, 1.6)

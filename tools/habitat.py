@@ -31,7 +31,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_HULL, V_CAP, V_DOCK, V_MIRROR = 0.62, 0.58, 0.52, 0.88
+V_HULL   = (0.58, 0.62, 0.66)   # drum hull
+V_CAP    = (0.80, 0.64, 0.30)   # end caps
+V_DOCK   = (0.56, 0.58, 0.62)   # docking ports
+V_MIRROR = (0.90, 0.92, 0.95)   # sunlight mirrors
 
 parts = []
 

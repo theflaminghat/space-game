@@ -16,7 +16,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_KEEL, V_FOUNDRY, V_HOOP, V_ARM = 0.55, 0.70, 0.62, 0.48
+V_KEEL    = (0.56, 0.58, 0.62)   # keel
+V_FOUNDRY = (0.72, 0.52, 0.34)   # foundry, running hot
+V_HOOP    = (0.80, 0.70, 0.32)   # dock hoops, marked
+V_ARM     = (0.40, 0.41, 0.44)   # gantry arms
 
 parts = []
 

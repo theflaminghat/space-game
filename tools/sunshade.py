@@ -17,7 +17,9 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_SAIL, V_SPAR, V_HUB = 0.92, 0.45, 0.58
+V_SAIL = (0.88, 0.89, 0.92)   # light sail
+V_SPAR = (0.40, 0.41, 0.44)   # spars
+V_HUB  = (0.80, 0.64, 0.30)   # hub, blanketed
 
 parts = []
 

@@ -29,6 +29,21 @@ uniform float blur_texels : hint_range(0.0, 16.0) = 2.0;
 // night side (the moons use it; the planets leave it at 0).
 uniform float self_light : hint_range(0.0, 1.0) = 0.0;
 
+// ── A world being taken apart ────────────────────────────────────────────────
+//
+// Past the crust there is no surface left to show: hot silicate, then iron.  Rather than swap in
+// another map — there is none to swap in, and a flat colour would read as a billiard ball — the
+// surface map stays in play as the body's STRUCTURE.  Its own light and dark modulate the
+// exposed material, so a half-eaten Mars still reads as Mars with its crust off: the maria and
+// the highlands are still there, as brighter and darker exposed rock.
+//
+// Driven from disassembly.gd's look(), off one excavation depth.  All zero on an untouched
+// world, which is every world in a run that never does this.
+uniform float strip_mix : hint_range(0.0, 1.0) = 0.0;
+uniform vec4 strip_color : source_color = vec4(1.0);
+uniform float strip_glow : hint_range(0.0, 1.0) = 0.0;
+uniform float strip_metallic : hint_range(0.0, 1.0) = 0.0;
+
 const int TAPS_U = 8;
 const int TAPS_V = 3;
 
@@ -88,8 +103,26 @@ void fragment() {
 		}
 		tex = sum / wsum;
 	}
-	ALBEDO = albedo_color.rgb * tex.rgb;
-	EMISSION = ALBEDO * self_light;
-	ROUGHNESS = 1.0;
-	METALLIC = 0.0;
+	vec3 surf = albedo_color.rgb * tex.rgb;
+	if (strip_mix <= 0.0) {
+		ALBEDO = surf;
+		EMISSION = ALBEDO * self_light;
+		ROUGHNESS = 1.0;
+		METALLIC = 0.0;
+	} else {
+		// The map's luminance, re-centred on 1.0, is the only thing carried across: it keeps the
+		// body's features as variation in the exposed material instead of discarding them.
+		// Clamped well away from zero so a dark sea does not become a black hole in the mantle.
+		float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+		float relief = clamp(0.55 + 0.9 * lum, 0.35, 1.6);
+		vec3 exposed = strip_color.rgb * relief;
+		ALBEDO = mix(surf, exposed, strip_mix);
+		// Incandescence follows the relief too, so the low ground glows hottest — which is where
+		// an excavation would actually have reached.
+		float heat = strip_glow * strip_mix * clamp(1.5 - lum, 0.2, 1.5);
+		EMISSION = ALBEDO * max(self_light, heat);
+		// Exposed rock is rough; exposed iron is not.
+		ROUGHNESS = mix(1.0, 0.35, strip_metallic * strip_mix);
+		METALLIC = strip_metallic * strip_mix;
+	}
 }

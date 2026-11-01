@@ -24,7 +24,9 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_FIN, V_SPINE, V_COLLAR = 0.80, 0.50, 0.60
+V_FIN    = (0.87, 0.87, 0.85)   # radiating fins
+V_SPINE  = (0.56, 0.58, 0.62)   # coolant spine
+V_COLLAR = (0.80, 0.64, 0.30)   # manifold collars
 
 parts = []
 

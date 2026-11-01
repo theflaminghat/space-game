@@ -20,7 +20,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_DECK, V_BUSBAR, V_STRUT, V_MIRROR = 0.52, 0.72, 0.45, 0.90
+V_DECK   = (0.56, 0.58, 0.62)   # deck
+V_BUSBAR = (0.76, 0.48, 0.27)   # superconducting busbars
+V_STRUT  = (0.40, 0.41, 0.44)   # struts
+V_MIRROR = (0.90, 0.92, 0.95)   # mirror
 
 parts = []
 

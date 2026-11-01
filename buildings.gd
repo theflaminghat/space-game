@@ -69,7 +69,7 @@ const LEVEL_OUTPUT_KEYS: Array = ["production", "storage", "consumption"]
 const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacity", "habitat",
 	"atmo_rate", "radiator_capacity", "detection", "shelter",
 	"beam_send", "beam_recv", "star_lift_power", "shade_fraction", "husbandry_power",
-	"mirror_coverage"]
+	"mirror_coverage", "disassembly_rate"]
 
 # ── Single buildings, not complexes ───────────────────────────────────────────
 ## Entries were originally authored at REGIONAL FLEET scale — one "Coal Plant" meant 132 GW of
@@ -305,6 +305,7 @@ const DESCRIPTIONS: Dictionary = {
 	"Sunshade Constellation": "Light sails flown sunward of the inner worlds, held in place by the pressure of the light they block. They do nothing to the star — they stand between it and the planets. Shading offsets greenhouse warming directly, so a cooked Earth recovers, but every solar collector on a shaded world makes proportionally less, and shading past what the CO₂ is doing cools the world below its ceiling again.",
 	"Shkadov Mirror": "A statite sail flown to one side of the Sun: it reflects the star's light back, and the star feels the recoil. It burns nothing and needs no crew — the engine is the star itself, and the mirrors only have to exist. Thrust is a fraction of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century; left standing for geological time it moves the solar system light-years. A brighter star pushes harder and a lighter one is easier to push, so lifting cuts both ways. Aim it from the star map.",
 	"Core Mixing Array": "Driven circulation reaching from the Sun's envelope into its core, feeding it unburnt hydrogen it would never otherwise meet. Costs energy and returns time: the star's clock runs backwards while the array works, though never past the year the run began. Unlike lifting it removes no mass, so the Sun keeps its light — and yields nothing but the extra years.",
+	"Planetary Disassembler": "Mass drivers, orbital catchers and autonomous excavation that lift a world into orbit a layer at a time — atmosphere, then crust, then mantle, then core, because you cannot reach a core through a mantle. Draws energy at the binding energy of what it removes, which for a planet is four to five orders of magnitude cheaper per kilogram than lifting the same mass off the Sun. What comes up lands in the body's own inventory; what is left when the last layer goes is nothing at all, and anything still held there is carried home. A world shrinks as it is eaten: its carrying capacity falls with its mass, and the people on it go with it.",
 	"Star Lifter": "Magnetic nozzles standing off the photosphere, driving a controlled wind off the Sun and collecting it as hydrogen. Draws its rated power from the civilisation's reserve and converts it into lifted mass at the binding energy of the material removed. Every kilogram taken off Sol dims it slightly and lengthens its life: the red-giant date moves further away for as long as the lifters run. The hydrogen lands in the Sun's own inventory.",
 	"Space Elevator": "Carbon-composite tether from the surface to beyond geostationary altitude. Launches departing its world need fewer vehicles and less propellant and arrive sooner. Also generates power.",
 	"Orbital Vault": "Sealed orbital storage domes. Raises the matter storage cap; unlike the Matter Depot, it can be built in solar orbit and on gas giants.",
@@ -849,6 +850,25 @@ const BUILDINGS := [
 	# of the material removed.  One lifter at full power takes roughly 3e17 kg a year off the Sun
 	# — about a hundred-millionth of a percent of it.  This is deep-time work, and it is meant to
 	# be: a serious campaign means hundreds of them and a swarm to feed them.
+	# Planetary Disassembler — mass drivers and orbital catchers that lift a world into orbit a
+	# layer at a time.  The sibling of the Star Lifter and the cheap half of the pair: a planet
+	# costs four to five orders of magnitude less per kilogram than its star does, because the
+	# well is that much shallower.
+	#
+	# The rate is what matters.  Binding energy is a real bill but a small one at this scale —
+	# Mercury's whole binding energy is days of a finished swarm — so what decides how long a
+	# planet takes is how much machinery is standing on it.  One of these moves 1e18 g/day,
+	# which is Mercury in about 900 000 years; a tier-V battery of them is a project measured in
+	# centuries.  See disassembly.gd for the arithmetic.
+	{"name": "Planetary Disassembler",
+		"category": "industry",
+		"allowed_types": ["rocky", "gas_giant"],
+		"cost": {"Metamaterial": 9_000_000, "SelfHealingComposite": 11_000_000,
+			"CarbonNanotube": 8_000_000, "Ti": 24_000_000, "Superconductor": 6_000_000,
+			"energy": 40_000_000},
+		"production": {},
+		"disassembly_rate": 1.0e18},
+
 	{"name": "Star Lifter",
 		"category": "support",
 		"allowed_types": ["star"],

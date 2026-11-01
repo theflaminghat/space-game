@@ -29,7 +29,11 @@ def setup():
 
 
 def mat(value, bands=(), windings=0, amp=0.0, grime=0.10):
-    """A greyscale material: a base value, optional ridging, and a little grime.
+    """A material: a base colour, optional ridging, and a little grime.
+
+    `value` is either a float (a neutral grey of that value) or an (r, g, b) triple.
+    The pattern is a scalar either way and multiplies through the colour, so ridging and
+    grime darken a gold blanket or a blue solar cell exactly as they darkened grey.
 
     The pattern is driven from OBJECT coordinates, not UVs.  smart_project lays the
     islands out for packing efficiency, so anything authored in UV space would run in
@@ -47,7 +51,8 @@ def mat(value, bands=(), windings=0, amp=0.0, grime=0.10):
     same 0.3 that StandardMaterial3D already applies at runtime, baking it in twice.
     """
     assert float(windings).is_integer(), "windings must be a whole number, got %r" % windings
-    m = bpy.data.materials.new("v%.2f_%d_%d" % (value, len(bands), windings))
+    rgb = (value, value, value) if isinstance(value, (int, float)) else tuple(value)
+    m = bpy.data.materials.new("c%.2f_%.2f_%.2f_%d_%d" % (rgb + (len(bands), windings)))
     m.use_nodes = True
     nt = m.node_tree
     bsdf = nt.nodes["Principled BSDF"]
@@ -96,7 +101,13 @@ def mat(value, bands=(), windings=0, amp=0.0, grime=0.10):
     dirt = op("MULTIPLY_ADD", noise.outputs["Fac"], grime, 1.0 - grime)
     out = dirt if out is None else op("MULTIPLY", out, dirt)
 
-    nt.links.new(op("MULTIPLY", out, value), bsdf.inputs["Base Color"])
+    base = mk("ShaderNodeRGB")
+    base.outputs[0].default_value = (rgb[0], rgb[1], rgb[2], 1.0)
+    tint = mk("ShaderNodeMixRGB", blend_type='MULTIPLY')
+    tint.inputs[0].default_value = 1.0
+    nt.links.new(base.outputs[0], tint.inputs[1])
+    nt.links.new(out, tint.inputs[2])      # float into a colour socket broadcasts to grey
+    nt.links.new(tint.outputs[0], bsdf.inputs["Base Color"])
 
     # The same pattern again as an emission tap, so finish() can bake it on its own as a
     # height field.  Left unlinked from the output: it is swapped in for one pass only.
@@ -340,11 +351,11 @@ def finish(parts, name, out, tex_out, res=512, tag="MODEL"):
     final = bpy.data.images.new("albedo", res, res, float_buffer=True)
     final.pixels.foreach_set(px.reshape(-1))
 
-    # Save 8-bit greyscale, not Blender's default 16-bit RGB.  The map carries one
-    # channel of information and the lane supplies the colour, so three 16-bit channels
-    # would be ~10x the bytes in the repo for nothing a player could see.
+    # 8-bit RGB, not Blender's default 16-bit.  These used to be greyscale, back when the
+    # lane multiplied its own colour through them; now the map carries the hardware's real
+    # colour and the lane's identity lives in the material's emission instead.
     scene.render.image_settings.file_format = 'PNG'
-    scene.render.image_settings.color_mode = 'BW'
+    scene.render.image_settings.color_mode = 'RGB'
     scene.render.image_settings.color_depth = '8'
     scene.render.image_settings.compression = 95
     final.save_render(filepath=tex_out, scene=scene)

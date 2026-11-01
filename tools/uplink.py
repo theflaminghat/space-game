@@ -20,7 +20,11 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_FACE, V_BUS, V_MAST, V_MOUNT, V_FIN = 0.78, 0.55, 0.48, 0.60, 0.40
+V_FACE  = (0.22, 0.26, 0.36)   # emitter face
+V_BUS   = (0.80, 0.64, 0.30)   # bus
+V_MAST  = (0.40, 0.41, 0.44)   # mast
+V_MOUNT = (0.56, 0.58, 0.62)   # mount
+V_FIN   = (0.87, 0.87, 0.85)   # fins
 
 parts = []
 

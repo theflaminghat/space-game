@@ -21,7 +21,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_COIL, V_CRYO, V_HUB, V_SPOKE = 0.82, 0.52, 0.68, 0.45
+V_COIL  = (0.76, 0.48, 0.27)   # superconducting coil
+V_CRYO  = (0.77, 0.83, 0.88)   # cryostat modules
+V_HUB   = (0.56, 0.58, 0.62)   # hub
+V_SPOKE = (0.40, 0.41, 0.44)   # spokes
 
 R_COIL = 0.112   # major radius; overall width stays under the 0.34 the lanes allow
 R_TUBE = 0.024

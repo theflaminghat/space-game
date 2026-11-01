@@ -18,7 +18,9 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_DISH, V_MAST, V_BUS = 0.86, 0.45, 0.55
+V_DISH = (0.87, 0.87, 0.85)   # collector dish
+V_MAST = (0.40, 0.41, 0.44)   # mast
+V_BUS  = (0.80, 0.64, 0.30)   # bus
 
 parts = []
 

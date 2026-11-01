@@ -379,6 +379,26 @@ wrong number rather than a slower rebuild would not be worth having. Two backsto
 copies. Every reader is read-only today and `verify_prod_cache` says so, so a future writer finds
 out there rather than through a slowly drifting figure.
 
+### One line per recipe per world
+
+A recipe already in production on a world is **greyed in the picker** and cannot be started
+there again until it is taken off the list. Two copies was never two production lines — it was
+one recipe listed twice, each with its own rate slider, competing for the same inputs.
+
+**Per world, not globally**: the same recipe running on Mars says nothing about whether Earth
+may start it, and `_recipe_running_here()` tests the active body's jobs by recipe *name*,
+because that is what a job carries.
+
+`_refresh_recipe_availability()` is called from every point the job set or the active world can
+change — `_populate_recipes` (a research unlock), `_rebuild_job_list` (which covers a load, a
+planet switch and a removal), and `_on_add_pressed`. It also moves the selection off a recipe
+that has just gone into production, because the common gesture is "add this, now add the next
+thing" and leaving the picker parked behind a dead button is worse than moving it.
+
+**`_on_add_pressed` enforces it too**, not just the menu. The greying is what the player sees,
+but that function is the one path that creates a job, and a popup built before the last change
+must not be able to get a second copy past it.
+
 ### Microchip grades
 
 Three fabrication processes, each gated deeper in the tree, each a step closer to what
@@ -454,6 +474,21 @@ the node actually cost.
 `minerals`, `science`; `Game.compound_inventory[world]` holds per-world compounds. `_get_stockpile`
 reads either, which is why a building cost can mix `energy` with `Steel`.
 
+**The population worklist is dealt, not filtered.** `_update_population` walks
+`_pop_system` (the solar-system worlds, every tick) plus one of `_pop_parts` (the interstellar
+colonies, dealt into `POP_SLICES` hands). It used to iterate `world_pop` itself and `continue`
+past seven entries in eight. `_ensure_pop_parts` re-deals once a cycle, and at once whenever the
+roster changes size — so a colony arriving is picked up immediately, while a change that keeps
+the size equal waits for the cycle boundary, which is the same tolerance the slice already had.
+`verify_population_slice` asserts the partition is exactly the roster, with nothing dealt twice
+and nothing left out: a colony missing from it is a colony that never grows again.
+
+Measured at 15 000 colonies, per frame: **17.3 ms → 9.0 ms**. The two halves were not what they
+looked like — the eager default above was 5.4 ms of it and the dealt worklist 2.9 ms. What is
+left is genuine arithmetic over the 1 875 worlds a frame actually owes, plus ~1.1 ms amortised
+for the re-deal. `POP_SLICES` is the remaining lever, and it trades frame cost against how often
+a colony is visited.
+
 **Production** is recomputed only when dirty (`_mark_prod_dirty()` →
 `_recompute_production_cache()`), then combined per frame in `_combine_production()`. Note the
 ordering trap inside the recompute: it clears `_prod_dirty` at the END, and anything called
@@ -461,6 +496,32 @@ before that which asks for a building count will recurse.
 
 Construction is work over time: `_building_work()` against the world's Manufacturing Capacity,
 which is `BASE_MC` plus factories (and, off-world, an Orbital Construction Station).
+
+### Naming a save
+
+Saving already worked and had nothing to say. The pause menu's Save button called `save_game()`
+with no path, which fell through to `user://saves/default.json` — so every run that had not been
+*loaded* from a named slot overwrote the same file, there was no way to keep two games, and no
+way to tell which one you were in.
+
+`save_dialog.gd` asks for a name. **Game is the authority**, as for every other panel here: the
+dialog emits `save_requested`, Game decides the path, writes, and hands back a result through
+`set_result`, so what the player is told and what is on disk cannot disagree. A failure leaves
+the dialog **open**, because the player's next move is to try another name.
+
+**The sanitiser is shared on purpose.** `SaveDialog.sanitise()` strips the same three characters
+`StartMenu` strips, and `verify_named_saves` asserts the two produce the same path for the same
+name — if they ever drift, a save made in game is one the menu cannot find.
+
+**Saving names the run.** On success `GameSession.current_save_path` becomes that slot, so the
+next save goes there rather than back to `default.json`, and the name field opens pre-filled
+with it. An unnamed run is offered its year instead ("Humanity 2187"), which is the one fact
+that tells two saves of the same game apart.
+
+Two smaller things `save_game()` gained, because a player-facing button needs them and a test
+that can look at the disk itself did not: it **creates the save directory** (on a fresh install
+`user://saves` does not exist, and `FileAccess.open(WRITE)` into a missing directory fails
+silently), and it **returns whether the file was written**.
 
 ### Saves
 
@@ -547,6 +608,80 @@ helium ignition: no giant branch, no engulfment, no nebula — `sun_red_giant_ye
 **Dimming has a price.** `_climate_capacity_factor()` penalises the *net* of CO₂ warming and the
 light Earth is not receiving, so lifting a quarter of the Sun is a climate catastrophe in the cold
 direction — and the player's own emissions become a counterweight.
+
+### Taking the planets apart
+
+The other half of the same idea, and the cheap half. `disassembly.gd` prices a gram the way
+`star_model.gd` prices one: gravitational binding energy, (3/5)GM/R averaged over a uniform
+sphere. The numbers are the design:
+
+| | per kg | whole body |
+|---|---|---|
+| Sol, at the photosphere | 1.91 × 10¹¹ J | — |
+| Earth | 3.75 × 10⁷ J | 2.24 × 10³² J |
+| Mercury | 5.42 × 10⁶ J | 1.79 × 10³⁰ J |
+
+A planet is four to five orders of magnitude cheaper per kilogram than its star. That is the
+honest reason a civilisation eats the planets first, and it falls out of the physics rather than
+being a balance decision.
+
+**Which is also why energy cannot be the limit.** Mercury's entire binding energy is about five
+days of a finished Dyson swarm; gate on energy alone and taking a planet apart is a button. What
+actually limits it is moving 3.3 × 10²⁶ grams, so the **rate comes from machinery** — the
+Planetary Disassembler, in grams per day, tiered like every other rated structure — and the
+energy is a floor that stops it being free in 1960. One base unit is Mercury in ~900 000 years.
+Short of energy the tick takes proportionally less rather than refusing: a half-powered
+operation runs slowly.
+
+**Outside in.** `LAYER_ORDER` is atmosphere → crust → mantle → core, because you cannot reach a
+core through a mantle. That gives a half-eaten planet a different character from a fresh one —
+the crust is the thin interesting layer, the mantle is bulk silicate, and the iron-nickel core a
+swarm actually wants is last. On a gas giant the envelope *is* the planet, so Jupiter is a
+hydrogen reservoir with a small rocky prize at the bottom.
+
+**The removal ledger is stored, not derived, and this was a bug fix as much as a feature.** The
+composition readout used to compute what was left as `crust mass − what the world is currently
+holding`. Neat for a display, and wrong the moment anything *leaves* the inventory: spend the ore
+on a building or ship it away and the crust quietly grew back. Harmless while nothing could
+exhaust a crust; fatal for disassembly, which would let a planet be eaten for ever. `_body_removed`
+(body → layer → compound → grams) is now the one ledger, **mining writes to it too**, and the
+panel answers the same question the simulation does.
+
+**A world shrinks as it is eaten.** `_world_capacity()` multiplies by `_body_remaining_fraction()`,
+and capacity is already a *ceiling* in `_update_population` — so the population sheds down to
+whatever ground is left, and nothing special has to kill anybody. When the last layer goes,
+`_finish_disassembly()` takes the body out by the same route `_destroy_engulfed_planets()` does,
+because the consequences are identical. Whatever was still in its stores is in orbit rather than
+on a planet that no longer exists, so it is carried home instead of evaporating.
+
+**A world being taken apart stops looking like a world.** Two things change, and they are
+driven from deliberately different numbers.
+
+**Size follows the mass left, by the cube root** (`DisassemblyData.radius_frac`). Mass goes as
+the cube of the radius at constant density, so a planet with half its mass gone is 0.79 of its
+radius and the first tenth off it is barely visible. That is correct: a crust is a skin.
+
+**Appearance follows the LAYERS reached, not the mass** (`_disassembly_depth`, 0 at an untouched
+world and 1 at the last of the core). A core is most of a planet by mass, so a mass-driven look
+would leave a world apparently untouched long after its crust was gone and then race through the
+interesting part — measured on Mercury, a mass ramp sits at 0.00 with the atmosphere gone and
+0.09 with the whole crust gone, against 0.25 and 0.50 for the layer ramp. The depth counts only
+the layers a body *has*, so losing Jupiter's envelope is half of Jupiter rather than a quarter.
+
+`DisassemblyData.look(depth)` turns that into `mix` / `color` / `glow` / `metallic`: the surface
+map gives way to incandescent silicate, which cools into iron as the core comes up.
+
+**No new art, because the surface map stays in play as the body's relief.**
+`planet_polar_blur.gdshader` takes four `strip_*` uniforms and modulates the exposed material by
+the map's own luminance, so a half-eaten Mars reads as Mars with its crust off rather than as a
+billiard ball — and the low ground glows hottest, which is where an excavation would have
+reached. All four are zero on an untouched world, which is every world in a run that never does
+this. `Planet.set_disassembly()` works in both directions, or a reloaded save would show the
+last world the node happened to be told about.
+
+**The planet panel rebuilds its composition list on the fraction, not just on the selection.**
+What a body is made of used to be static per body, which is exactly the assumption disassembly
+breaks.
 
 ---
 
@@ -647,6 +782,38 @@ holds — a rule naming something that world never dug would never fire), and it
 same `_on_launch_requested` path the manual panel uses. That path charges the cargo's own mass
 in extra rockets and refuses the launch if the origin cannot fill the manifest, so an
 over-ambitious hold simply waits, exactly as a rule that cannot afford its rockets already does.
+
+**And it could only carry four or five things, or in a standing order only energy.** Both
+manifest pickers read one map, `Game._build_launch_stock()`, and that map was a *whitelist* of
+the goods a launch is **priced** in: `Rocket`, the propellants, and the bills of materials of
+the structures a carrier mission flies. Pricing was all it was ever built for; pointing the
+cargo editors at it meant the hold could be filled with airframes and fuel and not one thing a
+colony would actually ask for — no steel, no water, no food.
+
+In a *standing* order it was narrower still, and this is the part that reads as a different bug.
+On a world that has not stockpiled rockets or propellant every key in that map is zero, and a
+picker skips a zero — leaving `energy` as the only offer, because it is the civilisation-wide
+reserve and so the one entry that is never empty. Which is also the one thing that cannot
+usefully be shipped: it is in `GLOBAL_POOLS`, so `_deduct_stockpile` takes it from the pool at
+launch and `_add_stockpile` hands it back to **the same pool** on arrival. A round trip to
+nowhere, paid for in rockets.
+
+The executor was never the limit — it ships any compound by key and always could, which
+`verify_automation_cargo` had been proving with steel the whole time. So the map now reports
+what each world **holds**, with the cost keys still written explicitly at zero so a gate reads a
+definite number rather than a missing key, and copied rather than aliased so a panel cannot
+write the inventory through it. `_home_worlds()` is Earth plus the in-system colonies — a dozen
+worlds, not the fifteen thousand in `compound_inventory` — so a full copy costs 0.38 ms with
+every world holding all 95 compounds, and the UI pass now builds it once for both panels instead
+of twice.
+
+What stays out is in `MissionData.HOLD_EXCLUDED`, asked through `MissionData.can_hold()` by both
+pickers *and* by the launch itself, so what the player is offered and what the game will fly are
+one rule. The executor filters rather than trusts because a manifest can arrive from a standing
+order saved before the rule existed: the pool entry is dropped and the rest of the hold flies,
+where refusing outright would strand a rule whose manifest the player can no longer see. Not a
+theoretical case — the mass is counted in **grams**, so a reserve-sized figure asks for more
+lift than there are rockets and the rule silently never fires.
 
 ### Standing defence, and three lists instead of one
 
@@ -803,6 +970,120 @@ Frame cost at 1600×900, measured with the panel driving its own redraws:
 
 The remainder is the star field and the cluster shell: 200 flights and 3 000 flights now differ
 by about 7 ms.
+
+### The star pass is cached
+
+Measured at six thousand stars, the per-star loop in `_draw` **was** the map's entire frame
+cost: 31.5 ms, against 6.9 ms for a frame with the map hidden. It split three ways, almost
+evenly — `_rel` + `_project` 11.3 ms, the name conversion and two dictionary probes 12.4 ms,
+`_display_radius` + `_detail_alpha` 7.1 ms. Nothing else on the panel was material.
+
+None of that depends on anything but the star, the camera, the frame origin, the selection, who
+holds what, and the layer filter. So the whole pass — `_st_vis`, `_st_pts`, `_st_col` — is cached
+behind a key of exactly those, the same treatment `_cl_pts` already gives the clusters, with the
+frame origin on a movement **tolerance** rather than in the key (a Shkadov-driven Sol moves
+`_ref_pos` every frame, and an exact compare would rebuild for a sub-pixel displacement).
+
+Then `_st_held` / `_st_fac` resolve who holds each star **by catalogue index**, rebuilt only when
+that changes, which takes the 12.4 ms of `str(s0["name"])` and two probes per star off every
+frame on which anything anywhere is marked.
+
+| at 2 000 colonies | before | after |
+|---|---|---|
+| static view | 38.2 ms | **6.9 ms** |
+| while turning | 64.4 ms | **57.6 ms** |
+
+The static case is the one that matters: a map is read far more than it is turned, and the map's
+own share of a still frame went from ~31 ms to nothing measurable.
+
+### Turning: the other half of that sentence
+
+"A map is read far more than it is turned" was true and was also an excuse. Turning still cost
+**60 ms a frame — 16 fps** — because the cache key holds `_zoom`, `_yaw` and `_pitch`, so every
+frame of a drag threw the whole thing away and rebuilt it. Profiled per section at 6 060 stars
+and 8 401 clusters:
+
+| turning, per frame | | |
+|---|---|---|
+| star rebuild | 32.4 ms | |
+| cluster rebuild | 23.7 ms | |
+| everything else | 4.1 ms | unchanged from a still frame |
+
+The drawing was never the problem and the point count was never the problem. The field already
+goes out as **one** batched `draw_multiline_colors`, which measures 0.7 ms; a still frame costs
+4.4 ms in total. The 56 ms was GDScript, and two measurements said what kind:
+
+- Truncating the star loop after its first half — the part before anything is transformed — cost
+  12.0 ms of the 32.4. **A third of the loop was recomputing values that cannot change when the
+  camera turns.**
+- A synthetic loop doing nothing but project, cull and append over the same stars cost 5.5 ms.
+  So of the 32.4, only ~5 was the projection; the rest was overhead around it.
+
+And one number explained the shape of it: **6 059 of 6 060 stars survived the cheap culls and
+were projected, and 607 landed on screen.** The distance and detail-band tests were discarding
+one star in six thousand, so essentially the whole catalogue paid full price every frame.
+
+**So each pass is split in two.** An inner cache (`_sv_*` for stars, `_cv_*` for clusters) keyed
+on the catalogue, the frame origin, the selection, who holds what and the filters — *not* on
+zoom, yaw, pitch or panel size — holding `_rel(pos)`, the distance, `_display_radius`, the
+resolved status colour and the tier flags in parallel `Packed*` arrays. The outer cache is
+unchanged and still keyed on the camera; its rebuild now only runs the detail band, the
+projection, the screen cull and the tier choice.
+
+What that moved off a turning frame, per point: a `sqrt` for the distance, `_rel`'s three dot
+products plus a `sqrt` and a `log`, `_display_radius`'s `log`, and — the one that does not look
+expensive until you read it — `_status_color_of`, which is a **linear scan of `STAR_CLASSES`
+comparing strings**, run twice per star because `_star_shown` scans it again. A useful
+consequence of caching the tier: a star past `STATUS_COLOR_LY` is known to be a bare status
+point from its distance alone, so it never reaches `_star_state()` or `_star_screen_radius()`.
+
+**Then the frame constants.** `_project` and `_detail_alpha` were called once per point — fifteen
+thousand times a frame — and both re-derived the same handful of frame-fixed numbers on every
+call. `_persp` is the worst of them: it recomputes the view radius (itself a call), the camera
+distance and the near plane per point, for three values that are constant for the whole frame.
+Hoisting those out of the loops and writing the arithmetic **inline** was worth more than the
+cache split:
+
+| turning, per frame | original | split caches | + hoisted and inlined |
+|---|---|---|---|
+| star rebuild | 32.4 ms | 11.5 ms | **5.1 ms** |
+| cluster rebuild | 23.7 ms | 13.1 ms | **4.7 ms** |
+| **total** | **60.2 ms** | 28.8 ms | **13.8 ms** |
+| | *16 fps* | *35 fps* | ***72 fps*** |
+
+Inlining a formula in two places is a real hazard, and `verify_starmap_project` is the price of
+admission: `_project` and `_detail_alpha` remain the definition of record, every other caller
+still goes through them, and the test compares the inlined arithmetic against both across five
+views and 635 points. A y-sign flip or a dropped near-plane clamp fails it by tens of thousands
+of pixels.
+
+Its tolerances are split on purpose. Held to 0.001 px everywhere, it **failed by 64 px** — on a
+synthetic test point projecting to a coordinate of 773 187 520, where that is a relative error of
+8e-8 and nothing but single-precision rounding. Real catalogue positions agree to ~1e-4 px. So
+anything that could actually be drawn is held to a hundredth of a pixel, and the absurd-depth
+cases — which exist to exercise the near-plane clamp, and do catch its removal — are held to a
+relative tolerance instead.
+
+**One trade accepted.** The cluster loop used to test the detail band *before* calling `_rel`,
+which its comment says "buys a third of a rebuild at a deep zoom". The inner cache transforms all
+8 401 regardless, so recentring is marginally dearer than it was — but that runs when Sol moves
+and the outer loop runs sixty times a second. The band test still comes first in the outer loop,
+so the *projection* is still skipped at a deep zoom.
+
+What is left on a turning frame is 1.8 ms of rings, galaxies and landmarks and 1.4 ms of the
+per-star overlay loop, both of which a still frame pays too.
+
+**Two ways this can go silently wrong**, both covered by `verify_starmap_cache`:
+
+- **Who-holds-what enters the key as counts.** A colony swapped for another at the same count
+  would be missed, which secession makes an ordinary event rather than a theoretical one.
+  `_marked_version` is bumped by both pushes that can cause it. Without it the test fails with
+  the colony marker still sitting on the old star.
+- **The holder arrays are indexed by catalogue position**, and `all_stars()` filters the
+  procedural field by *live* distance from Sol — so a travelling star rebuilds the catalogue,
+  dropping some stars and gaining others, and can come out the same length. Length is therefore
+  not enough: they are also keyed on `catalogue_version()`, which the catalogue already bumped
+  on every rebuild for `_refresh_lod_cuts`.
 
 ### Star labels
 
@@ -1011,6 +1292,75 @@ that is not there.)
   *entry* whether it is showing or not; `clip_text` is what lets the showing one give way once
   it has. Both are needed. It matters most for the cargo dropdown, whose entries are whatever
   the origin world is holding — a width this panel cannot know in advance.
+
+### The chrome: the frame, and the four readouts
+
+**The light-blue border only ever showed two of its eight edges.** The top bar and the sidebar
+button strip are plain containers that cannot take a background, so each is drawn over an opaque
+backing `Panel` whose `StyleBoxFlat` supplies both the fill and the outline. A `StyleBoxFlat`
+draws its border at the panel's **own** edges — so growing a bar's rect by the 6 × 4 backing
+margin, which is what gives the content breathing room, moved those edges off the screen. Both
+bars sit flush against the window: the top bar spans the full width at y = 0, the sidebar runs
+down x = 0. What was left visible was the top bar's bottom border and the sidebar's right
+border, which read as two lines across the middle of the screen rather than an outline around
+anything.
+
+Two things were needed and the first alone is a trap.
+
+- **Clamp the backing to the viewport** (`_fit_bar_bg`). Pull the edge back on screen and the
+  border comes with it, because the border is drawn at the edge.
+- **Inset the bar stack by the same margin.** After clamping, the top bar's left border measured
+  *0%* visible: `TimeBox` is a `PanelContainer` painting its own opaque stylebox flush at x = 0,
+  directly over a 1px border at x = 0. The sidebar's left edge was 76% — the gaps are between
+  buttons. So `VBoxContainer3` is inset by `BAR_BG_PAD` on the **left and top**, which is where
+  the bars are flush and their children paint. Right and bottom are left alone deliberately: the
+  top bar's children are left-aligned and the sidebar's buttons stop well short of the bottom,
+  so the backing is all that paints there and those borders were already clear.
+
+The seam needs nothing. The sidebar's backing still reaches up into the top bar's and draws its
+top border there, but the top bar's backing is opaque and drawn after it — both were moved to
+index 0, which left the top bar second and therefore on top — so the line is covered and the two
+read as one L of chrome sharing a single edge.
+
+Three things are measured off each other rather than set twice, because a pair of constants that
+have to agree is a pair that will drift:
+
+- **The corners are square.** A 4px radius on an edge flush with the window reads as a nick out
+  of the frame. The pages that float over the scene keep theirs (`PanelBackground`).
+- **The sidebar's right border meets the clock's right edge.** They were 4px apart — close
+  enough to read as a mistake rather than as two widths. The strip is sized from `TimeBox`'s
+  measured rect so its *backing* lands on that edge, since the backing carries the border.
+  Writing `custom_minimum_size` emits `resized`, which re-enters the layout pass, so it only
+  writes a real change; otherwise the two bounce every frame.
+- **The planet panel keeps one margin from the chrome on both sides** (`PLANET_PANEL_GAP`). Its
+  top was a hard-coded 52, from when the bar ended there; the backing now reaches 58, so the
+  panel had been starting four pixels *inside* the chrome. It is measured off the backing and
+  re-measured each layout, and the panel's **height** is carried across the move — setting the
+  top without the bottom silently shortens it once, permanently, which is the kind of loss a
+  test comparing the height against itself can never see.
+
+**The four resource readouts were panels that moved.** Each was a `PanelContainer`, so a bar that
+is already a panel carried four more sunken boxes bolted onto it. They were added straight to the
+top bar's HBox, so they packed against the speed buttons and left the right half of the bar
+empty. And each was as wide as its text.
+
+That last one is the same `Label` rule as the bullet above, in the place it does the most damage:
+a `Label` reports a minimum size that fits its whole string and a container honours it, so
+`9.4 TJ / 301.0 TJ` made Energy wider than its neighbours and **every** readout jumped sideways
+when a figure crossed into another SI prefix. These are numbers that change constantly and change
+width by nature, on a bar across the top of the screen.
+
+So: a `MarginContainer` with no stylebox at all (the bar behind it is the surface); one
+`ResourceRow` that expands, with all four sharing it at equal stretch ratios; and `clip_text` on
+every label so the text is out of the minimum-size calculation entirely. The clock's spacer
+became a fixed 16px gap — a second expander would have split the leftover space with the row and
+reproduced the bunching.
+
+`verify_top_bar_chrome` measures the rects. Worth knowing why it asserts the *minimum* sizes and
+not only the laid-out widths: at 1920 wide an equal quarter of the row is ~478px, wider than
+anything a figure can spell, so the boxes stay equal on expansion alone and the width assertions
+cannot fail. It is on a narrow window, where the share drops below the text, that the minimum is
+what decides — so that is what the test pins.
 
 **The selector is in the Launch panel**, under the Cost block it explains — a colony ship's
 vehicle count is mostly the people in it, and `_mission_rockets()` folds the founder group's
@@ -1254,6 +1604,154 @@ do not. A trade has to name what it delivers across a save file, a light-delayed
 version boundary; a string does that and a row index does not. The multipliers in `TRAITS` are
 stated explicitly rather than derived so that there is something to put a number against.
 
+### Allegiance, and what you know about it
+
+Two features that are one. A colony four hundred light-years out cannot be governed: every
+order describes a four-hundred-year-old situation and every answer is four hundred years old on
+arrival. An exchange is eight hundred years. What a distant colony has instead of a government
+is a memory of one.
+
+So **loyalty drifts at a rate proportional to distance** (`allegiance.gd`), and
+`GOVERNABLE_LY_YEARS` sets the scale — a colony holds for roughly `GOVERNABLE_LY_YEARS /
+dist_ly` years unattended:
+
+| distance | unattended |
+|---|---|
+| 10 ly | ~200 000 yr — effectively permanent |
+| 100 ly | ~20 000 yr |
+| 500 ly | ~4 000 yr |
+| 1 000 ly | ~2 000 yr — barely held |
+
+**Divergence multiplies it.** `AllegianceData.divergence()` is the Jaccard distance over spliced
+traits, so a population Earth has edited into something else has proportionally less reason to
+take Earth's word for anything. That is where the trait system stops being an economic curiosity
+and becomes a political fact: two unedited populations are the same people by definition, which
+is the right answer for 1945.
+
+**The lever is supply.** A consignment landing restores `CONSIGNMENT_GAIN`, which is what gives
+the colony economy a purpose beyond the materials it moves — a civilisation that trades with its
+frontier keeps it. Nothing here is a hard timer: a supplied colony never falls and an ignored one
+always does, and the distance decides how much attention "not ignored" means.
+
+**Secession is immediate in the simulation and late in the readout.** At zero loyalty the colony
+leaves `colonized_stars` on that tick, stops producing and growing, and becomes a state of its
+own through `Polities.splinter_of()` with humanity as the parent race — the same route an alien
+polity that outgrew its own light-lag already took. Its **lineage goes with it**: `_world_stock`
+is erased, so a world that spent 300 kyr working out a sequence nobody else has takes it along.
+That is the real cost of letting a colony drift.
+
+But the player does not know. `believed_colonies()` is `colonized_stars` **plus every colony
+whose declaration has not reached Sol yet**, and that is what the star map is given — so a
+system that stopped being yours two centuries ago is still drawn as yours, because that is still
+the last thing anybody heard. The simulation is always truthful; the UI is lagged. The gap is the
+feature.
+
+**The post.** `_colony_news[star]` holds the report in hand (`at`/`pop`/`loyalty`/`gone`) and the
+one still crossing (`tx`/…), both in one record because a late run holds fifteen thousand of
+them. A colony broadcasts continuously, so the next sample is taken as soon as the last lands —
+which makes the report between one and two light-crossings old, and its age is shown rather than
+hidden ("as of 430 yr ago"). Advanced on a round-robin slice (`ALLEGIANCE_PER_TICK`) like the
+economy and lineage passes.
+
+**Deterministic things need no post.** `_colony_infra_at(star, obs_year)` grows the Dyson swarm,
+telescopes and lasers from the founding year, so any past state can be computed without storing
+it — exactly how `_alien_intel` has always lagged a neighbour's infrastructure. The player's own
+colonies simply never used it, and now do: a frontier system is described as it looked when the
+light left it.
+
+### Somebody else's probes
+
+The swarm is **exponential**. Every fixed-size antagonist in this game — a set number of
+neighbours, an asteroid every few hundred thousand years, a salvo of missiles — becomes
+proportionally smaller as it grows, and past a few thousand colonies none of them is a
+consideration. A second self-replicating civilisation is the only opponent that stays the same
+size relative to the player for ever, because it is running the same process.
+
+The front itself is cheap: the galaxy is already a ~900-cell hex grid that saturates and
+diffuses (`_update_regions`), and this is that automaton with one seed at the galactic centre.
+**What did not exist was denial.** `_consider_target` asked only whether *we* had taken a star,
+so a volume could be entirely somebody else's and the swarm would still fly into it. Now
+whoever reaches a volume first holds it, both ways:
+
+- the front's share of a cell is capped by `1 − _player_share(id)`
+- `front_denies_pos()` rejects stars **and clusters** in cells past `DENIED_SHARE`
+
+Which turns the swarm's greedy nearest-star rule from an invisible heuristic into a decision:
+the nearest star stops being the right answer when the contested boundary is somewhere else.
+
+**The rates are set from the crossing time, not picked.** Cells are 3 753 ly apart, so
+`SPREAD_RATE = 2.5e-5` is one cell per 40 000 years — a front advancing at 0.094 c, which is
+what a replicator that must decelerate, land, mine and build the next generation manages.
+`CLAIM_RATE` is deliberately comparable, so a cell locks in ~50 000 years against 40 000 to
+reach the next one and the contested band stays one or two cells deep. **That band is where the
+game is**: faster and the front is a wall, slower and it never holds anything.
+
+Sol sits ~26 000 ly out, which is about seven cells of runway:
+
+| Setup | cells | solid | contested | nearest |
+|---|---|---|---|---|
+| Empty | 0 | — | — | — |
+| Distant | 1 | 1 | 0 | 26 000 ly |
+| Underway | 37 | 19 | 18 | 16 358 ly |
+| Entrenched | 169 | 127 | 42 | 3 753 ly |
+
+A head start is **filled, not simulated** — and as a *gradient*, since a cell `ring` out was
+only reached `head − ring × YEARS_PER_CELL` years ago. One flat share made the whole radius a
+wall; the gradient makes the interior solid and the frontier barely touched. `verify_vn_front`
+asserts Sol's own cell is never denied at setup, because a head start that covered it would make
+the run unplayable from the first frame.
+
+**Its signature is light-delayed** like everybody else's, so a front seeded 26 000 ly away is
+26 000 years old before Sol hears anything — and is already much nearer than where it appears.
+That gap is the reveal, and it comes free from the rule already applied to alien signatures.
+
+**`front_denies_pos` rejects on distance before it touches the hex grid.** `_region_id`
+rotates into the galactic basis and rounds onto the lattice, and this is called for every
+candidate star inside `_consider_target` — thousands of times per replication, tens of
+replications a year. Added unguarded it took `verify_vn` from 189 s to 209 s against the suite's
+240 s limit, and over it before the guard existed. Nothing nearer to Sol than the front's own
+nearest cell, less a cell's reach, can be inside it; that is almost every candidate for almost
+all of a run. The surrounding code defers its transforms for exactly this reason.
+
+**`verify_vn` pins itself to an empty galaxy** (`setup = {"front": 0}`). Everything it measures
+is how the swarm routes through unobstructed space — frontier distance, excess over the nearest
+colony, whether an enclosed lineage retires — and a front taking the inner disk changes what is
+being measured rather than testing it. `verify_vn_front` covers the interaction instead.
+
+Four things that were wrong first time and are worth not repeating:
+
+- `SPREAD_RATE` at `1e-3` was **3.75× lightspeed**, and a 200 000-year head start filled the
+  whole galaxy including Sol's cell before the game began.
+- The spread roll was salted on `front_year`, which never changes — so a cell either spread on
+  its first tick or was frozen out of ever spreading. It is salted on `year`.
+- `front_active()` tested `front_year >= 0.0`, and a head start puts the origin a long way BC.
+  It seeded 883 cells and then reported no front. Hence `front_on` as its own flag.
+- The denial went into the innermost targeting loop with no cheap rejection in front of it, and
+  the only thing that caught it was a pre-existing test running out of time.
+
+Advanced on a round-robin slice (`FRONT_PER_TICK`) like the economy, lineage and allegiance
+passes: a full pass over 883 cells measured 2.5 ms, a quarter of the whole per-frame simulation
+budget, for a process that moves on a clock of millennia. Sliced, 0.44 ms.
+
+**Drawn as territory, under everything else.** `front_map_cells()` hands the panel POSITIONS and
+shares, never hex ids — Game owns the region grid and the map has no business knowing what a hex
+is. The marks go down before the clusters and stars, so a star inside the front still draws as a
+star over the stain saying who holds the volume around it. Cached behind the same camera key the
+star and cluster passes use, with the frame origin on the same movement tolerance.
+
+**Solid is exactly what is closed.** A cell past `FrontData.DENIED_SHARE` draws in
+`FRONT_HELD_COLOR` and is the same test `front_denies_pos()` applies, so the map cannot paint a
+volume as takeable that the targeting refuses. Contested cells draw dimmer, and only alpha is
+scaled per mark — which is what lets `verify_vn_front` assert every mark carries the rgb of one
+constant or the other.
+
+**An undetected front draws nothing.** `front_map_cells()` returns empty until `front_seen`, so
+the first the player gets is the announcement; the stain appears afterwards. And it is a
+galactic-scale object — the nearest cell is thousands of light-years out — so like the clusters
+and galaxies it is only in band once the map is pulled back. At the default neighbourhood zoom
+it is correctly culled, which the test asserts in both directions so the behaviour is recorded
+rather than discovered.
+
 ### Clusters are not stars
 
 A cluster is a Voronoi territory of the home tile holding thousands of stars, too far to resolve
@@ -1330,23 +1828,30 @@ These are not style preferences; each was a bug.
    that function claiming "nothing is spent" was true for the mission it was written about and
    false for the one added later.
 10. **A world appears in `_home_worlds()` once.** The list is Earth followed by the in-system
-    colonies, and callers *sum over it*: a duplicate makes `_player_item_count` report twice the
-    stock on hand (so `_consume_player_item` "succeeds" having spent half of it) and
-    `_consume_food` feed the home world twice. Earth got into `colonized_planets` because the
-    launch panel offers Earth as a target and treats `origin == target` as a local orbit
-    insertion — right for every mission except the one that settles a world. Refused at the
-    request, refused again at the arrival, de-duplicated in the list, and stripped on load.
+	colonies, and callers *sum over it*: a duplicate makes `_player_item_count` report twice the
+	stock on hand (so `_consume_player_item` "succeeds" having spent half of it) and
+	`_consume_food` feed the home world twice. Earth got into `colonized_planets` because the
+	launch panel offers Earth as a target and treats `origin == target` as a local orbit
+	insertion — right for every mission except the one that settles a world. Refused at the
+	request, refused again at the arrival, de-duplicated in the list, and stripped on load.
 11. **Stockpiles and reserves are floats, never `int()`.** `int()` saturates to `INT64_MIN`
-    above 2^63, and these are gram and joule figures: a developed civilisation passes 9.2e18 J
-    long before anything else, at which point the launch panel was told it held a large
-    *negative* reserve and refused missions the origin could pay for many times over.
-    `_build_satellite_stock` already documented this; `_build_launch_stock` had to learn it.
-12. **One warning at a time.** `_check_incoming_attacks()` and `_check_asteroid_impact()` run
-    four lines apart in the same tick body, and a fast tick spans thousands of years. The second
-    warning used to replace the first and record *its* pause as "what the clock was doing
-    before", so answering could never start the clock again. Both raisers now stand down while
-    `_pending_threat` is set, and the asteroid check stands down **before** advancing its
-    schedule, so the rock is postponed rather than skipped.
+	above 2^63, and these are gram and joule figures: a developed civilisation passes 9.2e18 J
+	long before anything else, at which point the launch panel was told it held a large
+	*negative* reserve and refused missions the origin could pay for many times over.
+	`_build_satellite_stock` already documented this; `_build_launch_stock` had to learn it.
+12. **Nothing expensive goes in a default-argument position.** `Dictionary.get(key, default)`
+	evaluates its default **eagerly**, present key or not. `_update_population` carried
+	`stats.get("current_population", _total_population())` with a comment explaining that
+	re-summing the roster for a bool had cost four milliseconds a tick — and it still did,
+	every frame, because the call ran whether the key was there or not. At fifteen thousand
+	colonies that was 15 of the tick's 17 ms spent computing a figure that was then discarded.
+	An optimisation written as a default argument is not an optimisation. Branch it.
+13. **One warning at a time.** `_check_incoming_attacks()` and `_check_asteroid_impact()` run
+	four lines apart in the same tick body, and a fast tick spans thousands of years. The second
+	warning used to replace the first and record *its* pause as "what the clock was doing
+	before", so answering could never start the clock again. Both raisers now stand down while
+	`_pending_threat` is set, and the asteroid check stands down **before** advancing its
+	schedule, so the rock is postponed rather than skipped.
 
 ---
 

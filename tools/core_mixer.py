@@ -26,7 +26,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_LANCE, V_SHIELD, V_STACK, V_VANE = 0.45, 0.90, 0.62, 0.75
+V_LANCE  = (0.34, 0.33, 0.36)   # refractory lances
+V_SHIELD = (0.90, 0.89, 0.84)   # ablative shield
+V_STACK  = (0.80, 0.64, 0.30)   # control stack
+V_VANE   = (0.87, 0.87, 0.85)   # radiator vanes
 
 parts = []
 

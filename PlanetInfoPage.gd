@@ -20,6 +20,10 @@ var _construction_label: Label = null
 
 # Composition section (replaces the Tree node at runtime).
 var _composition_scroll:    ScrollContainer = null
+var _disasm_label:          Label           = null
+## How much of the body was left when the composition list was last built, so a world being
+## taken apart rebuilds it as it shrinks rather than showing what it used to be made of.
+var _last_fraction:         float           = 1.0
 var _composition_container: VBoxContainer   = null
 
 # ── Change-detection state ────────────────────────────────────────────────────
@@ -128,6 +132,15 @@ func _ready() -> void:
 
 	# ── Composition scroll (inserted where the Tree was) ──────────────────────
 	var vbox: VBoxContainer = composition_tree.get_parent()
+
+	# What is being taken off this world, above the list of what is left of it.
+	_disasm_label = Label.new()
+	_disasm_label.add_theme_font_size_override("font_size", 11)
+	_disasm_label.modulate = Color(0.95, 0.80, 0.55)
+	_disasm_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_disasm_label.hide()
+	vbox.add_child(_disasm_label)
+	vbox.move_child(_disasm_label, tree_idx)
 
 	_composition_scroll = ScrollContainer.new()
 	_composition_scroll.custom_minimum_size = Vector2(0, 200)
@@ -359,15 +372,51 @@ func set_planet_info(data: Dictionary) -> void:
 			_construction_label.modulate = Color(0.95, 0.70, 0.30)
 			_construction_label.show()
 
-	# Crust composition is static per body, so it only needs rebuilding when the planet
-	# changes.  (The material stockpile is shown in the separate Inventory tab now.)
-	if planet_name != _last_planet:
+	# What a body is made of USED to be static, so this rebuilt only when the planet changed.
+	# Disassembly makes it move, so the fraction left is part of the test — otherwise a world
+	# being eaten shows the composition it had when the player opened the tab.
+	var dis: Dictionary = data.get("disassembly", {}) as Dictionary
+	var frac: float = float(dis.get("fraction", 1.0))
+	if planet_name != _last_planet or absf(frac - _last_fraction) > 0.0005:
 		_last_planet = planet_name
+		_last_fraction = frac
 		_rebuild_composition(data.get("composition_g", {}))
+	_set_disassembly(dis)
 	# Visibility is managed by the parent TabContainer / Game (this is a tab page now).
+
+## The disassembly line: what is coming off this world, and how long it has left.
+func _set_disassembly(dis: Dictionary) -> void:
+	if _disasm_label == null:
+		return
+	if dis.is_empty():
+		_disasm_label.hide()
+		return
+	if bool(dis.get("gone", false)):
+		_disasm_label.text = "Disassembled — nothing of this world is left in place."
+		_disasm_label.show()
+		return
+	var frac: float = float(dis.get("fraction", 1.0))
+	var rate: float = float(dis.get("rate", 0.0))
+	if rate <= 0.0:
+		# Nothing running, but say so if somebody has already taken a bite out of it.
+		if frac >= 0.9995:
+			_disasm_label.hide()
+			return
+		_disasm_label.text = "%.1f%% of this world remains. Nothing is lifting it." % (frac * 100.0)
+		_disasm_label.show()
+		return
+	var years: float = float(dis.get("years", -1.0))
+	_disasm_label.text = "Disassembly: %s at %s/day — %.1f%% of the world remains%s" % [
+		str(dis.get("layer_label", "?")), Units.format_si(rate, "g"), frac * 100.0,
+		"" if years < 0.0 else ", ~%s to go" % Units.format_si(years, "yr")]
+	_disasm_label.show()
+
 
 func clear_planet_info() -> void:
 	_last_planet = ""
+	_last_fraction = 1.0
+	if _disasm_label:
+		_disasm_label.hide()
 	planet_name_label.text = "No Planet Selected"
 	energy_label.text      = "-"
 	population_label.text  = "-"

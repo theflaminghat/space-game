@@ -25,7 +25,12 @@ S.setup()
 
 # The aperture is the bright note: the lane colour is a hot red, so a high value there
 # reads as the emitter rather than as more hull.
-V_APERTURE, V_BARREL, V_RING, V_POWER, V_COLLAR, V_FIN = 0.95, 0.70, 0.55, 0.62, 0.50, 0.35
+V_APERTURE = (0.94, 0.88, 0.68)   # emitter
+V_BARREL   = (0.62, 0.63, 0.66)   # barrel
+V_RING     = (0.46, 0.47, 0.50)   # focusing rings
+V_POWER    = (0.80, 0.64, 0.30)   # power section
+V_COLLAR   = (0.56, 0.58, 0.62)   # mount collar
+V_FIN      = (0.87, 0.87, 0.85)   # radiator fins
 
 parts = []
 

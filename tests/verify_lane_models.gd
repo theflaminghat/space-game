@@ -12,8 +12,10 @@ extends SceneTree
 ##       exporter that split the mesh by material would cost draw calls for nothing.
 ##   UVs - the override's albedo_texture is sampled with them.  A mesh without UVs reads as
 ##       flat colour.
-##   GREYSCALE MAP - the lane sets albedo_color and the texture multiplies through it.  Hue
-##       baked into the map would fight the lane palette, so the bake carries value only.
+##   COLOURED MAP, WHITE TINT - the maps carry the hardware's own colour, so albedo_color
+##       must stay WHITE.  It MULTIPLIES through the texture, and tinting a blue solar
+##       panel with an amber lane colour gives mud.  The lane's grouping lives in the
+##       material's emission instead, which is why both halves are checked.
 ##   SIZE - the lanes sit 0.04 apart in radius around a body.  Much over ~0.3 units and a
 ##       hull reaches into its neighbours; the box these replaced was 0.18.
 ##   RADIAL AXIS IS +Y - _update_infra() builds Basis(t1, radial, t2), so each model's +Y
@@ -305,14 +307,17 @@ func _run() -> void:
 				if img.is_compressed():
 					img.decompress()
 				var worst := 0.0
-				var step: int = maxi(1, img.get_width() / 48)
+				# Denser than the 48 this used when it was looking for the ABSENCE of hue:
+				# a small part's island is easy to step straight over, and missing one is
+				# the difference between "no colour anywhere" and "none where I looked".
+				var step: int = maxi(1, img.get_width() / 128)
 				for y in range(0, img.get_height(), step):
 					for x in range(0, img.get_width(), step):
 						var c: Color = img.get_pixel(x, y)
 						worst = maxf(worst,
 							maxf(c.r, maxf(c.g, c.b)) - minf(c.r, minf(c.g, c.b)))
-				check(worst < 0.02,
-					"%s: the map is greyscale, so the lane's colour is the only hue: worst "
+				check(worst > 0.04,
+					"%s: the map carries the hardware's own colour, not grey: widest "
 						% what + "channel spread %.4f" % worst)
 				print("%s: %d verts, bounds %.3f x %.3f x %.3f, tex %dx%d spread %.4f" % [
 					what, verts.size(), size.x, size.y, size.z,
@@ -407,9 +412,12 @@ func _run() -> void:
 			for s: Dictionary in P.INFRA_LANES:
 				if str(s["type"]) == what:
 					want = s["color"]
-			check(std_m.albedo_color == want,
-				"%s: and still tints it with the lane's own colour: %s vs %s"
-					% [what, str(std_m.albedo_color), str(want)])
+			check(std_m.albedo_color == Color.WHITE,
+				"%s: nothing tints the map — albedo_color is white, not %s, or the "
+					% [what, str(std_m.albedo_color)] + "hardware colours would be muddied")
+			check(std_m.emission_enabled and std_m.emission == want,
+				"%s: the lane's own colour is carried by the emission instead: %s vs %s"
+					% [what, str(std_m.emission), str(want)])
 			var np2: String = str(entry["texture"]).replace("_albedo.png", "_normal.png")
 			if ResourceLoader.exists(np2):
 				check(std_m.normal_enabled and std_m.normal_texture != null,

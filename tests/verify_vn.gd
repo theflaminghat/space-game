@@ -28,6 +28,11 @@ func _initialize() -> void:
 func _run() -> void:
 	seed(20260927)
 	root.get_node("GameSession").should_load_on_start = false
+	# NO RIVAL FRONT.  Everything below measures how the swarm routes through an unobstructed
+	# galaxy — how far the frontier gets, how much further a probe flies than the nearest colony
+	# sits, whether an enclosed lineage retires.  A front taking the inner disk changes what is
+	# being measured rather than testing it, and verify_vn_front covers the interaction.
+	root.get_node("GameSession").setup = {"front": 0}
 	change_scene_to_file("res://node_3d.tscn")
 	for _i in range(30): await process_frame
 	var g: Node = current_scene

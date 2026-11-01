@@ -19,7 +19,8 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_FILM, V_HUB = 0.88, 0.40
+V_FILM = (0.90, 0.90, 0.88)   # radiator film
+V_HUB  = (0.80, 0.64, 0.30)   # hub, blanketed
 
 parts = []
 

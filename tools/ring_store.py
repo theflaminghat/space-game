@@ -30,7 +30,8 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_LOOP, V_STATION = 0.72, 0.50
+V_LOOP    = (0.77, 0.83, 0.88)   # cryogenic loop
+V_STATION = (0.80, 0.64, 0.30)   # tap stations, blanketed
 
 R_MAJOR = 0.145   # near the widest the 0.04 lane spacing leaves room for
 R_TUBE = 0.014

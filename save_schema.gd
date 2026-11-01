@@ -145,6 +145,28 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "colony_year",        "prop": "_colony_year", "kind": DICT_INT, "default": null},
 	{"key": "variant_parent",     "custom": true},   # replays the evolution tree into the UI
 	{"key": "engulfed_planets",   "prop": "_engulfed_planets", "kind": DICT_TRUE, "default": null},
+	# What has been dug or lifted out of each body, and which bodies are gone entirely.  The
+	# removal ledger is nested two deep (body → layer → compound → grams) and is written
+	# straight out: an older save simply has none of it, which reads as a solar system nobody
+	# has taken anything out of — true of every run before this existed, and close enough for
+	# one that had only ever mined.
+	{"key": "body_removed",       "prop": "_body_removed", "custom": true},
+	{"key": "disassembled",       "prop": "_disassembled", "kind": DICT_TRUE, "default": null},
+	# Allegiance, and what has been heard about it.  All three are plain: an older save has no
+	# loyalty figures, which reads as every colony being loyal — true of every run before this
+	# existed — and no post in flight, which reads as every report being up to date.
+	{"key": "colony_loyalty",     "kind": DICT_FLOAT, "default": null},
+	{"key": "seceded",            "prop": "_seceded", "kind": DICT_FLOAT, "default": null},
+	# Custom: a record per colony, nested one deep, and loading VALIDATES it — a truncated or
+	# hand-edited file must not leave a report holding a string where a year should be.
+	{"key": "colony_news",        "prop": "_colony_news", "custom": true},
+	# Somebody else's probes: which hex cells the rival front holds, when it started, and
+	# whether its signature has reached us.  All plain — an older save has no front, which reads
+	# as a run that was given the galaxy to itself, and front_active() is false on a -1 year.
+	{"key": "front_cells",        "kind": DICT_FLOAT, "default": null},
+	{"key": "front_year",         "kind": FLOAT, "default": 0.0},
+	{"key": "front_on",           "kind": BOOL, "default": false},
+	{"key": "front_seen",         "kind": BOOL, "default": false},
 
 	# ── Launches and flights ──
 	{"key": "active_launches",      "custom": true},  # reserved swarm slots are recounted

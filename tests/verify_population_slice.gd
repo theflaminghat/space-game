@@ -64,7 +64,7 @@ func _run() -> void:
 		worst = maxf(worst, absf(got - want) / want)
 	check(grown == N, "every colony grew over the cycle: %d of %d" % [grown, N])
 	check(worst < 1.0e-6,
-		"and by exactly one closed-form step of the whole span: worst %.3e off" % worst)
+		"and by exactly one closed-form step of the whole span: worst %s off" % str(worst))
 
 	# ── Not more than once ──
 	# A colony grown on every tick would be eight steps ahead, which the composition makes
@@ -134,6 +134,60 @@ func _run() -> void:
 	var e2: float = float(g.world_pop["earth"])
 	check(e1 > e0 and e2 > e1,
 		"Earth grows on consecutive ticks: %s -> %s -> %s" % [e0, e1, e2])
+
+	# ── The worklist is prepared, and it covers the roster exactly ──
+	# The loop walks a dealt partition rather than filtering world_pop, so the partition IS the
+	# roster: a colony missing from it is a colony that never grows again.
+	g._invalidate_pop_parts()
+	g._update_population(1.0)
+	check(g._pop_parts.size() == g.POP_SLICES,
+		"the colonies are dealt into POP_SLICES hands: %d" % g._pop_parts.size())
+	var dealt: Dictionary = {}
+	var dupes: Array = []
+	for part in g._pop_parts:
+		for w: String in (part as Array):
+			if dealt.has(w):
+				dupes.append(w)
+			dealt[w] = true
+	for w: String in g._pop_system:
+		if dealt.has(w):
+			dupes.append(w)
+		dealt[w] = true
+	check(dupes.is_empty(), "no world is dealt twice: %s" % str(dupes.slice(0, 5)))
+	var missing: Array = []
+	for w: String in g.world_pop:
+		if not dealt.has(w):
+			missing.append(w)
+	check(missing.is_empty(), "and none is left out: %s" % str(missing.slice(0, 5)))
+	check(dealt.size() == g.world_pop.size(),
+		"the partition is exactly the roster: %d vs %d" % [dealt.size(), g.world_pop.size()])
+	# A colony that arrives is picked up rather than waiting for the cycle: the roster changing
+	# size is what invalidates the deal.
+	var fresh: String = "Latecomer"
+	g.colonized_stars.append(fresh)
+	g._col_star_set[fresh] = true
+	g._colony_year[fresh] = g.year
+	g.world_pop[fresh] = 1000.0
+	g._world_stock[fresh] = SD.found("standard", [], SD.baseline())
+	g._update_population(1.0)
+	var found_fresh: bool = false
+	for part in g._pop_parts:
+		if (part as Array).has(fresh):
+			found_fresh = true
+	check(found_fresh, "a colony that arrives mid-cycle is dealt in at once")
+	# Every colony is grown within one cycle, which is the whole contract of slicing.
+	var seeds: Dictionary = {}
+	for w: String in g.world_pop:
+		seeds[w] = float(g.world_pop[w])
+	for _t4 in range(g.POP_SLICES):
+		g._update_population(2.0)
+	var untouched: Array = []
+	for w: String in g.world_pop:
+		if absf(float(g.world_pop[w]) - float(seeds.get(w, -1.0))) < 0.5:
+			untouched.append(w)
+	check(untouched.is_empty(),
+		"one full cycle grows every world: %d untouched %s" % [
+			untouched.size(), str(untouched.slice(0, 5))])
 
 	print("FAILS: %d" % fails)
 	quit()

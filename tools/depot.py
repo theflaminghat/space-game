@@ -12,9 +12,15 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-# Greyscale base values.  Solar panels are the dark note that makes the silhouette
-# read; the tanks are the bright one, because they are the depot.
-V_SPINE, V_TANK, V_COLLAR, V_BOOM, V_PANEL = 0.75, 0.88, 0.62, 0.50, 0.28
+# Hardware colours.  Solar panels are the dark note that makes the silhouette read; the
+# tanks are the bright one, because they are the depot.  The gold is thermal blanket, and
+# it goes on the collar and base plate rather than the spine: the spine sits inside the
+# tank cluster and is barely visible from outside, so colour spent there is colour wasted.
+V_SPINE  = (0.55, 0.57, 0.60)   # bare structure, mostly hidden inside the tank cluster
+V_TANK   = (0.86, 0.86, 0.84)   # white tankage
+V_COLLAR = (0.82, 0.66, 0.30)   # gold MLI, on the two parts actually in view
+V_BOOM   = (0.40, 0.41, 0.44)
+V_PANEL  = (0.11, 0.15, 0.32)   # solar cells
 
 parts = []
 

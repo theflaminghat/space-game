@@ -19,7 +19,8 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_BAR, V_NODE = 0.60, 0.82
+V_BAR  = (0.16, 0.22, 0.38)   # receiving bars
+V_NODE = (0.80, 0.64, 0.30)   # centre node
 
 parts = []
 

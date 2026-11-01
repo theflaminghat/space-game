@@ -32,7 +32,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_BELL, V_COIL, V_THROAT, V_TANK = 0.68, 0.92, 0.50, 0.60
+V_BELL   = (0.52, 0.50, 0.48)   # nozzle bell
+V_COIL   = (0.76, 0.48, 0.27)   # field coils
+V_THROAT = (0.88, 0.76, 0.50)   # throat, running hot
+V_TANK   = (0.87, 0.87, 0.85)   # collection tanks
 
 parts = []
 

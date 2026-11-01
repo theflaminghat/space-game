@@ -1058,6 +1058,22 @@ static func build() -> Array:
 		lane_pos(10, MATERIALS, X_SPACING, Y_SPACING)
 	))
 
+	# NEW — Planetary Disassembly
+	# The other half of stellar engineering.  Star Lifting takes the Sun apart; this takes
+	# everything else apart, and it is the cheaper half by four orders of magnitude per kilogram
+	# — which is why a civilisation that has run out of places to build eats the planets first.
+	# Needs the structures to build the machinery out of and the autonomy to run an operation
+	# nobody is standing next to.
+	nodes.append(make.call(
+		"planetary_disassembly",
+		"Planetary Disassembly",
+		"Mass drivers, orbital catchers and autonomous excavation able to lift a world into orbit a layer at a time, and the logistics to do it for as long as it takes.",
+		["self_healing_megastructures", "self_replicating_industry"],
+		{"science": 4200},
+		42.0,
+		lane_pos(11, MATERIALS, X_SPACING, Y_SPACING)
+	))
+
 	# NEW — Star Lifting
 	# Taking a star apart, slowly and on purpose: magnetic nozzles standing off the photosphere,
 	# driving a controlled wind and catching it.  Needs the swarm-class structures to build with

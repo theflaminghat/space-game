@@ -20,7 +20,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_RECTENNA, V_BUS, V_MAST, V_DISH = 0.30, 0.58, 0.45, 0.85
+V_RECTENNA = (0.11, 0.15, 0.32)   # rectenna face
+V_BUS      = (0.80, 0.64, 0.30)   # bus
+V_MAST     = (0.40, 0.41, 0.44)   # masts
+V_DISH     = (0.87, 0.87, 0.85)   # relay dishes
 
 parts = []
 

@@ -608,6 +608,12 @@ func _build_cargo_ui(parent: Control) -> void:
 
 ## Repopulate the compound dropdown from what the ORIGIN actually holds — you cannot ship what
 ## is not there, and offering the whole periodic table would bury the few things that are.
+##
+## ANY material the world has.  Game._build_launch_stock used to report only the goods a launch
+## is PRICED in, so the hold could be filled with propellant and rocket airframes and nothing a
+## colony would ever ask for.  The filter that remains is the one that belongs here: a positive
+## amount, and not one of the civilisation-wide pools, which are not freight
+## (MissionData.HOLD_EXCLUDED says why).
 func _refresh_cargo_choices() -> void:
 	if _cargo_pick == null:
 		return
@@ -617,7 +623,7 @@ func _refresh_cargo_choices() -> void:
 	var names: Array = held.keys()
 	names.sort()
 	for k: String in names:
-		if float(held[k]) > 0.0:
+		if float(held[k]) > 0.0 and MissionData.can_hold(k):
 			_cargo_pick.add_item(k)
 	for i in range(_cargo_pick.item_count):
 		if _cargo_pick.get_item_text(i) == keep:

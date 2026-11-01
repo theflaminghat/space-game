@@ -27,7 +27,11 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_BENCH, V_MIRROR, V_APERTURE, V_AFT, V_PANEL = 0.72, 0.60, 0.85, 0.55, 0.30
+V_BENCH    = (0.80, 0.64, 0.30)   # blanketed optical bench
+V_MIRROR   = (0.56, 0.58, 0.62)   # mirror housing
+V_APERTURE = (0.87, 0.87, 0.85)   # sunshade aperture
+V_AFT      = (0.50, 0.52, 0.56)   # instrument module
+V_PANEL    = (0.11, 0.15, 0.32)   # solar wings
 
 parts = []
 

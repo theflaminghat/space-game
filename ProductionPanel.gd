@@ -394,6 +394,61 @@ func _populate_recipes() -> void:
 		_selected_recipe_name = str(_all_recipes[0]["name"]) if not _all_recipes.is_empty() else ""
 	_update_recipe_menu_text()
 	_update_io_preview()
+	_refresh_recipe_availability()
+
+## Whether this world is already making this.
+##
+## By NAME, because that is what a job carries, and per WORLD: the same recipe running on Mars
+## says nothing about whether Earth may start it.
+func _recipe_running_here(recipe_name: String) -> bool:
+	for j: Dictionary in _jobs:
+		if str(j.get("planet", "earth")).to_lower() == _active_planet \
+				and str(j.get("recipe", "")) == recipe_name:
+			return true
+	return false
+
+
+## The first recipe this world could still start, or "" if it is making all of them.
+func _first_available_recipe() -> String:
+	for r: Dictionary in _all_recipes:
+		var nm: String = str(r["name"])
+		if not _recipe_running_here(nm):
+			return nm
+	return ""
+
+
+## Grey out what this world is already making, and keep the Add button honest about it.
+##
+## A line already on the floor cannot be started a second time — that was never two production
+## lines, it was one recipe listed twice, each with its own rate slider, competing for the same
+## inputs. Taking it off production makes it selectable again, which is what the greying says
+## without having to spell it out.
+##
+## Called from every point the job set or the active world can change: _populate_recipes,
+## _rebuild_job_list (which covers a load, a planet switch and a removal) and _on_add_pressed.
+func _refresh_recipe_availability() -> void:
+	for sm in _cat_submenus:
+		var menu := sm as PopupMenu
+		if menu == null:
+			continue
+		for i in range(menu.item_count):
+			var idx: int = menu.get_item_id(i)
+			if idx < 0 or idx >= _all_recipes.size():
+				continue
+			menu.set_item_disabled(i, _recipe_running_here(str(_all_recipes[idx]["name"])))
+	# A selection that has just become unavailable moves on rather than sitting there behind a
+	# dead button: the common gesture is "add this, now add the next thing".
+	if _selected_recipe_name != "" and _recipe_running_here(_selected_recipe_name):
+		_selected_recipe_name = _first_available_recipe()
+		_update_io_preview()
+	_update_recipe_menu_text()
+	if _add_button:
+		var none_left: bool = _selected_recipe_name == "" \
+			or _recipe_running_here(_selected_recipe_name)
+		_add_button.disabled = none_left
+		_add_button.tooltip_text = "" if not none_left \
+			else "Already in production here. Take it off the list to start it again."
+
 
 ## Update the MenuButton's label to reflect the current selection.
 func _update_recipe_menu_text() -> void:
@@ -464,6 +519,9 @@ func _rebuild_job_list() -> void:
 	for job in _jobs:
 		if str(job.get("planet", "earth")).to_lower() == _active_planet:
 			_add_job_row(job)
+	# What this world is making has just changed (a load, a switch, a removal), so what it may
+	# still be told to make has changed with it.
+	_refresh_recipe_availability()
 
 func _add_job_row(job: Dictionary) -> void:
 	var recipe  := _find_recipe(job.get("recipe", ""))
@@ -648,6 +706,11 @@ func _on_add_pressed() -> void:
 	var recipe := _selected_recipe()
 	if recipe.is_empty():
 		return
+	# Enforced HERE as well as in the menu.  The greying is what the player sees, but this is
+	# the one path that actually creates a job, and a popup built before the last change must
+	# not be able to get a second copy past it.
+	if _recipe_running_here(str(recipe["name"])):
+		return
 	var job := {
 		"id":     _next_id,
 		"recipe": recipe["name"],
@@ -657,6 +720,7 @@ func _on_add_pressed() -> void:
 	_next_id += 1
 	_jobs.append(job)
 	_add_job_row(job)
+	_refresh_recipe_availability()
 	production_changed.emit(_jobs.duplicate(true))
 
 ## Ids of this world's jobs, in priority order.  The master list interleaves every planet's

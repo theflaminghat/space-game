@@ -494,6 +494,13 @@ func set_launch_stock(stocks: Dictionary) -> void:
 
 ## Repopulate the compound list from what the selected origin actually holds — a rule naming
 ## something that world has never dug would never fire.
+##
+## ANY material the world has.  A standing Supply Run offered ENERGY and usually nothing else,
+## which is the narrowest this could possibly have been: Game._build_launch_stock reported only
+## the goods a launch is priced in, and on a world that has not stockpiled rockets or propellant
+## the civilisation-wide energy reserve is the one entry in that map that is never zero.  Now it
+## reports the world's whole inventory, and energy is excluded because flying a global pool
+## delivers nothing (MissionData.HOLD_EXCLUDED).
 func _refresh_cargo_choices() -> void:
 	if _l_cargo_pick == null:
 		return
@@ -506,7 +513,7 @@ func _refresh_cargo_choices() -> void:
 	var keys: Array = held.keys()
 	keys.sort()
 	for k in keys:
-		if float(held[k]) <= 0.0:
+		if float(held[k]) <= 0.0 or not MissionData.can_hold(str(k)):
 			continue
 		_l_cargo_pick.add_item(str(k))
 		if str(k) == prev:

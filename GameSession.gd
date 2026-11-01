@@ -23,6 +23,17 @@ const OPTIONS: Array = [
 		],
 	},
 	{
+		"id": "front",
+		"label": "Rival probes",
+		"help": "Whether somebody else's self-replicating probes are already spreading from the galactic centre, and how long a head start they have. Whoever reaches a volume first keeps it — the front cannot be driven back, so the run becomes a race for the galaxy rather than a tour of it.",
+		"choices": [
+			{"name": "Empty",     "desc": "Nobody else is replicating. The galaxy is yours to fill.", "front": false, "head_years": 0.0},
+			{"name": "Distant",   "desc": "A front began at the galactic centre as you launched.",    "front": true,  "head_years": 0.0},
+			{"name": "Underway",  "desc": "It has been spreading for 150 000 years — a few thousand light-years of the inner disk is already theirs.", "front": true, "head_years": 1.5e5, "default": true},
+			{"name": "Entrenched","desc": "300 000 years. The front has reached Sol's own distance from the centre; every system you take is one taken from it.", "front": true, "head_years": 3.0e5},
+		],
+	},
+	{
 		"id": "hostility",
 		"label": "Hostility",
 		"help": "How readily an aggressive civilisation decides to fire on you.",

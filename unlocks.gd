@@ -55,6 +55,7 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	# The same gate as the Solar Satellite recipe and as building in solar orbit at all: this
 	# is that satellite, assembled where it will fly instead of being lofted to it.
 	"Swarm Collector Array": "space_power_infrastructure",
+	"Planetary Disassembler": "planetary_disassembly",
 	"Star Lifter":           "star_lifting",
 	"Sunshade Constellation": "solar_shading",
 	"Core Mixing Array":     "stellar_husbandry",

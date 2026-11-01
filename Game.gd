@@ -1146,6 +1146,8 @@ var _recipe_cache: Dictionary = {}
 @onready var research_ui: Control = $main_ui/VBoxContainer3/HBoxContainer2/research_tree
 ## Per-resource top-bar readout boxes: key → { "value": Label, "rate": Label }.
 var _res_boxes: Dictionary = {}
+## The row holding the four readouts; it expands, and they share it equally.
+var _res_row: HBoxContainer = null
 @onready var time_label: Label = $main_ui/VBoxContainer3/HBoxContainer/TimeBox/time
 @onready var statistics_page: Control = $main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage
 @onready var planet_info_page: PanelContainer = $main_ui/PlanetInfoPage
@@ -1211,6 +1213,7 @@ func start_new_game() -> void:
 	# Apply the setup screen's choices.  Defaults are the values the game used before the screen
 	# existed, so a run started by any other path is untouched.
 	setup_hostility = float(GameSession.choice("hostility").get("mult", 1.0))
+	_seed_front()
 	setup_climate = float(GameSession.choice("climate").get("mult", 1.0))
 	contact_doctrine = str(GameSession.choice("doctrine").get("doctrine", DoctrineData.DEFAULT_ID))
 	# A fresh sky.  The cluster field, the cells that carve up the home tile and the stars that
@@ -1233,6 +1236,13 @@ func start_new_game() -> void:
 	stats["current_population"] = 2_300_000_000.0   # world population in 1945
 	world_pop = {"earth": 2_300_000_000.0}          # per-world population; only Earth at the start
 	_engulfed_planets = {}                          # no planets destroyed yet
+	_invalidate_pop_parts()                         # the roster is new
+	colony_loyalty    = {}                          # every colony starts loyal
+	_seceded          = {}
+	_colony_news      = {}
+	_allegiance_cursor = 0
+	_body_removed     = {}                          # nothing dug out of anything
+	_disassembled     = {}                          # and nothing taken apart
 	time_accum = 0.0
 	active_launches = []
 	_next_launch_id = 1
@@ -1535,46 +1545,79 @@ var _realtime_label: Label = null
 
 ## Build one boxed readout per top-bar resource — a title over a current-amount line over the
 ## accumulation (rate) line — replacing the old single packed label.  Populated by _update_hud.
+## Width a readout will never go below, so the four stay legible on a narrow window. Above it
+## they share the row equally; this only ever sets the floor.
+const RES_BOX_MIN_W: float = 132.0
+
 func _setup_resource_boxes() -> void:
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as HBoxContainer
 	if top_bar == null:
 		return
 	if science_label:
 		science_label.hide()   # its readout is now split across the per-resource boxes below
+	# One row that takes all the space left over after the clock and the speed buttons, with the
+	# four readouts sharing it equally. Added straight to the top bar they packed together against
+	# the speed buttons and left the right half of the bar empty.
+	_res_row = HBoxContainer.new()
+	_res_row.name = "ResourceRow"
+	_res_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_res_row.add_theme_constant_override("separation", 0)
+	top_bar.add_child(_res_row)
 	for spec: Array in [["minerals", "Matter"], ["energy", "Energy"],
 			["compute", "Compute"], ["heat", "Heat"]]:
-		top_bar.add_child(_make_res_box(str(spec[0]), str(spec[1])))
+		_res_row.add_child(_make_res_box(str(spec[0]), str(spec[1])))
 
 ## One resource box: a PanelContainer holding a dim title, the current amount, and (underneath)
 ## its accumulation rate.  Stores the value/rate labels in _res_boxes[key] for _update_hud.
-func _make_res_box(key: String, title: String) -> PanelContainer:
-	var box := PanelContainer.new()
-	box.custom_minimum_size = Vector2(132, 0)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 8)
-	margin.add_theme_constant_override("margin_right", 8)
-	margin.add_theme_constant_override("margin_top", 2)
-	margin.add_theme_constant_override("margin_bottom", 2)
-	box.add_child(margin)
+func _make_res_box(key: String, title: String) -> Control:
+	# A MarginContainer, not a PanelContainer: the latter paints the theme's `panel` stylebox, and
+	# four of those in a row read as four sunken boxes bolted onto a bar that is already a panel.
+	# Nothing here draws a background; the bar behind it is the surface.
+	var box := MarginContainer.new()
+	box.custom_minimum_size = Vector2(RES_BOX_MIN_W, 0)
+	# Equal share of the row, and every box has the same minimum and the same (default) stretch
+	# ratio — so the four are always the same width as each other, wherever the row ends up.
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("margin_left", 8)
+	box.add_theme_constant_override("margin_right", 8)
+	box.add_theme_constant_override("margin_top", 2)
+	box.add_theme_constant_override("margin_bottom", 2)
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 0)
-	margin.add_child(col)
+	box.add_child(col)
 	var t := Label.new()
 	t.text = title
 	t.add_theme_font_size_override("font_size", 10)
 	t.add_theme_color_override("font_color", Color(0.62, 0.70, 0.84))
+	_pin_label_width(t)
 	col.add_child(t)
 	var value := Label.new()
 	value.text = "—"
 	value.add_theme_font_size_override("font_size", 13)
+	_pin_label_width(value)
 	col.add_child(value)
 	var rate := Label.new()
 	rate.text = ""
 	rate.add_theme_font_size_override("font_size", 10)
 	rate.add_theme_color_override("font_color", Color(0.45, 0.85, 0.55))
+	_pin_label_width(rate)
 	col.add_child(rate)
 	_res_boxes[key] = {"value": value, "rate": rate}
 	return box
+
+## Stop a label's TEXT from deciding how wide its box is.
+##
+## A Label reports a minimum size big enough for its whole string, and a container honours it —
+## so "9.4 TJ / 301.0 TJ" made the Energy readout wider than the other three, and every readout
+## jumped sideways whenever a figure crossed into another SI prefix. The numbers here change
+## constantly and by nature change width, which is exactly the thing a bar across the top of the
+## screen must not do.
+##
+## clip_text drops the text from the minimum-size calculation; the ellipsis is what the player
+## sees in the rare case a figure genuinely will not fit.
+func _pin_label_width(l: Label) -> void:
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 
 ## Push text into a resource box; an empty rate hides the accumulation line (for rate-only or
 ## instantaneous readouts like Compute and Heat).
@@ -1592,8 +1635,11 @@ func _setup_realtime_clock() -> void:
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
 	if top_bar == null:
 		return
+	# A fixed gap, not an expanding one. The resource row expands now, so a second expander here
+	# would split the leftover space with it and leave the four readouts bunched in the middle of
+	# the bar with a gap beside them — which is the layout this replaced.
 	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # pushes the clock to the right
+	spacer.custom_minimum_size = Vector2(16, 0)
 	top_bar.add_child(spacer)
 	_realtime_label = Label.new()
 	_realtime_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -1816,8 +1862,11 @@ func _world_capacity(world: String) -> float:
 	# uncapped this runs thousands of times a frame.
 	if _col_star_set.has(world) and not _cached_planet_hab.has(world):
 		return COLONY_HABITAT_K * _pop_cap_mult() * _stock_cap_mult(world)
+	# A world being taken apart holds fewer people as it goes, and none at all once it is in
+	# orbit.  Nothing else has to kill anybody: capacity is a CEILING in _update_population, so
+	# the population sheds down to whatever is left of the ground under it.
 	return (_natural_capacity(world) + _artificial_capacity(world)) * _pop_cap_mult() \
-		* _stock_cap_mult(world)
+		* _stock_cap_mult(world) * _body_remaining_fraction(world)
 
 
 ## What this world's own people do to its carrying capacity: a population spliced to eat less or
@@ -1913,7 +1962,10 @@ func _setup_bar_backgrounds() -> void:
 	var canvas := $main_ui
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.05, 0.06, 0.10, 1.0)
-	style.set_corner_radius_all(4)
+	# Square. These two run into the window's own corners and into each other, and a 4px radius
+	# on an edge that is flush with the screen reads as a nick out of the frame rather than as a
+	# rounded panel. The pages that float over the scene keep theirs (see PanelBackground).
+	style.set_corner_radius_all(0)
 	style.set_border_width_all(1)
 	style.border_color = Color(0.35, 0.45, 0.65, 1.0)   # opaque border
 
@@ -1929,6 +1981,19 @@ func _setup_bar_backgrounds() -> void:
 	canvas.add_child(_side_bar_bg)
 	canvas.move_child(_side_bar_bg, 0)
 
+	# Make room for the frame. VBoxContainer3 is anchored to the full rect, so the bars inside it
+	# sit flush against the window edge — and the TimeBox and the sidebar buttons paint their own
+	# opaque styleboxes there, straight over the border drawn at the same pixel. Insetting the
+	# whole stack by the backing margin puts the content INSIDE the frame instead of on it.
+	#
+	# Left and top only: the bars' right and bottom edges are already clear, because the top bar's
+	# children are left-aligned and the sidebar's buttons stop well short of the bottom, so the
+	# backing is all that paints there.
+	var frame := get_node_or_null("main_ui/VBoxContainer3") as Control
+	if frame:
+		frame.offset_left = BAR_BG_PAD.x
+		frame.offset_top = BAR_BG_PAD.y
+
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
 	var side_strip := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2/sidebar") as Control
 	if top_bar:
@@ -1938,17 +2003,87 @@ func _setup_bar_backgrounds() -> void:
 	get_viewport().size_changed.connect(_layout_bar_backgrounds)
 	call_deferred("_layout_bar_backgrounds")   # after the first layout pass
 
-## Match each backing panel to its bar's current rect (with a small margin).
+## Breathing room between a bar's content and the border drawn around it.
+const BAR_BG_PAD: Vector2 = Vector2(6, 4)
+
+## Match each backing panel to its bar's current rect (with a small margin), HELD INSIDE THE
+## VIEWPORT so the border is drawn on all four sides.
+##
+## The margin alone put most of the outline off the screen. Both bars sit flush against the
+## window edge — the top bar spans the full width at y = 0, the sidebar runs down the left — so
+## growing their rects by 6 x 4 moved the left, top and right edges of the top bar's panel, and
+## the left and bottom edges of the sidebar's, past the edge of the viewport. What was left
+## visible was the top bar's bottom border and the sidebar's right border: two lines through the
+## middle of the screen rather than an outline around the chrome.
+##
+## Clamping is all it takes, because a StyleBoxFlat draws its border at the panel's own edges:
+## pull the edge back onto the screen and the border comes with it.
+##
+## The seam between the two needs nothing. The sidebar's panel still reaches 4px up INTO the top
+## bar's, and its top border is drawn there — but the top bar's backing is opaque and drawn
+## after it (both were moved to index 0, which left the top bar second and therefore on top), so
+## that line is covered and the two read as one L of chrome sharing a single edge.
 func _layout_bar_backgrounds() -> void:
-	var pad := Vector2(6, 4)
+	var view := get_viewport().get_visible_rect()
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
 	if _top_bar_bg and top_bar:
-		_top_bar_bg.global_position = top_bar.global_position - pad
-		_top_bar_bg.size = top_bar.size + pad * 2.0
+		_fit_bar_bg(_top_bar_bg, Rect2(top_bar.global_position, top_bar.size), view)
 	var side_strip := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2/sidebar") as Control
+	if side_strip:
+		_match_sidebar_to_clock(side_strip)
 	if _side_bar_bg and side_strip:
-		_side_bar_bg.global_position = side_strip.global_position - pad
-		_side_bar_bg.size = side_strip.size + pad * 2.0
+		_fit_bar_bg(_side_bar_bg, Rect2(side_strip.global_position, side_strip.size), view)
+	_layout_planet_tabs()
+
+## Line the sidebar's right border up with the right edge of the clock panel above it.
+##
+## The two are the only things in the top-left corner and they were 4px apart, which is close
+## enough to read as a mistake rather than as two widths. Driven off the clock's measured rect
+## rather than a second hard-coded number: TimeBox carries its own minimum width, and two
+## constants that have to agree are two constants that will not.
+##
+## The strip is sized so its BACKING lands on that edge, because the backing is the thing with
+## the border on it.
+func _match_sidebar_to_clock(side_strip: Control) -> void:
+	var clock := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer/TimeBox") as Control
+	if clock == null:
+		return
+	var want: float = (clock.global_position.x + clock.size.x) \
+		- side_strip.global_position.x - BAR_BG_PAD.x
+	# Writing custom_minimum_size emits resized, which calls this again. Only write a real
+	# change, or the two bounce off each other every frame.
+	if want > 0.0 and absf(side_strip.custom_minimum_size.x - want) > 0.5:
+		side_strip.custom_minimum_size.x = want
+
+## Gap between the planet panel and the chrome it sits inside.  One number for both sides: the
+## panel hangs 8px off the right edge of the window, so it hangs 8px below the top bar too.
+const PLANET_PANEL_GAP: float = 8.0
+
+## Sit the planet tabs below the top bar by the same margin they keep from the right edge.
+##
+## Its top was a hard-coded offset of 52, from when the bar ended there. The bar's backing now
+## reaches 58 — so the panel started four pixels INSIDE the chrome, tight against a border it
+## was supposed to be clear of. Measured from the backing rather than from the bar, since the
+## backing is what the player sees, and re-measured on every layout so a taller bar still pushes
+## the panel down.
+func _layout_planet_tabs() -> void:
+	if _planet_tabs == null or _top_bar_bg == null:
+		return
+	var top: float = _top_bar_bg.global_position.y + _top_bar_bg.size.y + PLANET_PANEL_GAP
+	# Height held, not the bottom edge: moving the top down must not shorten the panel.
+	var height: float = _planet_tabs.offset_bottom - _planet_tabs.offset_top
+	if absf(_planet_tabs.offset_top - top) > 0.5:
+		_planet_tabs.offset_top = top
+		_planet_tabs.offset_bottom = top + height
+	_planet_tabs.offset_right = -PLANET_PANEL_GAP
+
+## Place `bg` around `bar` with BAR_BG_PAD of margin, trimmed to whatever of that fits in `view`.
+func _fit_bar_bg(bg: Panel, bar: Rect2, view: Rect2) -> void:
+	var want: Rect2 = bar.grow_individual(BAR_BG_PAD.x, BAR_BG_PAD.y, BAR_BG_PAD.x, BAR_BG_PAD.y)
+	var tl := Vector2(maxf(want.position.x, view.position.x), maxf(want.position.y, view.position.y))
+	var br := Vector2(minf(want.end.x, view.end.x), minf(want.end.y, view.end.y))
+	bg.global_position = tl
+	bg.size = Vector2(maxf(br.x - tl.x, 0.0), maxf(br.y - tl.y, 0.0))
 
 ## Research node that unlocks spaceflight; the Launches sidebar button (and panel)
 ## stay hidden until it is researched.
@@ -2103,6 +2238,7 @@ func _process(delta: float) -> void:
 		# _get_total_production then folds into this slice's energy.
 		_consume_fuel(delta_days)
 		_run_star_lifters(delta_days)
+		_run_disassembly(delta_days)
 		_run_husbandry(delta_days)
 		_run_star_thrust(delta_days)
 		var production := _get_total_production()
@@ -2192,9 +2328,12 @@ func _process(delta: float) -> void:
 			launch_panel.set_orbital_state(_build_orbital_state())
 			launch_panel.set_swarm_state(_build_satellite_stock(), swarm_panels(),
 				_swarm_max())
-			launch_panel.set_launch_stock(_build_launch_stock())
+			# Built once: it now carries every world's whole inventory, and both panels want
+			# the same map.
+			var stock: Dictionary = _build_launch_stock()
+			launch_panel.set_launch_stock(stock)
 			if sidebar and sidebar.automation_panel:
-				sidebar.automation_panel.set_launch_stock(_build_launch_stock())
+				sidebar.automation_panel.set_launch_stock(stock)
 			launch_panel.refresh_launches(_compute_launch_display_data())
 		_build_ui_dirty = false
 
@@ -2235,11 +2374,13 @@ func advance_day() -> void:
 			_check_population_splits()
 			_advance_lineages(1.0)
 			_advance_colony_economy(1.0)
+			_advance_allegiance(1.0)
 			_check_lineage_transfers()
 			_check_interstellar_arrivals()
 			_check_interstellar_attacks()
 			_process_aliens()
 			_update_regions()
+			_advance_front(1.0)
 			_check_incoming_attacks()
 			_apply_doctrine()
 			_check_probe_arrivals()
@@ -2964,6 +3105,7 @@ func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionar
 		"e_total": 0.0, "e_dirty": 0.0,  # non-fuel energy, and how much of it emits
 		"e_fuel_dirty": {},              # fuel-gated energy that emits, by building
 		"compute": 0.0,                  # this world's building compute, active copies only
+		"disasm": 0.0,                   # grams/day of this world being taken apart
 	}
 	for b_name: String in tally:
 		var standing: int = int(tally[b_name])
@@ -2987,6 +3129,7 @@ func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionar
 		upkeep   += float(bdef.get("_upkeep", 0.0)) * n
 		st["mine"] = float(st["mine"]) + (prod.get("minerals", 0.0) as float) * n
 		st["atmo"] = float(st["atmo"]) + float(bdef.get("atmo_rate", 0.0)) * n
+		st["disasm"] = float(st["disasm"]) + float(bdef.get("disassembly_rate", 0.0)) * n
 		detection += float(bdef.get("detection", 0.0)) * n
 		# Fissile capability tracks REACTOR CAPACITY, so a higher tier counts for as much
 		# more as it generates — and every tier counts, which plain name-matching missed.
@@ -3703,6 +3846,186 @@ func _advance_colony_economy(dt_years: float) -> void:
 			_add_stockpile(str(k), each, s)
 
 
+# ── Allegiance, and what you know about it ────────────────────────────────────
+#
+# Two features that are really one.  A colony four hundred light-years out cannot be governed —
+# every order describes a four-hundred-year-old situation and every answer is four hundred years
+# old on arrival — so loyalty drifts with distance (see allegiance.gd).  And because the same
+# light-lag applies to the news, you find out it has gone when the news gets here, not when it
+# happens.  The map goes on showing a colony that stopped being yours centuries ago.
+
+## star → 0..1. Absent means loyal: a colony earns an entry the first time it is advanced.
+var colony_loyalty: Dictionary = {}
+
+## star → the year it declared for itself. The TRUTH, not what the player knows.
+var _seceded: Dictionary = {}
+
+## star → the last report that has arrived, and the one still crossing.
+##
+##   at / pop / loyalty / gone     the report in hand, sampled at year `at`
+##   tx / tx_pop / tx_loyalty / tx_gone   the next one, sampled at `tx`, due at tx + dist
+##
+## Both in one record because there is one of these per colony and a late run holds fifteen
+## thousand of them: two dictionaries per colony would be the memory of the roster twice over.
+## A colony broadcasts continuously, so the next sample is taken as soon as the last one lands —
+## which makes the report in hand between one and two light-crossings old, and its age is shown
+## rather than hidden.
+var _colony_news: Dictionary = {}
+
+## Round-robin cursor over colonized_stars, like _econ_cursor and _adapt_cursor.
+var _allegiance_cursor: int = 0
+const ALLEGIANCE_PER_TICK: int = 48
+
+
+## What the player BELIEVES they hold: every colony that is theirs, plus every colony that has
+## declared independence and whose declaration has not reached Sol yet.
+##
+## The simulation is always truthful — a seceded colony leaves colonized_stars the moment it
+## goes, and stops producing, growing and being taxed on that same tick.  This is what the MAP
+## is told, and the gap between the two is the point of the feature.
+func believed_colonies() -> Array:
+	var out: Array = colonized_stars.duplicate()
+	for star: String in _seceded:
+		if not _news_knows_gone(star):
+			out.append(star)
+	return out
+
+
+## Whether the report in hand says this colony is gone.
+func _news_knows_gone(star: String) -> bool:
+	var rec: Variant = _colony_news.get(star)
+	if not (rec is Dictionary):
+		return true          # nothing was ever heard from it; nothing is being believed
+	return bool((rec as Dictionary).get("gone", false))
+
+
+## How different a colony's people are from the ones at home.
+func _colony_divergence(star: String) -> float:
+	return AllegianceData.divergence(
+		stock_of(star)["traits"] as Array, stock_of(HOME_WORLD)["traits"] as Array)
+
+
+## Give a slice of the colonies another span of drift, and move their post along.
+##
+## Sliced like _advance_colony_economy and _advance_lineages, and for the same reason: the
+## roster runs to tens of thousands and allegiance moves on a clock measured in millennia.
+func _advance_allegiance(dt_years: float) -> void:
+	if dt_years <= 0.0 or colonized_stars.is_empty():
+		return
+	var n: int = colonized_stars.size()
+	var visited: int = mini(ALLEGIANCE_PER_TICK, n)
+	var home_traits: Array = stock_of(HOME_WORLD)["traits"] as Array
+	# Collected and acted on after the walk: seceding mutates colonized_stars, and this loop is
+	# indexing it.
+	var gone: Array = []
+	for _i in range(visited):
+		_allegiance_cursor = (_allegiance_cursor + 1) % n
+		var star: String = str(colonized_stars[_allegiance_cursor])
+		# The span between this colony's own visits, as the other sliced passes do it.
+		var span: float = dt_years * float(n) / float(maxi(visited, 1))
+		var dist: float = _star_distance_ly(star)
+		var div: float = AllegianceData.divergence(
+			stock_of(star)["traits"] as Array, home_traits)
+		var loy: float = AllegianceData.drifted(
+			float(colony_loyalty.get(star, AllegianceData.FOUNDED_AT)), dist, div, span)
+		colony_loyalty[star] = loy
+		_tick_colony_news(star, dist, loy, false)
+		if AllegianceData.has_seceded(loy):
+			gone.append(star)
+	for star: String in gone:
+		_secede_colony(star)
+
+
+## Advance one colony's post: land the report that has finished crossing, and start the next.
+func _tick_colony_news(star: String, dist: float, loy: float, is_gone: bool) -> void:
+	var pop: float = float(world_pop.get(star, 0.0))
+	var rec: Variant = _colony_news.get(star)
+	if not (rec is Dictionary):
+		# Founded now.  You know what you sent, and nothing is crossing yet.
+		_colony_news[star] = {
+			"at": float(year), "pop": pop, "loyalty": loy, "gone": is_gone,
+			"tx": -1.0, "tx_pop": 0.0, "tx_loyalty": 0.0, "tx_gone": false,
+		}
+		return
+	var r: Dictionary = rec
+	var tx: float = float(r.get("tx", -1.0))
+	if tx >= 0.0 and float(year) >= tx + dist:
+		r["at"] = tx
+		r["pop"] = float(r.get("tx_pop", 0.0))
+		r["loyalty"] = float(r.get("tx_loyalty", 0.0))
+		r["gone"] = bool(r.get("tx_gone", false))
+		r["tx"] = -1.0
+	if float(r.get("tx", -1.0)) < 0.0:
+		r["tx"] = float(year)
+		r["tx_pop"] = pop
+		r["tx_loyalty"] = loy
+		r["tx_gone"] = is_gone
+	_colony_news[star] = r
+
+
+## A colony declares for itself.  It stops being the player's on this tick; the player hears
+## about it when the light gets here.
+func _secede_colony(star: String) -> void:
+	if _seceded.has(star):
+		return
+	_seceded[star] = float(year)
+	colony_loyalty[star] = 0.0
+	# The declaration is sampled NOW and crosses like any other report — pushed into the
+	# outgoing slot whatever was sitting in it, because this is the news that matters.
+	var dist: float = _star_distance_ly(star)
+	_tick_colony_news(star, dist, 0.0, false)
+	var rec: Dictionary = _colony_news.get(star, {})
+	rec["tx"] = float(year)
+	rec["tx_pop"] = float(world_pop.get(star, 0.0))
+	rec["tx_loyalty"] = 0.0
+	rec["tx_gone"] = true
+	_colony_news[star] = rec
+	# Truth, immediately: it is not ours, its people are not ours, and its lineage — traits and
+	# all — goes with it.  That is the real cost of letting a colony drift: a world that worked
+	# out a sequence nobody else has takes it with it when it leaves.
+	colonized_stars.erase(star)
+	_col_star_set.erase(star)
+	world_pop.erase(star)
+	_world_stock.erase(star)
+	_invalidate_pop_parts()
+	_mark_prod_dirty()
+	# It becomes a state of its own, by the same route an alien colony that outgrew its
+	# government does — Polities.splinter_of, with humanity as the parent race.
+	var parent: Dictionary = {"race_name": AllegianceData.HUMAN_RACE,
+		"name": "Earth", "alignment": "peaceful"}
+	var splinter: Dictionary = Polities.splinter_of(parent, _star_pos(star),
+		galaxy_seed, _factions.size() + 1, _hostile_share())
+	_factions[str(splinter["id"])] = splinter
+	_attach_star_to_polity(star, str(splinter["id"]))
+	_alien_since[star] = float(year)   # its signature begins here, en route to Sol like any other
+
+
+## A consignment landed at one of our own colonies: somebody at home still cares, and the far
+## end can tell.  This is the lever the player actually has against the drift.
+func _supply_allegiance(star: String) -> void:
+	if not _col_star_set.has(star):
+		return
+	colony_loyalty[star] = AllegianceData.supplied(
+		float(colony_loyalty.get(star, AllegianceData.FOUNDED_AT)))
+
+
+## What the player knows about one colony: the last report, and how old it is.
+func colony_report(star: String) -> Dictionary:
+	var rec: Variant = _colony_news.get(star)
+	if not (rec is Dictionary):
+		return {}
+	var r: Dictionary = rec
+	var age: float = maxf(0.0, float(year) - float(r.get("at", year)))
+	return {
+		"age": age,
+		"pop": float(r.get("pop", 0.0)),
+		"loyalty": clampf(float(r.get("loyalty", 1.0)), 0.0, 1.0),
+		"gone": bool(r.get("gone", false)),
+		"text": AllegianceData.describe(
+			clampf(float(r.get("loyalty", 1.0)), 0.0, 1.0), age),
+	}
+
+
 ## A world's age in years: when its people arrived, whichever route they came by.
 func _world_age(world: String) -> float:
 	if _colonized_year.has(world):
@@ -4290,11 +4613,13 @@ func _on_years_advanced_fast(_years_advanced: int) -> void:
 		# a fast-mode frame can cross a million years of it.
 		_advance_lineages(maxf(float(_years_advanced), 1.0))
 		_advance_colony_economy(maxf(float(_years_advanced), 1.0))
+		_advance_allegiance(maxf(float(_years_advanced), 1.0))
 		_check_lineage_transfers()
 		_check_interstellar_arrivals()
 		_check_interstellar_attacks()
 		_process_aliens()
 		_update_regions()
+		_advance_front(maxf(float(_years_advanced), 1.0))
 		_check_incoming_attacks()
 		_apply_doctrine()
 		_check_probe_arrivals()
@@ -4940,13 +5265,13 @@ func _accumulate_compounds(delta_days: float) -> void:
 		# pool via production.minerals, so it is written straight to the inventory — mirroring
 		# it as well would count every gram mined twice.
 		if mine_rate > 0.0:
-			_extract_layer(planet_name, comp.get("crust", {}),
-				mine_rate * minerals_mult * delta_days, false)
+			_extract_layer(planet_name, _layer_remaining(planet_name, "crust"),
+				mine_rate * minerals_mult * delta_days, false, "crust")
 		# Condensers split theirs across the ATMOSPHERE.  They have no production.minerals line,
 		# so nothing else accounts for their yield — it is mirrored into the Matter total here.
 		if atmo_rate > 0.0:
-			_extract_layer(planet_name, comp.get("atmosphere", {}),
-				atmo_rate * minerals_mult * delta_days, true)
+			_extract_layer(planet_name, _layer_remaining(planet_name, "atmosphere"),
+				atmo_rate * minerals_mult * delta_days, true, "atmosphere")
 
 ## How one layer's yield divides between compounds: compound -> share of the total, summing
 ## to 1.  With a focus set the operation is working named deposits rather than scooping average
@@ -4982,7 +5307,8 @@ func _extraction_split(planet_name: String, layer: Dictionary) -> Dictionary:
 ## Split `mass` grams across one composition layer and deposit the result in the world's
 ## inventory.  `mirror` also adds that mass to the Matter aggregate -- set it only for sources
 ## the production pipeline doesn't already account for.
-func _extract_layer(planet_name: String, layer: Dictionary, mass: float, mirror: bool) -> void:
+func _extract_layer(planet_name: String, layer: Dictionary, mass: float, mirror: bool,
+		layer_name: String = "crust") -> void:
 	if layer.is_empty() or mass <= 0.0:
 		return
 	var inv: Dictionary = _planet_inv(planet_name)
@@ -4990,9 +5316,307 @@ func _extract_layer(planet_name: String, layer: Dictionary, mass: float, mirror:
 	if split.is_empty():
 		return
 	for compound: String in split:
-		inv[compound] = float(inv.get(compound, 0.0)) + float(split[compound]) * mass
+		var g: float = float(split[compound]) * mass
+		inv[compound] = float(inv.get(compound, 0.0)) + g
+		# Recorded against the body as well as handed to the player.  Mining and disassembly
+		# are the same act at different scales and now keep one ledger, so what a world has
+		# left is a fact about the world rather than about what its owner happens to be
+		# holding at the time.
+		_record_removed(planet_name, layer_name, compound, g)
 	if mirror:
 		_mirror_matter(mass)
+
+# ── Taking a world apart ──────────────────────────────────────────────────────
+#
+# What has been REMOVED from each body, as stored state: body → layer → compound → grams.
+#
+# Stored and not derived, and that is the whole reason this exists.  The composition readout
+# used to work out what was left as `crust mass − what the world currently holds`, which is a
+# neat trick for a mining display and wrong the moment anything LEAVES the inventory: spend the
+# ore on a building or ship it away and the crust quietly grew back.  Harmless while the only
+# consumer was a readout and nothing could exhaust a crust; fatal for disassembly, where it
+# would let a planet be eaten for ever.  Mining writes here too now, so both read the same
+# ledger and the planet panel answers the same question the simulation does.
+var _body_removed: Dictionary = {}
+
+## Bodies that have been taken apart completely.  Terminal, like _engulfed_planets.
+var _disassembled: Dictionary = {}
+
+## The removal ledger for one body, created on demand.
+func _removed_of(body: String) -> Dictionary:
+	if not _body_removed.has(body):
+		_body_removed[body] = {}
+	return _body_removed[body]
+
+
+## Grams of `compound` already taken out of this body's `layer`.
+func _removed_grams(body: String, layer: String, compound: String) -> float:
+	var byl: Dictionary = _body_removed.get(body, {})
+	return float((byl.get(layer, {}) as Dictionary).get(compound, 0.0))
+
+
+## Write `grams` of `compound` out of `layer` into the ledger.
+func _record_removed(body: String, layer: String, compound: String, grams: float) -> void:
+	if grams <= 0.0:
+		return
+	var byl: Dictionary = _removed_of(body)
+	var m: Dictionary = byl.get(layer, {})
+	m[compound] = float(m.get(compound, 0.0)) + grams
+	byl[layer] = m
+
+
+## What is left of one layer: compound → grams, with anything exhausted dropped.
+func _layer_remaining(body: String, layer: String) -> Dictionary:
+	var base: Dictionary = (_body_composition(body) as Dictionary).get(layer, {})
+	if base.is_empty():
+		return {}
+	var out: Dictionary = {}
+	for compound: String in base:
+		var left: float = float(base[compound]) - _removed_grams(body, layer, compound)
+		# The atmosphere is the one layer something ADDS to: combustion puts CO2 back.
+		if layer == "atmosphere" and compound == "CO2":
+			left += float(atmospheric_co2.get(body, 0.0))
+		if left > 0.0:
+			out[compound] = left
+	return out
+
+
+## Grams left in one layer.
+##
+## The remaining map is built ONCE.  Written the obvious way it called _layer_remaining in the
+## loop header and again for every compound inside it, so a twenty-compound layer rebuilt the
+## dictionary twenty-one times — and _next_layer does this for up to four layers of every body
+## with machinery on it, every frame.  Measured at ~1 ms a frame for work that is a few hundred
+## multiplications.
+func _layer_mass_left(body: String, layer: String) -> float:
+	var left: Dictionary = _layer_remaining(body, layer)
+	var t: float = 0.0
+	for compound: String in left:
+		t += float(left[compound])
+	return t
+
+
+## The outermost layer of `body` that still has anything in it, or "" when the body is gone.
+## Outside in: you cannot reach a core through a mantle.
+func _next_layer(body: String) -> String:
+	var comp: Dictionary = _body_composition(body)
+	for layer: String in DisassemblyData.LAYER_ORDER:
+		var base: Dictionary = comp.get(layer, {})
+		if base.is_empty():
+			continue
+		# Short-circuited on the first compound with anything left, and without building the
+		# remaining map: this runs for every body being taken apart on every frame, and the
+		# answer is almost always "yes, the outermost layer" on the first compound tested.
+		for compound: String in base:
+			var left: float = float(base[compound]) - _removed_grams(body, layer, compound)
+			if layer == "atmosphere" and compound == "CO2":
+				left += float(atmospheric_co2.get(body, 0.0))
+			if left > 0.0:
+				return layer
+	return ""
+
+
+## How much of a body is still there, 0..1 — the figure its carrying capacity is scaled by.
+func _body_remaining_fraction(body: String) -> float:
+	if _disassembled.has(body):
+		return 0.0
+	var comp: Dictionary = _body_composition(body)
+	if comp.is_empty():
+		return 1.0
+	var base: float = 0.0
+	var left: float = 0.0
+	for layer: String in comp:
+		for compound: String in (comp[layer] as Dictionary):
+			var b: float = float((comp[layer] as Dictionary)[compound])
+			base += b
+			left += maxf(0.0, b - _removed_grams(body, layer, compound))
+	if base <= 0.0:
+		return 1.0
+	return clampf(left / base, 0.0, 1.0)
+
+
+## How far through the layers the excavation has reached: 0 at an untouched world, 1 at the last
+## of the core.  What the body's appearance is driven from — see DisassemblyData.look.
+##
+## Measured in LAYERS, not in mass.  A core is most of a planet by mass, so a mass fraction would
+## leave a world looking untouched long after its crust was gone and then race through the
+## interesting part.  Layers are what the player is actually watching, and they are what the
+## simulation removes one at a time.
+func _disassembly_depth(body: String) -> float:
+	var comp: Dictionary = _body_composition(body)
+	if comp.is_empty():
+		return 0.0
+	# Only the layers this body HAS: a gas giant has no crust, and counting one would stall its
+	# depth a quarter of the way down a layer that was never there.
+	var present: Array = []
+	for layer: String in DisassemblyData.LAYER_ORDER:
+		if not (comp.get(layer, {}) as Dictionary).is_empty():
+			present.append(layer)
+	if present.is_empty():
+		return 0.0
+	var done: int = 0
+	for layer: String in present:
+		var base: float = 0.0
+		for compound: String in (comp[layer] as Dictionary):
+			base += float((comp[layer] as Dictionary)[compound])
+		var left: float = _layer_mass_left(body, layer)
+		if left <= 0.0:
+			done += 1
+			continue
+		# Part-way through this one: the depth is the layers finished plus how much of this
+		# layer has gone.
+		var within: float = 1.0 - clampf(left / maxf(base, 1.0), 0.0, 1.0)
+		return clampf((float(done) + within) / float(present.size()), 0.0, 1.0)
+	return 1.0
+
+
+## Tell the body's own node how much of it is left and how deep the excavation has reached, so it
+## shrinks and stops looking like a surface.  Cheap enough to call on every body being worked on:
+## Planet.set_disassembly returns immediately when nothing has moved.
+func _sync_disassembly_visual(body: String) -> void:
+	var planets := get_node_or_null("WorldRoot/Planets")
+	if planets == null:
+		return
+	var node := planets.get_node_or_null(body)
+	if node == null or not node.has_method("set_disassembly"):
+		return
+	node.set_disassembly(_body_remaining_fraction(body), _disassembly_depth(body))
+
+
+## Push the look of every body anything has been taken out of.  For the cases that are not a
+## disassembly tick: a load, and the first frame of a run.
+func _sync_all_disassembly_visuals() -> void:
+	for body: String in _body_removed:
+		if not _disassembled.has(body):
+			_sync_disassembly_visual(body)
+
+
+## Everything the planet panel shows about a body being taken apart.
+func disassembly_state(body: String) -> Dictionary:
+	if _disassembled.has(body):
+		return {"gone": true, "fraction": 0.0, "layer": "", "rate": 0.0}
+	var comp: Dictionary = _body_composition(body)
+	if comp.is_empty():
+		return {}
+	var rate: float = float((_cached_planet_stats.get(body, {}) as Dictionary).get("disasm", 0.0))
+	var layer: String = _next_layer(body)
+	var left: float = _layer_mass_left(body, layer) if layer != "" else 0.0
+	var pd: Dictionary = PlanetData.PLANETS.get(body, {})
+	var years: float = -1.0
+	if rate > 0.0:
+		var total_left: float = 0.0
+		for l: String in DisassemblyData.LAYER_ORDER:
+			total_left += _layer_mass_left(body, l)
+		years = total_left / (rate * 365.25)
+	return {
+		"gone": false,
+		"fraction": _body_remaining_fraction(body),
+		"depth": _disassembly_depth(body),
+		"layer": layer,
+		"layer_label": DisassemblyData.layer_label(layer),
+		"layer_left": left,
+		"rate": rate,
+		"years": years,
+		"j_per_gram": DisassemblyData.binding_j_per_gram(
+			float(pd.get("mass_kg", 0.0)), float(pd.get("radius_km", 0.0))),
+	}
+
+
+## Take another `delta_days` out of every world that has disassembly machinery standing on it.
+##
+## The rate comes from the machinery and the bill comes from physics: lifting a gram off a body
+## costs its binding energy, which for a planet is four to five orders of magnitude less per
+## kilogram than lifting the same mass off Sol (see disassembly.gd).  Short of energy, the tick
+## takes proportionally less rather than refusing — a half-powered operation runs slowly.
+func _run_disassembly(delta_days: float) -> void:
+	if delta_days <= 0.0 or _cached_planet_stats.is_empty():
+		return
+	for body: String in _cached_planet_stats:
+		if _disassembled.has(body) or _engulfed_planets.has(body):
+			continue
+		var rate: float = float((_cached_planet_stats[body] as Dictionary).get("disasm", 0.0))
+		if rate <= 0.0:
+			continue
+		var layer: String = _next_layer(body)
+		if layer == "":
+			_finish_disassembly(body)
+			continue
+		var pd: Dictionary = PlanetData.PLANETS.get(body, {})
+		var per_gram_j: float = DisassemblyData.binding_j_per_gram(
+			float(pd.get("mass_kg", 0.0)), float(pd.get("radius_km", 0.0)))
+		var want: float = rate * delta_days
+		# The reserve is held in watt-days, the same unit _run_star_lifters spends from, so the
+		# joules the physics is stated in have to be converted before they can be paid.
+		if per_gram_j > 0.0:
+			var need_wd: float = want * per_gram_j / DAY_SECONDS
+			var have_wd: float = maxf(float(ResearchTree.resources.get("energy", 0.0)), 0.0)
+			var spend_wd: float = minf(need_wd, have_wd)
+			if spend_wd <= 0.0:
+				continue
+			if spend_wd < need_wd:
+				want *= spend_wd / need_wd
+			ResearchTree.resources["energy"] = have_wd - spend_wd
+		# Never take more than the layer holds: the rest waits for the next tick, which will
+		# find the layer empty and move inward.
+		var remaining: Dictionary = _layer_remaining(body, layer)
+		var left: float = 0.0
+		for compound: String in remaining:
+			left += float(remaining[compound])
+		var take: float = minf(want, left)
+		if take <= 0.0:
+			continue
+		# Split by what the layer is actually made of.  Not through _extraction_split: an
+		# excavation that lifts the whole layer has nothing to prioritise, and the player's
+		# mining allocation is about which seams to work.
+		var inv: Dictionary = _planet_inv(body)
+		for compound: String in remaining:
+			var share: float = float(remaining[compound]) / left
+			var g: float = take * share
+			inv[compound] = float(inv.get(compound, 0.0)) + g
+			_record_removed(body, layer, compound, g)
+		_mirror_matter(take)
+		# Capacity follows mass, so the world holds fewer people as it goes and the population
+		# loop sheds them down to it.  Nothing else has to kill anybody.
+		_pop_cap_mult_cache = -1.0
+		_sync_disassembly_visual(body)
+		if _next_layer(body) == "":
+			_finish_disassembly(body)
+
+
+## The last layer has gone.  The body stops existing, by the same route the Sun's expansion
+## takes one — see _destroy_engulfed_planets, whose consequences are identical.
+func _finish_disassembly(body: String) -> void:
+	if _disassembled.has(body):
+		return
+	_disassembled[body] = true
+	# Whatever was still sitting in its stores is in orbit, not on a planet that no longer
+	# exists, so it comes home rather than evaporating with the ground it was dug out of.
+	var inv: Dictionary = compound_inventory.get(body, {})
+	var carried: float = 0.0
+	if body != HOME_WORLD and not inv.is_empty():
+		var home: Dictionary = _planet_inv(HOME_WORLD)
+		for compound: String in inv:
+			var g: float = float(inv[compound])
+			if g > 0.0:
+				home[compound] = float(home.get(compound, 0.0)) + g
+				carried += g
+		compound_inventory[body] = {}
+	world_pop.erase(body)
+	colonized_planets.erase(body)
+	planet_buildings.erase(body)
+	active_buildings.erase(body)
+	var planets := get_node_or_null("WorldRoot/Planets")
+	if planets:
+		var pnode := planets.get_node_or_null(body)
+		if pnode and pnode.has_method("engulf"):
+			pnode.engulf()        # the same visual an engulfed world gets: it is simply gone
+	_mark_prod_dirty()
+	_pop_cap_mult_cache = -1.0
+	_announce("World disassembled",
+		"The last of %s is in orbit. %s" % [_body_display_name(body),
+			"Its stores came home." if carried > 0.0 else "Nothing of it is left in place."],
+		"disasm_%s_%d" % [body, year])
+
 
 ## Per-world extraction allocation: planet → { compound → weight }.  Empty (the default) means
 ## the operation takes whatever the ground gives, split by crustal abundance.
@@ -5237,33 +5861,22 @@ func get_planet_data(planet_name: String) -> Dictionary:
 	for b_name in counts:
 		buildings_list.append({"name": b_name, "count": counts[b_name]})
 	d["buildings"] = buildings_list
-	# Build composition with crust depleted by mining and the atmosphere's CO₂
-	# raised by combustion emissions.  Uses this planet's own inventory.
+	# Composition as the removal ledger leaves it: every layer net of what mining and
+	# disassembly have taken out of it, with the CO2 combustion has put back.
 	var inv: Dictionary = _planet_inv(planet_name)
 	var raw_comp: Dictionary = _body_composition(planet_name)
-	var added_co2: float = float(atmospheric_co2.get(planet_name, 0.0))
 	if raw_comp.is_empty():
 		d["composition_g"] = raw_comp
 	else:
 		var comp: Dictionary = {}
 		for layer: String in raw_comp:
-			if layer == "crust" and not inv.is_empty():
-				var depleted: Dictionary = {}
-				for compound: String in raw_comp["crust"]:
-					depleted[compound] = maxf(
-						0.0,
-						float(raw_comp["crust"][compound]) - float(inv.get(compound, 0.0))
-					)
-				comp["crust"] = depleted
-			elif layer == "atmosphere" and added_co2 > 0.0:
-				# Duplicate so we never mutate the PlanetData constant.
-				var atmo: Dictionary = (raw_comp["atmosphere"] as Dictionary).duplicate()
-				atmo["CO2"] = float(atmo.get("CO2", 0.0)) + added_co2
-				comp["atmosphere"] = atmo
-			else:
-				comp[layer] = raw_comp[layer]
+			# Straight off the removal ledger, which already folds in the CO2 combustion put
+			# back.  This used to subtract whatever the world was HOLDING, so spending the ore
+			# grew the crust back and a body could never be exhausted.
+			comp[layer] = _layer_remaining(planet_name, layer)
 		d["composition_g"] = comp
 	d["compound_inventory"] = inv.duplicate()
+	d["disassembly"] = disassembly_state(planet_name)
 
 	# Per-compound mine output: distribute mine_output_rate by crust mass fractions.
 	var crust_comp: Dictionary = (_body_composition(planet_name) as Dictionary).get("crust", {})
@@ -5885,10 +6498,21 @@ func _on_launch_requested(params: Dictionary) -> void:
 	# Cargo: a Supply Run carries whatever the player put in the manifest.  The goods are taken
 	# from the origin now and delivered on arrival, and the hold costs extra rockets in
 	# proportion to its mass — otherwise a supply run would move a world for the price of four.
-	var manifest: Dictionary = params.get("cargo", {})
+	#
+	# Filtered rather than trusted, because a manifest can arrive from a STANDING ORDER written
+	# before this rule existed and saved to disk.  A civilisation-wide pool in the hold is a
+	# round trip to nowhere — deducted from the pool here, added back to the same pool on
+	# arrival — and its grams-of-joules mass would price the rockets for it.  Dropping the entry
+	# flies the rest of the hold; refusing the launch outright would strand a rule the player
+	# cannot see the manifest of.
+	var asked: Dictionary = params.get("cargo", {})
+	var manifest: Dictionary = {}
+	for res: String in asked:
+		if MissionData.can_hold(res):
+			manifest[res] = maxf(0.0, float(asked[res]))
 	var cargo_mass: float = 0.0
 	for res: String in manifest:
-		cargo_mass += maxf(0.0, float(manifest[res]))
+		cargo_mass += float(manifest[res])
 	var cargo_rockets: int = int(ceil(cargo_mass / MissionData.CARGO_PER_ROCKET_G))
 	for res: String in manifest:
 		if _get_stockpile(res, origin_name) < float(manifest[res]):
@@ -5986,8 +6610,20 @@ func _build_satellite_stock() -> Dictionary:
 		out[p] = float((compound_inventory.get(p, {}) as Dictionary).get("SolarSatellite", 0.0))
 	return out
 
-## Per-planet stock of the rockets + fuels a launch can draw on, so the LaunchPanel
-## can show "have N" and refuse to fly when the origin can't cover the cost.
+## What each of this civilisation's worlds is holding, so the launch panels can price a mission,
+## refuse one the origin cannot cover, and offer a Supply Run's hold.
+##
+## EVERYTHING the world holds, not a whitelist.  This used to report only the launch COST keys —
+## Rocket, the propellants, and the bill of materials of the structures a carrier mission flies —
+## because pricing was all it was for.  Then the manifest pickers were pointed at the same map,
+## and so a Supply Run could only ship the handful of goods that happen to appear in a launch
+## bill: not steel, not food, not water, not a single thing a colony actually wants sent.  The
+## executor was never the limit — it ships any compound by key and always could — so the fix is
+## here, at the source both pickers read.
+##
+## The cost keys are still written explicitly, at zero when the world has none. A gate wants a
+## definite number rather than a missing one, and `inv` only has a key once something has put
+## some there.
 ##
 ## FLOATS, for the reason _build_satellite_stock gives: these are gram and joule figures, and
 ## int() saturates to INT64_MIN above 2^63.  Cast, a developed civilisation's energy reserve
@@ -6010,11 +6646,19 @@ func _build_launch_stock() -> Dictionary:
 	var out: Dictionary = {}
 	for p: String in _home_worlds():
 		var inv: Dictionary = compound_inventory.get(p, {})
+		# Copied, not aliased: this goes to the UI, and handing a panel the live inventory makes
+		# every picker a way to write to it.  _home_worlds() is Earth plus the in-system
+		# colonies — a dozen worlds, not the fifteen thousand in compound_inventory — so the
+		# copy is small enough to make on a UI refresh.
 		var stock: Dictionary = {}
+		for k: String in inv:
+			stock[k] = float(inv[k])
 		for k: String in keys:
-			stock[k] = float(inv.get(k, 0.0))
+			if not stock.has(k):
+				stock[k] = 0.0
 		# Energy is one civilisation-wide reserve rather than a thing each world holds, so every
-		# origin reports the same figure — the same rule _get_stockpile() follows.
+		# origin reports the same figure — the same rule _get_stockpile() follows.  It is not
+		# freight: see MissionData.HOLD_EXCLUDED, which is what keeps it out of the hold.
 		stock["energy"] = float(ResearchTree.resources.get("energy", 0.0))
 		out[p] = stock
 	return out
@@ -6587,6 +7231,11 @@ func _nearest_uncolonised(origin: Vector3, max_n: int, max_ly: float,
 				continue
 			if enroute.has(cnm) or cluster_colonized.has(cnm):
 				continue
+			# And a cluster inside the front's territory is as closed as a star in it.  Clusters
+			# are where the swarm goes once no star is resolvable, so without this the front
+			# would deny the near volume and the swarm would hop straight over it.
+			if front_denies_pos(c["pos"] as Vector3):
+				continue
 			# Deliberately NOT subject to max_ly.  A cluster is the destination a swarm reaches
 			# when there are no individual stars left within a sensible hop; refusing it for
 			# being far would leave a lineage on the edge of the resolved sky with nowhere to go
@@ -6711,6 +7360,13 @@ func _consider_target(cand: Array, s: Dictionary, spos: Vector3, d: float, max_n
 	# on a system that is already someone's home — and never starts a war on its own initiative.
 	# A surveyor or relay lineage is welcome to look.
 	if _star_occupied(nm) and not allow_inhabited:
+		return false
+	# Whoever got there first.  The rival front holds this volume, so a probe sent into it is a
+	# probe sent at somebody else's system — and unlike a region, this applies at ANY distance:
+	# if the front reaches the neighbourhood, the neighbourhood is gone.  See vn_front.gd; this
+	# is the denial the whole feature exists for, and the reason the swarm's greedy
+	# nearest-star rule stops being the right answer.
+	if front_denies_pos(spos):
 		return false
 	# A far star folds into a region, and a region only needs seeding ONCE — after that it
 	# spreads on its own, and sending more probes at its neighbours would be sending them
@@ -7125,6 +7781,225 @@ func _update_regions() -> void:
 			nb["pop"] = maxf(float(nb["pop"]), COLONY_SEED_POP)
 
 ## A random adjacent cell id (one step in a random axis direction).
+# ── Somebody else's probes ────────────────────────────────────────────────────
+#
+# A rival replicator spreading over the same hex grid the statistical regions use, from a seed
+# at the galactic centre.  See vn_front.gd for why it is a rival REPLICATOR and not another war:
+# the swarm is exponential, so nothing of fixed size stays relevant to it.
+
+## hex id → share of that cell the front holds, 0..1.
+var front_cells: Dictionary = {}
+## The year it started replicating, which is what its signature is light-delayed from.
+##
+## Freely NEGATIVE: a head start of two million years against a 1945 epoch puts the front's
+## origin a long way BC, which is correct and is why front_on exists separately — a sign test
+## on this would have read every head start as "there is no front".
+var front_year: float = 0.0
+## Whether this run has a front at all.  Its own flag, not derived from front_year.
+var front_on: bool = false
+## Whether its signature has reached Sol yet.  Until it has, the player has no idea.
+var front_seen: bool = false
+
+
+## Is there a front in this run at all?  The setup screen can turn it off.
+func front_active() -> bool:
+	return front_on
+
+
+## Share of one hex cell the rival front holds.
+func front_share(id: String) -> float:
+	return float(front_cells.get(id, 0.0))
+
+
+## Share of a cell the PLAYER holds, as a fraction of its colonisable stars.
+##
+## Read off the same statistical region the galaxy already keeps, so the two sides of the race
+## are measured against one number rather than each counting in its own units.
+func _player_share(id: String) -> float:
+	var reg: Dictionary = _regions.get(id, {})
+	var able: float = maxf(float(reg.get("colonizable", 0.0)), 1.0)
+	return clampf(float(reg.get("colonized", 0.0)) / able, 0.0, 1.0)
+
+
+## Whether the front has taken enough of the cell holding `pos` that probes should go elsewhere.
+##
+## The denial rule, and the reason the front is worth having.  Probe targeting used to ask only
+## whether WE had taken a star, so a volume could be entirely somebody else's and the swarm
+## would still fly into it.
+func front_denies_pos(pos: Vector3) -> bool:
+	if not front_active() or front_cells.is_empty():
+		return false
+	# CHEAP REJECTION FIRST, and it is not an optimisation so much as a correction.
+	#
+	# _region_id rotates into the galactic basis and rounds onto the hex lattice, and this is
+	# called for every candidate star inside _consider_target — thousands of times per
+	# replication, tens of replications a year.  Put there unguarded it took verify_vn from
+	# seconds to over three minutes.  The surrounding code defers its transforms for exactly
+	# this reason; see the note on _rel in the cluster loop.
+	#
+	# Nothing nearer to Sol than the front's own nearest cell, less a cell's reach, can be
+	# inside it — which is almost every candidate for almost all of a run.
+	if pos.length() < _front_distance_ly() - HEX_SIZE:
+		return false
+	return FrontData.denies(front_share(_region_id(pos)))
+
+
+## Start the front, if this run has one.  Seeded at the galactic centre and dated now, so its
+## signature has the whole distance to Sol to cross before anybody knows.
+func _seed_front() -> void:
+	front_cells = {}
+	front_seen = false
+	front_on = false
+	front_year = float(year)
+	_front_dist = -1.0
+	var opt: Dictionary = GameSession.choice("front")
+	if not bool(opt.get("front", false)):
+		return                       # "Empty" — this run has the galaxy to itself
+	front_on = true
+	var seed_id: String = _region_id(_region_origin())
+	front_cells[seed_id] = 1.0
+	# Head start: the setup choice says how long it has already been running before 1945, which
+	# is the difference between a race and a rout.
+	var head: float = float(opt.get("head_years", 0.0))
+	if head <= 0.0:
+		return
+	front_year -= head
+	# FILLED, not simulated.  Running _advance_front for the head start would roll at a single
+	# unchanging year, so every cell would share one roll and the result would be a line rather
+	# than a blob — and simulating two million years of diffusion at startup is work nobody
+	# sees.  A radius and a share is the same answer stated directly.
+	var rings: int = mini(int(head * FrontData.SPREAD_RATE), REGION_GRID_RADIUS)
+	var parts: PackedStringArray = seed_id.split(",")
+	var sq: int = int(parts[0])
+	var sr: int = int(parts[1])
+	for q in range(-rings, rings + 1):
+		for r in range(-rings, rings + 1):
+			# Hex ring distance in axial coordinates.
+			var ring: int = maxi(maxi(absi(q), absi(r)), absi(-q - r))
+			if ring > rings:
+				continue
+			var id: String = "%d,%d" % [sq + q, sr + r]
+			if StarMapPanel.galactic_density(_region_center(id)) < 1.0e-3:
+				continue
+			# A GRADIENT, not one share everywhere.  A cell `ring` out was only reached
+			# `head - ring × YEARS_PER_CELL` years ago, so it has had that long to fill — which
+			# makes the interior solid, the frontier barely touched, and the contested band the
+			# couple of cells in between.  One flat share made the whole radius a wall.
+			var held_for: float = head - float(ring) * FrontData.YEARS_PER_CELL
+			if held_for <= 0.0:
+				continue
+			front_cells[id] = FrontData.claimed_after(0.0, 1.0, held_for)
+	front_cells[seed_id] = maxf(float(front_cells.get(seed_id, 0.0)),
+		FrontData.claimed_after(0.0, 1.0, head))
+
+
+## Give the front another span.  Saturating growth inside each held cell, diffusion to
+## neighbours, and the player's share of a cell is a ceiling it cannot pass.
+## Round-robin cursor over the front's cells, like _econ_cursor and _allegiance_cursor.
+var _front_cursor: int = 0
+## Cells advanced per tick.  Measured at 883 cells, a full pass was 2.5 ms — a quarter of the
+## whole per-frame simulation budget, for a process that moves on a clock of millennia.
+const FRONT_PER_TICK: int = 64
+
+func _advance_front(dt_years: float) -> void:
+	if not front_active() or dt_years <= 0.0 or front_cells.is_empty():
+		return
+	var ids: Array = front_cells.keys()
+	var n: int = ids.size()
+	var visited: int = mini(FRONT_PER_TICK, n)
+	# Each cell is credited the span between ITS OWN visits, the same way the lineage, economy
+	# and allegiance passes do it — against the number VISITED, not the cap, or a front of three
+	# cells would advance twenty times too slowly.
+	var span: float = dt_years * float(n) / float(maxi(visited, 1))
+	var to_seed: Array = []
+	for _i in range(visited):
+		_front_cursor = (_front_cursor + 1) % n
+		var id: String = str(ids[_front_cursor])
+		# First come, first served: whatever the player already holds here is not available.
+		var room: float = 1.0 - _player_share(id)
+		var share: float = FrontData.claimed_after(front_share(id), room, span)
+		front_cells[id] = share
+		# Salted on the YEAR, not on front_year.  front_year never changes, so the roll was the
+		# same on every call for a given cell: a cell either spread on its very first tick or
+		# was frozen out of ever spreading at all.
+		if _roll("front_spread", year, id.hash()) \
+				< FrontData.spread_chance(share, span):
+			to_seed.append(id)
+	for id: String in to_seed:
+		var nb: String = _region_neighbour_id(id)
+		if front_cells.has(nb):
+			continue
+		# Not into the void: a cell with no stars has nothing to replicate from, the same rule
+		# the statistical regions spread by.
+		if StarMapPanel.galactic_density(_region_center(nb)) < 1.0e-3:
+			continue
+		front_cells[nb] = 0.0
+		_front_dist = -1.0            # the nearest cell may have changed
+	_check_front_detected()
+
+
+## Has its signature arrived?  Announced once, with the gap between what is seen and what is
+## true spelled out, because that gap is the point.
+func _check_front_detected() -> void:
+	if front_seen or not front_active():
+		return
+	var dist: float = _front_distance_ly()
+	if not FrontData.detected(dist, front_year, float(year)):
+		return
+	front_seen = true
+	_announce("Something else is replicating",
+		"Probes not ours are spreading from the galactic centre, %s away. The light saying so left %s ago, so the front is already nearer than it looks — and it is taking every system it reaches." % [
+			Units.format_si(dist, "ly"), Units.format_si(float(year) - front_year, "yr")],
+		"front_seen_%d" % year)
+
+
+## Distance from Sol to the nearest cell the front holds.
+## Cached: the walk is ~900 _region_center calls, each with vector maths, and the answer only
+## moves when the front gains a cell — which is rare against how often this is asked.
+var _front_dist: float = -1.0
+var _front_dist_n: int = -1
+
+func _front_distance_ly() -> float:
+	if _front_dist >= 0.0 and _front_dist_n == front_cells.size():
+		return _front_dist
+	# _region_center is Sol-relative and already in light-years: HEX_SIZE is 2166.67 and the
+	# cells are 3 753 ly centre to centre, which is sqrt(3) times it.
+	var best: float = INF
+	for id: String in front_cells:
+		best = minf(best, _region_center(id).length())
+	_front_dist = 0.0 if best == INF else best
+	_front_dist_n = front_cells.size()
+	return _front_dist
+
+
+## The front as the star map wants it: [[Sol-relative position, share], …].
+##
+## POSITIONS rather than hex ids — the panel owns no part of the region grid and should not have
+## to. Empty until the signature has arrived, so an undetected front draws nothing: the first
+## the player sees of it is the announcement, and then the stain.
+func front_map_cells() -> Array:
+	var out: Array = []
+	if not front_active() or not front_seen:
+		return out
+	for id: String in front_cells:
+		var share: float = front_share(id)
+		if share > 0.0:
+			out.append([_region_center(id), share])
+	return out
+
+
+## What the player knows about the front, for the star map and the readout.
+func front_state() -> Dictionary:
+	if not front_active() or not front_seen:
+		return {}
+	var held: int = 0
+	for id: String in front_cells:
+		if front_share(id) > 0.0:
+			held += 1
+	return {"cells": front_cells.duplicate(), "held": held,
+		"distance_ly": _front_distance_ly(), "since": front_year}
+
+
 func _region_neighbour_id(id: String) -> String:
 	var p: PackedStringArray = id.split(",")
 	var d: Vector2i = HEX_DIRS[_roll_pick("region_dir", HEX_DIRS.size(), year, id.hash())]
@@ -7150,8 +8025,11 @@ func refresh_star_map() -> void:
 	if not sidebar.star_map.visible:
 		return
 	sidebar.star_map.set_cosmic_scale(_cosmic_scale())
+	# believed_colonies(), not colonized_stars: a colony that declared independence two hundred
+	# years ago and four hundred light-years out is still drawn as ours, because that is still
+	# the last thing we heard.  The simulation has already stopped counting it.
 	var colo: Dictionary = {}
-	for s in colonized_stars:
+	for s in believed_colonies():
 		colo[str(s)] = true
 	var disp: Array = []
 	for m in interstellar_missions:
@@ -7295,6 +8173,7 @@ func refresh_star_map() -> void:
 		var scopes: int = int(_colony_infra_at(str(cs))["telescopes"])
 		obs_range = maxf(obs_range, maxf(cd * 2.0, cd + float(scopes) * COLONY_TELESCOPE_REACH_LY))
 	StarMapPanel.set_observation_range(obs_range)
+	sidebar.star_map.set_front(front_map_cells())
 	sidebar.star_map.set_colony_intel(_player_colony_intel())
 	sidebar.star_map.set_interstellar_unlocked(ResearchTree.is_unlocked("relativistic_navigation"))
 
@@ -7535,8 +8414,14 @@ func _alien_intel() -> Dictionary:
 
 ## A player interstellar colony's infrastructure, grown deterministically from its founding year
 ## exactly like an alien colony's — a Dyson swarm (0..1), orbital telescopes, and defensive lasers.
-func _colony_infra_at(star: String) -> Dictionary:
-	var age: float = float(year - int(_colony_year.get(star, year)))
+func _colony_infra_at(star: String, obs_year: float = -1.0) -> Dictionary:
+	# Observed, not current, when a year is given.  The same light-lag _alien_intel applies to a
+	# neighbour's infrastructure applies to our own frontier: what a telescope at Sol can say
+	# about a colony four hundred light-years out is what it looked like four hundred years ago.
+	# Possible at all because this growth is a deterministic function of the founding year, so
+	# any past state can be worked out without having stored it.
+	var yr: float = float(year) if obs_year < 0.0 else obs_year
+	var age: float = yr - float(_colony_year.get(star, year))
 	if age <= 0.0:
 		return {"dyson": 0.0, "telescopes": 0, "lasers": 0}
 	return {
@@ -7548,8 +8433,17 @@ func _colony_infra_at(star: String) -> Dictionary:
 ## Infrastructure of every player interstellar colony, for the star map's colony readout.
 func _player_colony_intel() -> Dictionary:
 	var out: Dictionary = {}
-	for s in colonized_stars:
-		out[str(s)] = _colony_infra_at(str(s))
+	for s in believed_colonies():
+		var star: String = str(s)
+		var dist: float = _star_distance_ly(star)
+		# Seen as it was when the light left it.
+		var infra: Dictionary = _colony_infra_at(star, float(year) - dist)
+		var rep: Dictionary = colony_report(star)
+		infra["report_age"] = float(rep.get("age", 0.0))
+		infra["loyalty"] = float(rep.get("loyalty", 1.0))
+		infra["allegiance"] = str(rep.get("text", ""))
+		infra["pop_heard"] = float(rep.get("pop", 0.0))
+		out[star] = infra
 	return out
 
 ## Systems that will fire on human worlds: the innately aggressive ones plus any the player
@@ -8324,6 +9218,8 @@ func _resolve_own_colony_trade(m: Dictionary, star: String, world: String, where
 	# Delivered: the outbound half lands in the colony's own store.
 	for k: String in offer:
 		_add_stockpile(k, float(offer[k]), star)
+	# And somebody at home still cares, which the far end can tell — see _supply_allegiance.
+	_supply_allegiance(star)
 	# Collected: the inbound half, as far as the colony can actually fill it.
 	var got: Dictionary = {}
 	var short: Dictionary = {}
@@ -8866,11 +9762,21 @@ func _build_orbital_state() -> Dictionary:
 			out[pname] = p.orbit_angle
 	return out
 
-func save_game(path: String = "") -> void:
+## Returns whether the file was actually written.
+##
+## It used to return nothing, which was fine while the only caller was a test that could look at
+## the disk itself.  A player pressing Save needs to be told: the directory may not exist, the
+## path may not be writable, and silence reads exactly like success.
+func save_game(path: String = "") -> bool:
 	if path == "":
 		path = GameSession.current_save_path
 	if path == "":
 		path = "user://saves/default.json"
+	# Created on demand.  A fresh install has no user://saves, and FileAccess.open(WRITE) into a
+	# directory that is not there fails without saying so.
+	var dir: String = path.get_base_dir()
+	if dir != "" and not DirAccess.dir_exists_absolute(dir):
+		DirAccess.make_dir_recursive_absolute(dir)
 
 	# Everything that is only a value lives in SaveSchema.FIELDS and is written from there, so a
 	# field cannot be saved here and forgotten in load_game(). What is left below is the handful
@@ -8897,6 +9803,8 @@ func save_game(path: String = "") -> void:
 	data["colonized_stars"]    = colonized_stars
 	data["colonized_year"]     = _colonized_year
 	data["split_thresholds"]   = _split_thresholds
+	data["body_removed"]       = _body_removed
+	data["colony_news"]        = _colony_news
 	data["world_stock"]        = _world_stock
 	data["colony_stock"]       = colony_stock
 	data["variant_parent"]     = _variant_parent
@@ -8913,10 +9821,13 @@ func save_game(path: String = "") -> void:
 	data["next_nuclear_year"]  = _next_nuclear_year
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file:
-		file.store_string(JSON.stringify(data, "\t"))
-		file.close()
-		print("Saved to %s" % path)
+	if file == null:
+		push_warning("Could not write save: %s" % path)
+		return false
+	file.store_string(JSON.stringify(data, "\t"))
+	file.close()
+	print("Saved to %s" % path)
+	return true
 
 func load_game(path: String = "") -> void:
 	if path == "":
@@ -8955,6 +9866,9 @@ func load_game(path: String = "") -> void:
 	# The clock comes first in that table, because the frontier and alien clocks below default
 	# to "the year we have just loaded" when an older save has no entry for them.
 	SaveSchema.decode(data, self, SolarSystem)
+	_invalidate_pop_parts()   # world_pop has just been replaced wholesale
+
+	_sync_all_disassembly_visuals()   # a loaded world shows what has been taken out of it
 
 	# A save written while Earth was one of its own colonies heals here.  The list is the
 	# civilisation's OTHER worlds — _home_worlds puts Earth at the front of it — so Earth
@@ -9172,6 +10086,49 @@ func load_game(path: String = "") -> void:
 	# before any of this existed all arrive here — and every one of them has to come out as a
 	# stock the accessors can read.  Earth is the baseline if the file never said otherwise.
 	_world_stock = {}
+	# The post, validated rather than copied.  A record that does not parse is dropped, which
+	# reads as never having heard from that colony — and believed_colonies() takes silence as
+	# "nothing is being believed" rather than as "still ours", so a mangled file loses a ghost
+	# rather than inventing one.
+	_colony_news = {}
+	if data.get("colony_news") is Dictionary:
+		for star: String in (data["colony_news"] as Dictionary):
+			var rv: Variant = (data["colony_news"] as Dictionary)[star]
+			if not (rv is Dictionary):
+				continue
+			var r: Dictionary = rv
+			_colony_news[star] = {
+				"at": float(r.get("at", year)),
+				"pop": maxf(float(r.get("pop", 0.0)), 0.0),
+				"loyalty": clampf(float(r.get("loyalty", 1.0)), 0.0, 1.0),
+				"gone": bool(r.get("gone", false)),
+				"tx": float(r.get("tx", -1.0)),
+				"tx_pop": maxf(float(r.get("tx_pop", 0.0)), 0.0),
+				"tx_loyalty": clampf(float(r.get("tx_loyalty", 1.0)), 0.0, 1.0),
+				"tx_gone": bool(r.get("tx_gone", false)),
+			}
+	# The removal ledger, validated rather than copied: it is nested two deep and a hand-edited
+	# or truncated file must not leave a layer holding a string where grams should be.
+	_body_removed = {}
+	if data.get("body_removed") is Dictionary:
+		for body: String in (data["body_removed"] as Dictionary):
+			var layers: Variant = (data["body_removed"] as Dictionary)[body]
+			if not (layers is Dictionary):
+				continue
+			var clean: Dictionary = {}
+			for layer: String in (layers as Dictionary):
+				var compounds: Variant = (layers as Dictionary)[layer]
+				if not (compounds is Dictionary):
+					continue
+				var m: Dictionary = {}
+				for compound: String in (compounds as Dictionary):
+					var g: float = float((compounds as Dictionary)[compound])
+					if g > 0.0:
+						m[compound] = g
+				if not m.is_empty():
+					clean[layer] = m
+			if not clean.is_empty():
+				_body_removed[body] = clean
 	if data.has("world_stock") and data["world_stock"] is Dictionary:
 		for w: String in (data["world_stock"] as Dictionary):
 			_world_stock[w] = StockData.normalise((data["world_stock"] as Dictionary)[w])
@@ -9363,6 +10320,53 @@ func _consume_food(delta_days: float) -> void:
 		stats["current_population"] = maxf(
 			float(stats.get("current_population", 0.0)) - starved, 0.0)
 
+# ── The population worklist ───────────────────────────────────────────────────
+#
+# world_pop split the way _update_population walks it: the solar-system worlds, which are grown
+# every tick because what they hold moves as things are built on them, and the interstellar
+# colonies dealt into POP_SLICES hands, one per tick.
+#
+# Prepared rather than filtered.  The loop used to iterate world_pop and skip seven entries in
+# eight, which is a full traversal of the roster to do an eighth of its work — 15.7 ms a frame
+# at fifteen thousand colonies, linear in the roster, and nearly all of it spent getting to the
+# `continue`.
+var _pop_parts: Array = []        # POP_SLICES arrays of interstellar colony names
+var _pop_system: Array = []       # solar-system worlds, every tick
+var _pop_parts_n: int = -1        # world_pop.size() when the split was last dealt
+
+## Deal world_pop into the slices, if the split is missing or out of date.
+##
+## Rebuilt ONCE A CYCLE rather than once a frame — a full traversal every eight frames instead
+## of every one — and immediately whenever the roster changes size, which is what a colony
+## arriving or a world dying looks like. A membership change that keeps the size the same (one
+## world settled in the same tick another is lost) is therefore picked up at the end of the
+## cycle rather than at once, and a colony can miss a single cycle's growth that way. That is
+## the same imprecision the slice already had and for the same reason: three percent a year
+## over an eight-day step is nothing, and it corrects itself next cycle.
+func _ensure_pop_parts(closing: bool) -> void:
+	if _pop_parts.size() == POP_SLICES and not closing and world_pop.size() == _pop_parts_n:
+		return
+	_pop_parts = []
+	for _i in range(POP_SLICES):
+		_pop_parts.append([])
+	_pop_system = []
+	var i: int = 0
+	for world: String in world_pop:
+		if _col_star_set.has(world):
+			(_pop_parts[i % POP_SLICES] as Array).append(world)
+			i += 1
+		else:
+			_pop_system.append(world)
+	_pop_parts_n = world_pop.size()
+
+
+## Throw the split away, so the next population tick deals a fresh one.  For the callers that
+## change the roster and should not wait for the cycle to come round — a load, a new game.
+func _invalidate_pop_parts() -> void:
+	_pop_parts = []
+	_pop_parts_n = -1
+
+
 ## Advance population one logistic step over `delta_days` game-days toward the
 ## resource-driven capacity.  Uses the closed-form logistic solution, which is
 ## exact for a constant K and numerically stable for any step size — essential
@@ -9380,13 +10384,20 @@ func _update_population(delta_days: float) -> void:
 	# memoised on the stock's own growth multiplier and the loop below pays a dictionary probe.
 	var decay_for: Dictionary = {}
 	var decay: float = exp(-r * delta_days)        # the unselected baseline, and the fallback
-	# Last tick's headcount, not this one's.  It answers "is anyone left anywhere", which is a
-	# question about whether the species exists at all — and a figure one tick old cannot change
-	# that answer, because the loop below is what would have changed it and it writes the fresh
-	# total at the end.  Summing twenty thousand worlds again to ask it cost four milliseconds a
-	# tick for a bool.
-	var species_alive: bool = float(stats.get("current_population",
-		_total_population())) > 1.0
+	# Last tick's headcount, not this one's, for two questions: whether the species exists at
+	# all, and what the running total is being carried from.  A figure one tick old answers
+	# both, because this loop is the only thing that would have changed it.
+	#
+	# Worked out ONCE, and with the fallback branched rather than passed.
+	#
+	#   stats.get("current_population", _total_population())
+	#
+	# is what this used to say, and the comment above it noted that re-summing the roster for a
+	# bool had cost four milliseconds a tick.  It still did: GDScript evaluates a call in the
+	# DEFAULT ARGUMENT POSITION EAGERLY, whether the key is present or not, so the sum ran every
+	# frame and the optimisation the comment described never happened.  At fifteen thousand
+	# colonies it was 15 ms a frame — most of the cost of the whole tick — to compute a figure
+	# that was then thrown away.
 	# Grow each world's population logistically toward its OWN capacity (closed-form, exact at
 	# any timescale).  An empty-but-habitable world is re-settled by migrants — but only while
 	# the species survives somewhere; if nowhere is left, populations stay at zero (extinction).
@@ -9402,6 +10413,7 @@ func _update_population(delta_days: float) -> void:
 	var head: float = float(stats.get("current_population", -1.0))
 	if head < 0.0:
 		head = _total_population()
+	var species_alive: bool = head > 1.0
 	# Walked over world_pop ITSELF rather than over _inhabited_worlds().
 	#
 	# They are the same set — a world gets its world_pop entry the moment it is settled, and the
@@ -9419,25 +10431,28 @@ func _update_population(delta_days: float) -> void:
 	var dspan: float = 1.0 - dfloor
 	_pop_slice = (_pop_slice + 1) % POP_SLICES
 	var closing: bool = _pop_slice == 0
+	_ensure_pop_parts(closing)
 	var stale: Array = []
-	var idx: int = -1
-	for world: String in world_pop:
-		idx += 1
-		# The prune, folded into the pass that was walking these worlds anyway.  An interstellar
-		# colony is inhabited by definition and cannot be engulfed by Sol, so it short-circuits
-		# before the expensive half.
+	# This tick's worklist: every solar-system world, plus ONE SLICE of the colonies.
+	#
+	# The point of the split.  This loop used to walk world_pop itself and `continue` past seven
+	# entries in eight, which meant a fifteen-thousand-colony roster cost a full dictionary
+	# traversal every frame to do an eighth of a frame's work — measured at 15.7 ms, dead linear
+	# in the roster and almost all of it spent reaching the skip.  Walking a prepared list of
+	# the worlds this tick actually owes is the same work without the other seven eighths.
+	var todo: Array = _pop_system + (_pop_parts[_pop_slice] as Array)
+	for world: String in todo:
+		# A colony erased from world_pop elsewhere (a strike, an uncolonise) is still named in
+		# the partition until it is next rebuilt, so membership is checked rather than assumed.
+		if not world_pop.has(world):
+			continue
 		var is_star: bool = _col_star_set.has(world)
+		# The prune, still folded in here.  It only ever applies to solar-system worlds — an
+		# interstellar colony is inhabited by definition and cannot be engulfed by Sol — and
+		# those are in _pop_system, which is walked every tick, so nothing is pruned later than
+		# it used to be.
 		if not is_star and not _is_inhabited(world):
 			stale.append(world)
-			continue
-		# A colony is grown on its own tick of the cycle; everything in the solar system is
-		# grown every tick, because its capacity moves as things are built on it and the closed
-		# form only composes across a span the capacity held for.
-		#
-		# The slice is the position in world_pop, which shifts when the roster changes, so a
-		# world occasionally gets an extra cycle's growth or misses one.  Against three percent
-		# a year over an eight-day step that is nothing, and it corrects itself next cycle.
-		if is_star and (idx % POP_SLICES) != _pop_slice:
 			continue
 		var span_days: float = delta_days if not is_star else delta_days * float(POP_SLICES)
 		# Indexed, not .get(): the key is the one being iterated, so it is there by definition.
@@ -9623,8 +10638,48 @@ func _update_hud() -> void:
 		research_ui.set_science(
 			ResearchTree.resources.get("science", 0.0), prod.get("science", 0.0))
 
+## The pause menu's Save button.  Asks for a name rather than writing over default.json.
 func _on_save_pressed() -> void:
-	save_game()
+	_ensure_save_dialog()
+	_save_dialog.open(_default_save_name())
+
+
+## What the name field starts as: the slot this run was loaded from if there is one, otherwise
+## the year it has reached, which is the one fact that tells two saves of the same run apart.
+func _default_save_name() -> String:
+	var cur: String = str(GameSession.current_save_path)
+	if cur != "":
+		return cur.get_file().get_basename()
+	return "Humanity %d" % year
+
+
+var _save_dialog: SaveDialog = null
+
+func _ensure_save_dialog() -> void:
+	if _save_dialog != null and is_instance_valid(_save_dialog):
+		return
+	_save_dialog = SaveDialog.new()
+	_save_dialog.name = "SaveDialog"
+	_save_dialog.save_requested.connect(_on_save_requested)
+	add_child(_save_dialog)
+
+
+## The dialog asked for a name.  Game decides where that goes and whether it worked, and the
+## dialog shows whatever comes back — so what the player is told and what is on disk agree.
+func _on_save_requested(slot: String) -> void:
+	var path: String = SaveDialog.slot_path(slot)
+	if path == "":
+		if _save_dialog:
+			_save_dialog.set_result(false, "That is not a usable name.")
+		return
+	var ok: bool = save_game(path)
+	if ok:
+		# Saving NAMES the run: a later quick save, and the next load, go to this slot.
+		GameSession.current_save_path = path
+	if _save_dialog:
+		_save_dialog.set_result(ok,
+			"Saved as \"%s\"." % SaveDialog.sanitise(slot) if ok \
+				else "Could not write that file.")
 
 func _on_settings_pressed() -> void:
 	settings_menu.visible = true

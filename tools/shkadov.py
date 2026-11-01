@@ -22,7 +22,9 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_MIRROR, V_BOOM, V_BUS = 0.95, 0.40, 0.55
+V_MIRROR = (0.92, 0.94, 0.96)   # statite sail
+V_BOOM   = (0.40, 0.41, 0.44)   # boom
+V_BUS    = (0.80, 0.64, 0.30)   # bus
 
 parts = []
 

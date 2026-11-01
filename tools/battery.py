@@ -19,7 +19,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_CELL, V_RAIL, V_PLATE, V_CONTROL = 0.68, 0.45, 0.58, 0.80
+V_CELL    = (0.46, 0.50, 0.54)   # cell stacks
+V_RAIL    = (0.52, 0.54, 0.58)   # rails
+V_PLATE   = (0.80, 0.64, 0.30)   # blanketed end plates
+V_CONTROL = (0.87, 0.87, 0.85)   # controller
 
 parts = []
 

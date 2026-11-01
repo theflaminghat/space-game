@@ -18,7 +18,8 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_TETHER, V_APERTURE = 0.42, 0.82
+V_TETHER   = (0.40, 0.41, 0.44)   # tether
+V_APERTURE = (0.80, 0.64, 0.30)   # phased apertures
 
 parts = []
 

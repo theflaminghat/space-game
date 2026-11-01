@@ -23,6 +23,13 @@ var _rings: MeshInstance3D = null    # planetary rings (gas giants only)
 var _blur_torus: MeshInstance3D = null  # translucent motion-blur ring shown post-freeze
 var _body_visual_radius: float = 0.0    # apparent radius (game units); sizes the blur tube
 
+# ── Being taken apart ─────────────────────────────────────────────────────────
+## The size this body is at full mass, so a partial disassembly has something to scale against.
+var _intact_scale: Vector3 = Vector3.ONE
+## Last pushed state, so a body that has not moved is not re-set every frame.
+var _strip_remaining: float = 1.0
+var _strip_depth: float = -1.0
+
 ## Cosmetic moons orbiting this body in its local (scaled) frame, so they track and
 ## size with the planet automatically.  Each entry: { node, radius, speed, angle, incl }.
 var _moons: Array = []
@@ -273,6 +280,10 @@ func _ready() -> void:
 	# SphereMesh AABB is the unscaled diameter; half it and apply the node scale.
 	if mesh != null:
 		_body_visual_radius = mesh.get_aabb().size.x * 0.5 * scale.x
+	# What the body is when nothing has been taken off it.  Captured after the log-scaling above
+	# has settled, so set_disassembly has an untouched size to work back to — the same thing
+	# _sun_base_scale is for the star.
+	_intact_scale = scale
 
 	# Capture the log-scaled base size, then apply the initial stellar appearance.
 	if type == Type.STAR:
@@ -494,6 +505,35 @@ var _engulfed: bool = false
 
 ## The Sun has engulfed this planet: destroy it and everything orbiting it (moons, rings,
 ## orbital infrastructure, orbit line), and stop all its per-frame work.
+## Show this world as `remaining` of its mass, excavated to `depth` — see disassembly.gd.
+##
+## Two things change, and both of them are the point.  The body SHRINKS, by the cube root of what
+## is left (mass goes as the cube of the radius, so the first tenth off a planet is barely
+## visible and that is correct — a crust is a skin).  And its surface stops being a surface: the
+## shader blends the map toward hot silicate and then iron, keeping the map's own light and dark
+## as the exposed material's relief so the body still reads as itself with the top taken off.
+func set_disassembly(remaining: float, depth: float) -> void:
+	var rem: float = clampf(remaining, 0.0, 1.0)
+	var dep: float = clampf(depth, 0.0, 1.0)
+	if absf(rem - _strip_remaining) < 0.0005 and absf(dep - _strip_depth) < 0.0005:
+		return
+	_strip_remaining = rem
+	_strip_depth = dep
+	# A floor, not zero: a body still being worked on has to stay clickable, and the world is
+	# removed outright by Game the moment the last layer goes (see _finish_disassembly).
+	var f: float = maxf(DisassemblyData.radius_frac(rem), 0.03)
+	scale = _intact_scale * f
+	if mesh != null:
+		_body_visual_radius = mesh.get_aabb().size.x * 0.5 * scale.x
+	var look: Dictionary = DisassemblyData.look(dep)
+	var mat := material_override as ShaderMaterial
+	if mat != null:
+		mat.set_shader_parameter("strip_mix", float(look["mix"]))
+		mat.set_shader_parameter("strip_color", look["color"] as Color)
+		mat.set_shader_parameter("strip_glow", float(look["glow"]))
+		mat.set_shader_parameter("strip_metallic", float(look["metallic"]))
+
+
 func engulf() -> void:
 	if _engulfed:
 		return
@@ -778,8 +818,9 @@ static func _get_placeholder_tex() -> ImageTexture:
 ## baked against its model's actual unwrap (tools/depot.py), so the two must travel together —
 ## the texture is meaningless on any other mesh.
 ##
-## The map is greyscale on purpose.  albedo_color tints it with the lane's own colour, exactly
-## as it tinted the checker, so what the bake carries is value and not hue.  A missing or
+## The maps carry the hardware's own colour, and albedo_color is left WHITE so nothing
+## multiplies through them.  They were greyscale for a long time, back when the lane tinted
+## them; the lane's grouping now lives in the material's emission instead.  A missing or
 ## unimported texture falls back to the checker rather than rendering untextured white.
 static var _lane_tex_cache: Dictionary = {}
 
@@ -911,7 +952,11 @@ static func _model_mesh(kind: String) -> Mesh:
 func _infra_material(color: Color, tex_path: String = "") -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_texture = _lane_texture(tex_path)
-	m.albedo_color   = color
+	# WHITE, not the lane colour.  The maps carry the hardware's own colour now — gold
+	# blanket, blue solar cells, white tankage — and albedo_color MULTIPLIES through the
+	# texture, so tinting a blue panel amber would give mud.  Tinting only ever worked
+	# because the maps were deliberately greyscale.
+	m.albedo_color   = Color.WHITE
 	m.metallic       = 0.3
 	m.roughness      = 0.7
 	# Surface relief, where the model has it baked.  The albedo map carries the same
@@ -921,9 +966,13 @@ func _infra_material(color: Color, tex_path: String = "") -> StandardMaterial3D:
 	if nrm != null:
 		m.normal_enabled = true
 		m.normal_texture = nrm
+	# The lane's colour lives here now, and carries the whole of the grouping INFRA_LANES
+	# describes — amber for heat, blue for the power link, grey for storage, green for
+	# people.  It has to be stronger than the 0.15 it was when it only had to warm a
+	# surface already tinted that colour: this is the only lane cue left.
 	m.emission_enabled = true
 	m.emission       = color
-	m.emission_energy_multiplier = 0.15
+	m.emission_energy_multiplier = 0.20
 	return m
 
 ## Build one MultiMesh lane per orbital-infrastructure type (all under this planet, in its
