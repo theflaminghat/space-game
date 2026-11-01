@@ -168,6 +168,11 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "front_on",           "kind": BOOL, "default": false},
 	{"key": "front_seen",         "kind": BOOL, "default": false},
 
+	# What the run is remembered for.  id -> the year it was earned, so a summary can say when.
+	# Plain: an older save has earned nothing, which is what an empty dict already means, and a
+	# loaded run goes on earning from wherever it is.
+	{"key": "achievements",       "prop": "achievements_earned", "kind": DICT_INT, "default": null},
+
 	# ── Launches and flights ──
 	{"key": "active_launches",      "custom": true},  # reserved swarm slots are recounted
 	{"key": "next_launch_id",       "prop": "_next_launch_id", "custom": true},

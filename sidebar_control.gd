@@ -20,6 +20,8 @@ var automation_panel: AutomationPanel = null
 var compute_panel: ComputePanel = null
 ## Merged planet panel (info + build + population tabs), created and assigned by Game.
 var planet_tabs: Control = null
+## What this run has been remembered for.
+var achievements_page: AchievementsPage = null
 ## The cloned "automation" sidebar button, hidden until Industrial AI is researched.
 var automation_button: Button = null
 
@@ -47,6 +49,11 @@ func _ready() -> void:
 	compute_panel.hide()
 	add_child(compute_panel)
 	_add_cloned_button("compute_panel", "compute", _on_compute_pressed)
+
+	achievements_page = AchievementsPage.new()
+	achievements_page.hide()
+	add_child(achievements_page)
+	_add_cloned_button("achievements", "records", _on_achievements_pressed)
 
 	automation_panel = AutomationPanel.new()
 	automation_panel.hide()
@@ -99,6 +106,8 @@ func hide_all() -> void:
 		compute_panel.hide()
 	if automation_panel:
 		automation_panel.hide()
+	if achievements_page:
+		achievements_page.hide()
 
 
 ## Toggle a panel: if it's already open, close everything (return to the default view);
@@ -144,6 +153,15 @@ func _on_politics_pressed() -> void:
 ## Open the star map outright, rather than toggling it.  Used when something else — a timeline
 ## card, a notification — is taking the player there: arriving at a panel that closed again
 ## because it happened to be open already is not what they asked for.
+## Game refreshes the record on the way in, so an achievement earned while the page was shut
+## is there when it opens.
+signal achievements_opened
+
+func _on_achievements_pressed() -> void:
+	if _toggle_panel(achievements_page):
+		achievements_opened.emit()
+
+
 func show_star_map() -> void:
 	hide_all()
 	if star_map == null:

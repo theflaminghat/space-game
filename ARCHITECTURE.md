@@ -1266,6 +1266,81 @@ So `_update_population` costs exactly what it did when a stock was a single row.
 **`TRAITS` order and not tick order**, or two populations holding the same three traits would
 hash to different keys and be different stocks.
 
+### Achievements
+
+`achievements.gd` holds the table; `Game.achievements_earned` maps id → **the year it was
+earned**, not a flag, so a run summary can say when. One schema row saves it.
+
+**Granted two ways, and which one a given achievement gets is not arbitrary.** Anything with a
+MOMENT is hooked at that moment, because the moment is the only place the fact exists — by the
+next tick a seceded colony is simply gone and there is nothing left to notice. Anything that is
+a THRESHOLD on state the game already keeps is swept once a year instead, on **both** clocks:
+fast mode is where a run actually crosses the deep-time thresholds, and an achievement only the
+day clock could grant would be unreachable in the era it is about.
+
+The sweep deliberately touches no per-colony state. The roster is fifteen thousand entries, so
+anything about colonies is granted where a colony changes instead — and the trait achievements
+are checked where a splice lands rather than by walking every stock record a year.
+
+**Three hooks were placed wrong first, and each was wrong in an instructive way.**
+
+- `harsh_mistress` went on `_announce("A state breaks away")`, which is inside `_spread_aliens`
+  and fires when an **alien** polity fragments. A player achievement wired to an alien event.
+- Moving it raised the real question. Granting it when the colony secedes would announce the
+  news the instant it happened — which is the one thing the light-lag exists to withhold. It now
+  fires when the post arrives, in `_tick_colony_news`, and `no_reply` with it when that news is
+  `ACH_LATE_NEWS_YEARS` stale.
+- `we_are_bob` went on the probe announcement, which only covers the probe the **player** sends;
+  a replicating swarm launches thousands through `_vn_launch` without one. It is now at the point
+  in `_vn_launch` past which no launch can be refused.
+
+**The endings needed a memory.** Every ending goes through `trigger_game_over`, but the three
+catastrophes have no ending of their own — they kill people and the run ends as "Population
+collapse" — so the cause cannot be named unless something remembers it. `_last_catastrophe`
+records what landed and when, and the ending is only blamed on it within
+`ACH_CATASTROPHE_WINDOW_YEARS`. It is deliberately not saved: it is a few years of context for
+an ending, not run state.
+
+**The page lists what has NOT been earned, except the failures.** The milestone groups are the
+only place the game says out loud what it expects you to do, and a player opening the page in
+their first minute should come away knowing that settling the system, replicating, enclosing a
+star and taking a planet apart are all things that happen here. The failures are hidden until
+earned, their group is omitted entirely while empty, and they are left out of the `N of M` count
+— otherwise the total quietly tells the player how many ways there are to lose.
+
+**A GDScript trap worth recording:** `-1 << 40` as a "never happened" sentinel is a *parse
+error* — negative operands to `<<` are rejected. And because a parse error aborts `_run` before
+`quit()`, the suite reports it as a bare `TIMEOUT` with no diagnosis. Two tests timed out before
+the cause was found by loading `Game.gd` directly. Relatedly: piping Godot's output through
+`grep` loses everything when the process is killed, so a hang must be captured to a file.
+
+**The top bar reports the solar system, not the galaxy.** Three of the four readouts always did,
+by accident of where they come from: Matter, Energy and Heat are summed off `planet_buildings`,
+and an interstellar colony has no entry there — its infrastructure is the abstracted
+`_colony_infra_at`, and what it mines goes into its own stores to be traded for
+(`_advance_colony_economy`). Compute did not, because it is driven by population and
+`_pop_weighted_compute` walks every world. Measured: forty colonies multiplied the figure driving
+research by **139**, and a late-game roster is thousands — the solar system's own contribution
+rounds to nothing against them.
+
+That contradicted the rest of the design rather than merely inflating a number. The light-lag
+that makes a colony ungovernable — every order describes a four-hundred-year-old situation — also
+means it cannot be thinking for you now. So `_pop_weighted_compute_sol` accumulates the same
+stock-weighted sum restricted to the solar system, keyed off the `is_star` flag the population
+loop already has in hand, and `_combine_production` reads that. The galaxy-wide sum is still
+kept; it is a real number, just not this one.
+
+**The consequence is real and intended: late-game research now runs on the solar system's minds.**
+A civilisation that wants more thinking has to build it where it lives, or trade for what the
+frontier makes.
+
+`verify_solar_pool` asserts both directions, and the second one is the point — an in-system colony
+must still count, or "exclude the colonies" would have been a blanket exclusion that passed every
+other assertion. Getting that assertion to mean anything took two tries: Earth grows by about nine
+million people over the test's sixty ticks and Mars only holds six, so a before/after comparison
+of the solar sum is satisfied by Earth alone. It now measures the sum **minus Earth's own people**
+against what Mars actually holds.
+
 **Capacity is applied in two places on purpose.** `_world_capacity()` folds in
 `_stock_cap_mult()` for every caller that asks it — the stats page, the forecast, the colony
 panel — but `_update_population`'s common case never calls it: an interstellar colony with

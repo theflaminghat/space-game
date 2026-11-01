@@ -206,20 +206,25 @@ func _run() -> void:
 
 	# Human compute is the population weighted by what each stock gets out of a life, so the
 	# same headcount thinks differently depending on who it is.
+	#
+	# Poked through _pop_weighted_compute_SOL, which is the sum the compute term reads: the top
+	# bar reports the solar system, and an interstellar colony's minds are four hundred years
+	# away from any question put to them (see verify_solar_pool). The galaxy-wide sum is still
+	# kept, and is not what drives research.
 	g._recompute_production_cache()
 	g._combine_production()
-	var head: float = float(g.stats.get("current_population", 0))
+	var head: float = g._solar_population()
 	check(head > 0.0, "there are people to think")
 	var plain_compute: float = g._cached_compute_human
-	g._pop_weighted_compute = head * SD.compute_mult_of(clever)
+	g._pop_weighted_compute_sol = head * SD.compute_mult_of(clever)
 	g._combine_production()
 	check(g._cached_compute_human > plain_compute * 1.05,
 		"the same headcount of clever stock thinks more: %s vs %s" % [
 			g._cached_compute_human, plain_compute])
-	g._pop_weighted_compute = head * SD.compute_mult_of(quick)
+	g._pop_weighted_compute_sol = head * SD.compute_mult_of(quick)
 	g._combine_production()
 	check(g._cached_compute_human < plain_compute * 0.95, "and of fast-maturing stock thinks less")
-	g._pop_weighted_compute = 0.0
+	g._pop_weighted_compute_sol = 0.0
 
 	# ── Room is a property of the people as well as the ground ──
 	var star: String = "Tau Ceti"

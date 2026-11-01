@@ -715,6 +715,22 @@ var _pop_slice: int = 0
 var _pop_part_head: float = 0.0
 var _pop_part_compute: float = 0.0
 var _pop_part_life: float = 0.0
+## The same weighted compute sum, restricted to the SOLAR SYSTEM.
+##
+## What the top bar reports has to be the civilisation you can actually act with. A colony four
+## hundred light-years out thinks for itself — every answer it could give is four hundred years
+## old on arrival, which is the same light-lag that makes it ungovernable and eventually makes it
+## somebody else's. Counting its minds in the figure that drives research said the opposite.
+##
+## Matter, Energy and Heat never had this problem: they are summed off `planet_buildings`, and an
+## interstellar colony has no entry there — its infrastructure is the abstracted model in
+## `_colony_infra_at`, and what it mines goes into its OWN stores for trade (see
+## `_advance_colony_economy`). Compute was the one civilisation-wide figure still reaching across
+## the galaxy, and it dominated: forty colonies multiplied it by 139.
+##
+## Free to keep, because the pass already visits every world and already knows which kind it is.
+var _pop_part_compute_sol: float = 0.0
+var _pop_weighted_compute_sol: float = 0.0
 
 # ── Lineage archive and transfers ─────────────────────────────────────────────
 ## Life histories the civilisation HOLDS the genetic data for, as a set of strategy ids.
@@ -1280,6 +1296,7 @@ func start_new_game() -> void:
 	colony_stock      = {"founders": StockData.BASELINE_FOUNDERS, "traits": []}
 	_split_thresholds = {"earth": _stock_split_threshold("earth", stock_of(HOME_WORLD))}
 	_pop_weighted_compute = 0.0
+	_pop_weighted_compute_sol = 0.0
 	_pop_weighted_life = 1.0
 	lineage_archive   = {}
 	lineage_transfers = []
@@ -1483,6 +1500,8 @@ func _ready() -> void:
 		sidebar.automation_panel.doctrine_changed.connect(_on_doctrine_changed)
 	if timeline_panel:
 		timeline_panel.star_focus_requested.connect(_on_timeline_star_focus)
+	if sidebar:
+		sidebar.achievements_opened.connect(_push_achievements)
 	if sidebar and sidebar.compute_panel:
 		sidebar.compute_panel.alloc_changed.connect(_on_compute_alloc_changed)
 	if sidebar and sidebar.star_map:
@@ -1824,6 +1843,18 @@ func _total_population() -> float:
 	var t: float = 0.0
 	for w: String in world_pop:
 		t += float(world_pop[w])
+	return t
+
+## Population of the SOLAR SYSTEM alone — Earth and the in-system colonies.
+##
+## Only a fallback: `_pop_weighted_compute_sol` carries this (stock-weighted) across the
+## population cycle, and this is read on the frames before the first cycle has closed. Driven off
+## `_home_worlds()` for the reason `_player_item_count` is — it is the same dozen worlds, and
+## walking `world_pop` would be fifteen thousand lookups to exclude all but twelve of them.
+func _solar_population() -> float:
+	var t: float = 0.0
+	for w: String in _home_worlds():
+		t += float(world_pop.get(w, 0.0))
 	return t
 
 ## Carrying capacity of a SINGLE world.  Earth = its (climate-limited) biosphere; an interstellar
@@ -2388,6 +2419,7 @@ func advance_day() -> void:
 			_check_asteroid_impact()
 			_check_pandemic()
 			_check_nuclear_war()
+			_check_achievements()
 			if timeline_panel and timeline_panel.visible:
 				timeline_panel.set_current_year(year)
 
@@ -2409,6 +2441,8 @@ func _process_launch_arrivals() -> void:
 			)
 			if today_abs >= end_abs:
 				launch["status"] = "completed"
+				# Not at the press of the button: a launch that never arrives is not a step.
+				grant_achievement("small_step")
 				any_completed = true
 				var m_target: String = launch.get("target", "")
 				# Supply Run: the hold is emptied into the destination's stockpile.  The goods
@@ -3298,8 +3332,17 @@ func _combine_production() -> void:
 	#
 	# Falls back to the headcount before the first population tick, when the weighted sum has not
 	# been built yet and a zero here would blank the grid for a frame.
-	var pop: float = float(stats.get("current_population", 0))
-	var thinkers: float = _pop_weighted_compute if _pop_weighted_compute > 0.0 else pop
+	# The SOLAR SYSTEM's minds, not the galaxy's. An interstellar colony's population is real and
+	# is counted everywhere a headcount belongs, but it is not thinking for you: a question put
+	# to it is answered four hundred years later, which is the same light-lag that makes it
+	# ungovernable in the first place. What it does produce reaches you as freight, through
+	# _advance_colony_economy and the consignment system, not as research done here this year.
+	#
+	# Falls back to the solar headcount before the first population tick, when the weighted sum
+	# has not been built yet and a zero here would blank the grid for a frame.
+	var thinkers: float = _pop_weighted_compute_sol
+	if thinkers <= 0.0:
+		thinkers = _solar_population()
 	# No research term here any more: thinking faster and getting more out of a thought are
 	# different things, and only the second is what the compute lane actually buys.
 	var compute_mult: float = _policy_compute_mult()
@@ -3955,6 +3998,14 @@ func _tick_colony_news(star: String, dist: float, loy: float, is_gone: bool) -> 
 		r["loyalty"] = float(r.get("tx_loyalty", 0.0))
 		r["gone"] = bool(r.get("tx_gone", false))
 		r["tx"] = -1.0
+		# Granted on ARRIVAL, not on the secession itself. The colony stopped being ours
+		# centuries ago, but the whole point of the lag is that you did not know — and an
+		# achievement announced the moment it happened would tell you, which is the one thing
+		# the feature exists to withhold.
+		if bool(r["gone"]):
+			grant_achievement("harsh_mistress")
+			if float(year) - tx >= ACH_LATE_NEWS_YEARS:
+				grant_achievement("no_reply")
 	if float(r.get("tx", -1.0)) < 0.0:
 		r["tx"] = float(year)
 		r["tx_pop"] = pop
@@ -4092,6 +4143,10 @@ func _advance_lineages(dt_years: float) -> void:
 				StockData.set_traits(st, now)
 				st["splice"] = ""
 				st["splice_done"] = 0.0
+				# Checked here rather than swept: the trait set of a world only changes when a
+				# splice lands, and sweeping it would mean walking fifteen thousand stock records
+				# a year for an answer that moves perhaps a dozen times in a run.
+				_check_trait_achievements(st)
 				_announce("Sequence in the population",
 					"Everyone born on %s now carries %s." % [
 						_body_display_name(w), StockData.trait_label(splicing)],
@@ -4549,6 +4604,7 @@ func _destroy_engulfed_planets(sun_au: float) -> void:
 func trigger_game_over(cause: String, description: String) -> void:
 	if game_over:
 		return
+	_grant_ending_achievement(cause)
 	game_over          = true
 	SolarSystem.paused = true
 	_refresh_stats()
@@ -4627,6 +4683,10 @@ func _on_years_advanced_fast(_years_advanced: int) -> void:
 		_check_asteroid_impact()
 		_check_pandemic()
 		_check_nuclear_war()
+		# Both clocks, for the reason _process_launch_arrivals documents: fast mode is where a
+		# run actually crosses the deep-time thresholds, and an achievement that only the day
+		# clock could grant would be unreachable in the era it is about.
+		_check_achievements()
 		if timeline_panel and timeline_panel.visible:
 			timeline_panel.set_current_year(year)
 
@@ -5586,6 +5646,8 @@ func _run_disassembly(delta_days: float) -> void:
 ## The last layer has gone.  The body stops existing, by the same route the Sun's expansion
 ## takes one — see _destroy_engulfed_planets, whose consequences are identical.
 func _finish_disassembly(body: String) -> void:
+	if body == HOME_WORLD:
+		grant_achievement("pale_blue_dot")
 	if _disassembled.has(body):
 		return
 	_disassembled[body] = true
@@ -5612,6 +5674,7 @@ func _finish_disassembly(body: String) -> void:
 			pnode.engulf()        # the same visual an engulfed world gets: it is simply gone
 	_mark_prod_dirty()
 	_pop_cap_mult_cache = -1.0
+	grant_achievement("core_sample")
 	_announce("World disassembled",
 		"The last of %s is in orbit. %s" % [_body_display_name(body),
 			"Its stores came home." if carried > 0.0 else "Nothing of it is left in place."],
@@ -6849,6 +6912,12 @@ func _check_interstellar_arrivals() -> void:
 				# is settled: what it achieves is first contact, which is why sending recon ahead
 				# of a colony fleet is worth the wait.
 				if _star_occupied(target):
+					# Not every first contact is this one: the achievement is for meeting somebody
+					# who is not already hostile, and the alignment is read from the catalogue
+					# rather than from a local — _reveal_alignment below is what makes it KNOWN,
+					# but the fact itself is already there.
+					if str(star_factions.get(target, "")) != "aggressive":
+						grant_achievement("mostly_harmless")
 					_announce("First contact at %s" % target,
 						"The expedition arrives to find %s already inhabited. No colony is founded; the system's civilisation is now known to us." % target,
 						"occupied_arrival_%s" % target)
@@ -7049,6 +7118,10 @@ func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
 		return false
 	ResearchTree.resources["energy"] = maxf(0.0,
 		float(ResearchTree.resources.get("energy", 0.0)) - cost)
+	# Here rather than on the announcement: the announce only covers the probe the PLAYER sends,
+	# and a swarm that has started replicating launches thousands through this same function
+	# without one. This is the point every probe passes and past which none can be refused.
+	grant_achievement("we_are_bob")
 	enroute[target_star] = true
 	interstellar_missions.append({
 		"target": target_star, "vn": true,
@@ -7681,6 +7754,7 @@ func _recheck_sol_cell() -> void:
 func _colonize_star(star_name: String) -> void:
 	if _col_star_set.has(star_name):
 		return
+	grant_achievement("foothold")
 	colonized_stars.append(star_name)
 	_col_star_set[star_name] = true
 	# Checked here, once per colony, rather than by scanning the holdings: at sixteen thousand
@@ -7947,6 +8021,7 @@ func _check_front_detected() -> void:
 	if not FrontData.detected(dist, front_year, float(year)):
 		return
 	front_seen = true
+	grant_achievement("something_replicating")
 	_announce("Something else is replicating",
 		"Probes not ours are spreading from the galactic centre, %s away. The light saying so left %s ago, so the front is already nearer than it looks — and it is taking every system it reaches." % [
 			Units.format_si(dist, "ly"), Units.format_si(float(year) - front_year, "yr")],
@@ -8757,6 +8832,11 @@ func _launch_alien_attacks(dyears: float) -> void:
 			spent[mkey] = int(spent.get(mkey, 0)) + 1
 			_alien_fired[src] = spent
 		var beta: float = 1.0 if kind == "laser" else (0.3 if kind == "berserker" else RKKV_BETA)
+		# Shot at by somebody we have never spoken to. The alignment is in the catalogue either
+		# way; _known_alignments is whether WE know it, which is the thing the achievement is
+		# about — the first you hear of them is the projectile.
+		if not _known_alignments.has(src):
+			grant_achievement("dark_forest")
 		incoming_attacks.append({
 			"source": src, "target": tgt, "kind": kind,
 			"start_year": float(year), "end_year": float(year) + dist / beta,
@@ -8827,6 +8907,8 @@ func _check_incoming_attacks() -> void:
 			trigger_game_over("Relativistic bombardment",
 				"Earth is struck by a relativistic kinetic impactor and sterilised. Inhabited worlds: 0.")
 		else:
+			# Survived, which is the whole achievement: being hit is not the hard part.
+			grant_achievement("killing_star")
 			_announce("Relativistic impact — Earth",
 				"Earth is struck and sterilised. The species endures in %d settled place%s beyond it." % [
 					elsewhere, "" if elsewhere == 1 else "s"],
@@ -9452,6 +9534,7 @@ func _resolve_trade(m: Dictionary) -> void:
 		if status != "allied":
 			_diplo_status[star] = "trading"
 		var got: String = TradeData.bundle_text(request) if not request.is_empty() else "nothing (a gift)"
+		grant_achievement("rendezvous")
 		_announce("Trade accepted — %s" % star,
 			"%s accepts the proposal. Received at %s: %s. Delivered: %s." % [
 				star, where, got, TradeData.bundle_text(offer)],
@@ -9592,6 +9675,230 @@ func _setup_star_sky() -> void:
 ## `extra` carries anything the card should be able to act on — a "star" key makes the card
 ## clickable and takes the player to that star on the map, which is the only thing a detection
 ## three hundred light-years away actually invites them to do.
+# ── Achievements ──────────────────────────────────────────────────────────────
+#
+# What a run is remembered for.  See achievements.gd for what each one is and why the failures
+# are hidden.
+#
+# Granted two ways.  Anything with a MOMENT — a probe away, a colony lost, a world finished —
+# is granted at that moment, because the moment is the only place the fact exists; by the next
+# tick a seceded colony is simply gone and there is nothing left to notice.  Anything that is a
+# THRESHOLD on state the game already keeps is swept once a year instead, which is cheap and
+# cannot be missed by a condition that was briefly true between ticks.
+
+## id → the year it was earned.  A year rather than a bool, so the run summary can say when.
+var achievements_earned: Dictionary = {}
+
+## Hand the page the record. Called on every grant and when the page opens, so what is shown
+## and what is in the save cannot disagree.
+func _push_achievements() -> void:
+	if sidebar and sidebar.achievements_page:
+		sidebar.achievements_page.set_earned(achievements_earned)
+
+
+## What last went badly wrong, and when: {"kind": String, "year": int}.
+##
+## Only one ending condition actually exists for the three catastrophes — they kill people, and
+## the run ends when there is nobody left, under the single cause "Population collapse". So the
+## ending cannot say what did it unless something remembers, and this is what remembers.
+## Deliberately NOT saved: it is a few years of context for an ending, not run state.
+var _last_catastrophe: Dictionary = {}
+
+## How stale the news of a lost colony has to be to be worth an achievement of its own. Five
+## hundred light-years is well past the point where governing one was ever possible.
+const ACH_LATE_NEWS_YEARS: float = 500.0
+
+## How recently a catastrophe has to have landed for the ending to be blamed on it. A collapse
+## is not instant — the survivors dwindle — but a war a hundred thousand years ago did not do it.
+const ACH_CATASTROPHE_WINDOW_YEARS: int = 500
+
+## Award one.  Idempotent, and returns whether this call was the one that earned it, so a caller
+## inside a loop can announce the first without checking first.
+func grant_achievement(id: String) -> bool:
+	if achievements_earned.has(id):
+		return false
+	var rec: Dictionary = AchievementData.by_id(id)
+	if rec.is_empty():
+		push_warning("grant_achievement: no such achievement '%s'" % id)
+		return false
+	achievements_earned[id] = year
+	_push_achievements()
+	_announce("Achievement: %s" % str(rec["name"]), str(rec["desc"]),
+		"ach_%s" % id, {"category": "achievement"})
+	return true
+
+
+## Everything that is a threshold on state rather than an event.
+##
+## Called once a year from the year tick.  Every test below is a field read or a size, except
+## the two that walk the solar system's own bodies — a dozen — and they stop being walked once
+## earned.  Nothing here walks the colony roster, which is fifteen thousand entries: the
+## achievements that are about colonies are granted where a colony changes instead.
+func _check_achievements() -> void:
+	# ── The swarm ──
+	if interstellar_missions.size() >= 1000:
+		grant_achievement("we_are_legion")
+	if colonized_stars.size() >= 1000:
+		grant_achievement("star_maker")
+	if left_sol_cell:
+		grant_achievement("deepness")
+
+	# ── Stellar engineering ──
+	if SolarSystem.star_drift_dist_ly >= 1.0:
+		grant_achievement("wandering_sun")
+	if SolarSystem.star_drift_dist_ly >= 100.0:
+		grant_achievement("caravan")
+	if SolarSystem.star_mass_msun <= 0.90:
+		grant_achievement("stealing_fire")
+	if SolarSystem.star_mirror_coverage >= 0.99:
+		grant_achievement("accelerando")
+
+	# ── Thinking ──
+	if _cached_compute_ai > _cached_compute_human and _cached_compute_ai > 0.0:
+		grant_achievement("permutation_city")
+	if _get_compute_rate() >= ACH_DEEP_THOUGHT_FLOPS:
+		grant_achievement("deep_thought")
+
+	# ── Deep time.  The eras the timeline already names. ──
+	if float(year) >= ACH_TAU_ZERO_YEAR:
+		grant_achievement("tau_zero")
+	if float(year) >= ACH_DEGENERATE_YEAR:
+		grant_achievement("city_and_stars")
+	if float(year) >= ACH_HEAT_DEATH_YEAR:
+		grant_achievement("last_question")
+
+	# ── Secession, as a share of what was ever held ──
+	if _seceded.size() > 0 and _seceded.size() * 2 >= colonized_stars.size() + _seceded.size():
+		grant_achievement("foundation")
+
+	# ── The solar system, settled.  A dozen bodies, and only while unearned. ──
+	if not achievements_earned.has("the_expanse"):
+		var all_settled: bool = true
+		for body: String in _settleable_bodies():
+			if not colonized_planets.has(body):
+				all_settled = false
+				break
+		if all_settled and not _settleable_bodies().is_empty():
+			grant_achievement("the_expanse")
+
+	# ── The front ──
+	# Swept rather than hooked, because both are about the SHAPE of the front rather than a
+	# moment: a cell changes hands over centuries and there is no instant to hang either on.
+	# Skipped entirely until the front is real and seen, which is most runs.
+	if front_active() and front_seen and not front_cells.is_empty():
+		if not achievements_earned.has("first_come"):
+			for star: String in colonized_stars:
+				var sh: float = front_share(_region_id(_star_pos(star)))
+				if sh > 0.0:
+					grant_achievement("first_come")
+					break
+		if not achievements_earned.has("boxed_in") and _ach_boxed_in():
+			grant_achievement("boxed_in")
+
+	# ── Taken apart ──
+	if not achievements_earned.has("all_these_worlds"):
+		var whole: Array = []
+		for body: String in _settleable_bodies():
+			if not _disassembled.has(body):
+				whole.append(body)
+		if whole.is_empty():
+			grant_achievement("all_these_worlds")
+		elif whole.size() == 1 and str(whole[0]) == ACH_EUROPA:
+			grant_achievement("except_europa")
+
+## What the run is remembered for ending as.
+##
+## Every ending goes through trigger_game_over, so this is the one place that has to know them.
+## The three catastrophes do not have endings of their own — they kill people and the run ends
+## as a population collapse — so the cause is read from _last_catastrophe instead, and only if
+## one landed recently enough to plausibly be the reason.
+func _grant_ending_achievement(cause: String) -> void:
+	match cause:
+		"Planetary nebula", "Solar envelope expansion":
+			grant_achievement("time_machine")
+		"Population collapse":
+			var kind: String = str(_last_catastrophe.get("kind", ""))
+			# A plain absence check rather than a sentinel year: GDScript will not shift a
+			# negative operand, and a "very long ago" constant is a worse way to say "never".
+			var hit_year: int = int(_last_catastrophe.get("year", 0))
+			var recent: bool = not _last_catastrophe.is_empty() \
+				and year - hit_year <= ACH_CATASTROPHE_WINDOW_YEARS
+			if recent:
+				match kind:
+					"asteroid": grant_achievement("lucifers_hammer")
+					"nuclear":  grant_achievement("canticle")
+			grant_achievement("last_man")
+	# Earned the wrong way: the title, for a run that ended without ever reaching orbit.
+	if not achievements_earned.has("small_step"):
+		grant_achievement("dont_go_extinct")
+
+
+## Traits, as a splice lands.  Takes the record rather than the world, because the caller
+## already has it and looking it up again would be a second dictionary probe for nothing.
+func _check_trait_achievements(st: Dictionary) -> void:
+	var traits: Array = st.get("traits", [])
+	if traits.size() >= StockData.MAX_TRAITS:
+		grant_achievement("homo_superior")
+	if traits.has("longevity") and traits.has("high_intelligence"):
+		grant_achievement("beggars_in_spain")
+
+
+## Whether the front has closed the space around Sol: every neighbouring region denied.
+##
+## Measured on the ring of cells around the frame origin rather than on the whole grid, because
+## "boxed in" is a statement about where you can still go from here, not about how much of the
+## galaxy somebody holds.
+func _ach_boxed_in() -> bool:
+	var here: Vector3 = SolarSystem.sol_position()
+	var neighbours: int = 0
+	var denied: int = 0
+	for dx: int in [-1, 0, 1]:
+		for dz: int in [-1, 0, 1]:
+			if dx == 0 and dz == 0:
+				continue
+			var probe: Vector3 = here + Vector3(float(dx), 0.0, float(dz)) * HEX_SIZE * 1.8
+			var id: String = _region_id(probe)
+			if not _regions.has(id):
+				continue
+			neighbours += 1
+			if FrontData.denies(front_share(id)):
+				denied += 1
+	return neighbours >= 4 and denied == neighbours
+
+
+## Compute at which a civilisation is thinking on a scale nobody designed the units for.
+## Earth in 1945 runs about 3e26 FLOP/s of human thought, so this is a thousandfold on that.
+const ACH_DEEP_THOUGHT_FLOPS: float = 3.0e29
+## The last star formation; past here the galaxy is lit by what is already burning.
+const ACH_TAU_ZERO_YEAR: float = 1.0e14
+## The degenerate era: no main-sequence stars left anywhere.
+const ACH_DEGENERATE_YEAR: float = 1.0e20
+## Heat death, as the timeline draws it (see timeline_canvas.HEAT_DEATH_YEAR).
+const ACH_HEAT_DEATH_YEAR: float = 1.0e100
+
+## The bodies a civilisation could actually live on — what "settle everything" and "take
+## everything apart" are both measured against.
+##
+## launch_endpoints(), which is the same list the Launches panel offers and already means
+## "planets AND every buildable moon": a hand-written list here would be a second catalogue to
+## keep in step, and a moon added later would silently stop counting. Earth is left out because
+## it is where you start — settling it is not an achievement, and taking it apart has one of its
+## own.
+##
+## Cached: the catalogue does not change during a run, and this is read on the year tick.
+func _settleable_bodies() -> Array:
+	if _ach_bodies.is_empty():
+		for e: Array in launch_endpoints():
+			var id: String = str(e[1])
+			if id != HOME_WORLD:
+				_ach_bodies.append(id)
+	return _ach_bodies
+var _ach_bodies: Array = []
+
+## Europa, by its catalogue id.  The one world the quote says to leave alone.
+const ACH_EUROPA: String = "jupiter_moon_1"
+
+
 func _announce(title: String, desc: String, id: String, extra: Dictionary = {}) -> void:
 	var notif: Dictionary = {
 		"id": id, "year": year, "title": title, "desc": desc, "category": "civilization",
@@ -10152,6 +10459,7 @@ func load_game(path: String = "") -> void:
 	# Rebuilt on the first population tick; until then _combine_production falls back to the
 	# plain headcount rather than reading a zero.
 	_pop_weighted_compute = 0.0
+	_pop_weighted_compute_sol = 0.0
 	_pop_weighted_life = 1.0
 	# Rebuild the evolution tree from the saved lineage map.  variant_parent is an
 	# ordered { world → parent world } dict; replaying it in insertion order
@@ -10517,8 +10825,12 @@ func _update_population(delta_days: float) -> void:
 		# times, so it contributes on the tick the cycle closes.
 		if is_star or closing:
 			_pop_part_head += held
-			_pop_part_compute += held \
-				* maxf(1.0 + (float(srow.get("compute", 1.0)) - 1.0) * real, 0.01)
+			var cw: float = maxf(1.0 + (float(srow.get("compute", 1.0)) - 1.0) * real, 0.01)
+			_pop_part_compute += held * cw
+			# `is_star` is already in hand and is exactly the distinction: the solar system is
+			# the civilisation the player can act with this year.
+			if not is_star:
+				_pop_part_compute_sol += held * cw
 			_pop_part_life += held \
 				* maxf(1.0 + (float(srow.get("life", 1.0)) - 1.0) * real, 0.01)
 	for s: String in stale:
@@ -10531,10 +10843,12 @@ func _update_population(delta_days: float) -> void:
 		# Per-head averages, so a civilisation of one stock gets exactly that stock's figure and
 		# nothing is scaled by how many people happen to be alive.
 		_pop_weighted_compute = _pop_part_compute
+		_pop_weighted_compute_sol = _pop_part_compute_sol
 		_pop_weighted_life = _pop_part_life / _pop_part_head if _pop_part_head > 0.0 else 1.0
 		head = _pop_part_head
 		_pop_part_head = 0.0
 		_pop_part_compute = 0.0
+		_pop_part_compute_sol = 0.0
 		_pop_part_life = 0.0
 	# Mirror the total into stats for everywhere that reads a single global headcount.
 	stats["current_population"] = maxf(head, 0.0)
@@ -11027,6 +11341,7 @@ func _resume_after_threat() -> void:
 ## `target` and `kill_frac` default to a fresh roll, which is what the dev console wants; the
 ## warning dialog passes the ones the player was actually shown.
 func _trigger_asteroid_impact(target: String = "", kill_frac: float = -1.0) -> void:
+	_last_catastrophe = {"kind": "asteroid", "year": year}
 	var inhabited: Array = _impact_targets()
 	if target == "" or not inhabited.has(target):
 		target = str(inhabited[_roll_pick("impact_target", inhabited.size(), year)])
@@ -11203,6 +11518,7 @@ func pandemic_probability() -> float:
 ## affected world loses the same fraction, written to world_pop — the population record — so
 ## the loss persists instead of being re-summed away on the next frame.
 func _trigger_pandemic() -> void:
+	_last_catastrophe = {"kind": "pandemic", "year": year}
 	var inhabited: int = 1 + colonized_planets.size()
 	var affected: Array = []
 	var pop: float = 0.0
@@ -11312,6 +11628,7 @@ func nuclear_probability() -> float:
 ## stats mirror (as this used to) was re-summed away on the next frame, and it also charged
 ## the colonies' people to a war they took no part in.
 func _trigger_nuclear_war() -> void:
+	_last_catastrophe = {"kind": "nuclear", "year": year}
 	var pop: float = float(world_pop.get("earth", 0.0))
 	if pop <= 0.0:
 		return   # nobody left on Earth to fight it
