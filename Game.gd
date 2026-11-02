@@ -830,6 +830,10 @@ var _autosave_accum: float = 0.0
 ## every frame, and build-roster changes coalesce into one rebuild per tick (see _process).
 const UI_REFRESH_SEC: float = 0.25
 var _ui_refresh_accum: float = 0.0
+## The star map's own accumulator. Separate from _ui_refresh_accum so the two do not have to
+## land on the same frame — a full star-map rebuild and a BuildPanel rebuild in one frame is the
+## spike both throttles exist to avoid.
+var _star_map_accum: float = 0.0
 var _build_ui_dirty: bool = false
 
 # ── Game events ───────────────────────────────────────────────────────────────
@@ -2306,9 +2310,22 @@ func _process(delta: float) -> void:
 		_refresh_stats()
 		statistics_page.set_stats(stats)
 		_update_hud()
-		# Keep the star map's mission/attack progress + energy readout live while it's open.
+		# Keep the star map's energy readout and roster live while it's open — THROTTLED, the
+		# same way the panel refresh below is, and for a stronger reason.
+		#
+		# refresh_star_map() is a full rebuild: believed_colonies() duplicates the whole roster,
+		# the cluster pass walks every cluster in the patch, and the faction map is rebuilt. At
+		# four thousand colonies that measured 37 ms a push. And none of it is what makes a
+		# flight move — each track carries its own window and the panel places it from
+		# _flight_year, which its own _process advances every frame (see set_interstellar_state).
+		#
+		# So this was costing a full rebuild per frame to animate something that animates itself,
+		# from the moment the player launched anything.
 		if sidebar and sidebar.star_map and sidebar.star_map.visible:
-			refresh_star_map()
+			_star_map_accum += delta
+			if _star_map_accum >= UI_REFRESH_SEC:
+				_star_map_accum = 0.0
+				refresh_star_map()
 
 	# ── Throttled panel refresh (once per frame, capped at ~4 Hz) ────────────────
 	# get_planet_data duplicates composition/inventory dictionaries and a BuildPanel rebuild

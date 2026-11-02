@@ -996,6 +996,41 @@ frame on which anything anywhere is marked.
 The static case is the one that matters: a map is read far more than it is turned, and the map's
 own share of a still frame went from ~31 ms to nothing measurable.
 
+### Sending a flight used to cost a rebuild a frame
+
+Reported as "the star map gets laggy again after the player sends a flight", and it was two
+things, both doing work to animate something that animates itself.
+
+**The cache was thrown away on every push.** `set_interstellar_state` bumped `_marked_version`
+unconditionally, and that version is in the star cache's key — including the view-independent
+half, which holds `_rel(pos)` for every star and is the expensive one to rebuild. The UI pass
+calls `refresh_star_map()` while the map is open, so from the moment anything was in flight the
+whole pass was rebuilt sixty times a second.
+
+The version exists to catch *a colony lost and another gained between two frames*, which the
+counts miss. It does not need to fire when nothing moved. The comment beside it warned off "a
+value compare of six thousand entries every frame" — correct in isolation, but weighed against
+the wrong alternative: at 4 000 colonies that compare is **0.33 ms** and the rebuild it prevents
+is **37 ms**.
+
+**The push itself is a full rebuild.** `refresh_star_map()` duplicates the whole colony roster,
+walks every cluster in the patch and rebuilds the faction map. None of that is what makes a
+flight move — each track carries its own window and the panel places it from `_flight_year`,
+which its own `_process` advances every frame. So it is throttled to `UI_REFRESH_SEC` like the
+panel refresh beside it, with a **separate** accumulator so a star-map rebuild and a BuildPanel
+rebuild need not land on the same frame.
+
+| at 4 000 colonies | ms/frame |
+|---|---|
+| before | **80.8** |
+| conditional bump only | 50.8 |
+| + throttled push | **15.0** |
+
+`verify_flight_refresh` pins the part that matters: not "stop bumping", but bump *when it means
+something*. A push that changes nothing leaves the version alone; settling a star, a faction
+appearing, and a **same-size swap** all still move it. The swap is the case the version exists
+for and the counts cannot see.
+
 ### Turning: the other half of that sentence
 
 "A map is read far more than it is turned" was true and was also an excuse. Turning still cost

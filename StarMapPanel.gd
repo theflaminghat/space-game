@@ -2979,9 +2979,21 @@ var _flight_year: float = 0.0
 
 func set_interstellar_state(colonized: Dictionary, missions: Array, energy: float,
 		now_year: float = -1.0) -> void:
+	# Bumped only when the HOLDINGS actually moved, not on every push.
+	#
+	# This is called from the UI pass, and the UI pass runs every frame while anything is in
+	# flight — so an unconditional bump invalidated the star cache sixty times a second from the
+	# moment the player sent their first ship. Measured at six thousand stars: 7.3 ms a frame
+	# idle against 46.8 ms with the push, which is the whole of the "the map goes slow once I
+	# launch something" report.
+	#
+	# A value compare of the whole dictionary is exactly what the cache's own comment says it is
+	# avoiding — but it is avoiding it against the wrong alternative. The compare costs a
+	# fraction of a millisecond; the rebuild it prevents costs forty.
+	if colonized != _colonized:
+		_marked_version += 1
 	_colonized = colonized
 	_marked_stars = not _colonized.is_empty() or not _factions.is_empty()
-	_marked_version += 1
 	_missions = missions
 	_avail_energy = energy
 	if now_year >= 0.0:
@@ -3036,8 +3048,10 @@ func _cluster_pickable(ci: int) -> bool:
 
 ## Push alien presence (star name → "aggressive"/"peaceful") for the red/blue highlights.
 func set_star_factions(factions: Dictionary) -> void:
+	# Same rule as set_interstellar_state: pushed every frame, so bump only on a real change.
+	if factions != _factions:
+		_marked_version += 1
 	_factions = factions
-	_marked_version += 1
 	_marked_stars = not _colonized.is_empty() or not _factions.is_empty()
 	queue_redraw()
 
