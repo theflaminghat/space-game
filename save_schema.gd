@@ -172,6 +172,16 @@ const FIELDS: Array[Dictionary] = [
 	# Plain: an older save has earned nothing, which is what an empty dict already means, and a
 	# loaded run goes on earning from wherever it is.
 	{"key": "achievements",       "prop": "achievements_earned", "kind": DICT_INT, "default": null},
+	# High-water marks for the run summary.  Kept rather than derived: the stats graph is
+	# downsampled, and when a record was set is not recoverable from it afterwards.  An older
+	# save has none, and a zero peak simply starts being beaten on the next tick.
+	{"key": "peak_population",      "kind": FLOAT, "default": 0.0},
+	{"key": "peak_population_year", "kind": INT,   "default": 0},
+	{"key": "peak_stars",           "kind": INT,   "default": 0},
+	{"key": "peak_worlds",          "kind": INT,   "default": 0},
+	# -1, not 0: "the front was never seen" and "it arrived before we had anything" are
+	# different facts and the summary says different things about them.
+	{"key": "stars_at_front",       "kind": INT,   "default": -1},
 
 	# ── Launches and flights ──
 	{"key": "active_launches",      "custom": true},  # reserved swarm slots are recounted

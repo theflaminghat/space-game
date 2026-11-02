@@ -2420,6 +2420,7 @@ func advance_day() -> void:
 			_check_pandemic()
 			_check_nuclear_war()
 			_check_achievements()
+			_update_peaks()
 			if timeline_panel and timeline_panel.visible:
 				timeline_panel.set_current_year(year)
 
@@ -4611,7 +4612,8 @@ func trigger_game_over(cause: String, description: String) -> void:
 	# Record the final moment, then mirror the run's history onto the extinction screen.
 	statistics_page.push_snapshot(year, stats)
 	game_over_screen.set_graph_history(statistics_page.get_graph())
-	game_over_screen.show_game_over(cause, description, year, stats, _people_ever_lived)
+	game_over_screen.show_game_over(cause, description, year, stats, _people_ever_lived,
+		run_summary(), run_summary_text())
 
 ## Called when the player presses "Start New Civilization" on the game-over screen.
 ##
@@ -4687,6 +4689,7 @@ func _on_years_advanced_fast(_years_advanced: int) -> void:
 		# run actually crosses the deep-time thresholds, and an achievement that only the day
 		# clock could grant would be unreachable in the era it is about.
 		_check_achievements()
+		_update_peaks()
 		if timeline_panel and timeline_panel.visible:
 			timeline_panel.set_current_year(year)
 
@@ -9689,11 +9692,130 @@ func _setup_star_sky() -> void:
 ## id → the year it was earned.  A year rather than a bool, so the run summary can say when.
 var achievements_earned: Dictionary = {}
 
+## ── High-water marks ──────────────────────────────────────────────────────────
+##
+## What the run is measured by, which is NOT what it holds at the end.
+##
+## game_over_screen._build_stats_text already decided this and says so: the final population and
+## the final colony count are "deliberately absent", because at the end they are both zero or
+## near enough. A run that held six thousand stars for a billion years and a run that never left
+## Earth both finish with nothing, and reporting the last moment cannot tell them apart.
+##
+## So the summary reports PEAKS, and they have to be kept as they happen — the stats graph is
+## downsampled, and the year a record was set is not recoverable from it afterwards.
+##
+## stars_at_front is the one the whole rival-front feature exists to produce: how much of the
+## galaxy was yours when somebody else's probes turned up. Captured once, and never moved again.
+var peak_population: float = 0.0
+var peak_population_year: int = 0
+var peak_stars: int = 0
+var peak_worlds: int = 0
+var stars_at_front: int = -1          # -1 = the front was never seen
+
+## The run, as a record: [[label, value], …].
+##
+## ── Why it reads like an instrument printout ──
+##
+## VOICE.md: the game reports, it does not narrate. There is no "you held" and no closing
+## sentence, because a summary that told the player what their run amounted to would be making
+## the conclusion for them. Facts in a column, and the juxtaposition is the only lever — a span
+## of four billion years sitting above a population that peaked for a moment says what it says.
+##
+## ── Why rows are omitted rather than zeroed ──
+##
+## A run that never met the front and a run that lost everything to it are different runs, and a
+## table of blanks reads as a form rather than a record. A row appears when the thing it reports
+## happened. The consequence is that two summaries are not always the same shape, which is
+## correct: they are records of different runs.
+##
+## Peaks, not final state, for the reason the high-water marks document.
+func run_summary() -> Array:
+	var rows: Array = []
+	rows.append(["Span", "%s – %s" % [_summary_year(TimelineCanvas.START_YEAR), _summary_year(year)]])
+	rows.append(["Humans who ever lived", Units.format_si(_people_ever_lived, "")])
+	if peak_population > 0.0:
+		rows.append(["Peak population", "%s  (year %s)" % [
+			Units.format_si(peak_population, ""), _summary_year(peak_population_year)]])
+	rows.append(["Entropy exported", Units.format_si(entropy_exported, "J/K")])
+
+	if peak_worlds > 0:
+		rows.append(["Worlds settled in system", "%d of %d" % [
+			peak_worlds, _settleable_bodies().size()]])
+	if peak_stars > 0:
+		rows.append(["Stars held, peak", str(peak_stars)])
+	if not _seceded.is_empty():
+		rows.append(["Stars lost to secession", str(_seceded.size())])
+	if not _disassembled.is_empty():
+		rows.append(["Worlds disassembled", str(_disassembled.size())])
+
+	if SolarSystem.star_drift_dist_ly > 0.0:
+		rows.append(["Sol displaced", Units.format_si(SolarSystem.star_drift_dist_ly, "ly")])
+	var lifted: float = 1.0 - SolarSystem.star_mass_msun
+	if lifted > 0.005:
+		rows.append(["Sol mass removed", "%.1f%%" % (lifted * 100.0)])
+
+	# The rival front, which is the comparison the feature exists to produce.
+	if front_seen:
+		rows.append(["Rival front seen", "year %s" % _summary_year(int(front_year))])
+		if stars_at_front >= 0:
+			rows.append(["Stars held when it arrived", str(stars_at_front)])
+
+	# Hidden achievements are left out of the denominator for the reason the page does it: the
+	# total would otherwise say how many ways there are to lose.
+	var visible_total: int = 0
+	for a: Dictionary in AchievementData.ACHIEVEMENTS:
+		if not bool(a.get("hidden", false)) or achievements_earned.has(str(a["id"])):
+			visible_total += 1
+	rows.append(["Achievements", "%d of %d" % [achievements_earned.size(), visible_total]])
+	return rows
+
+
+## A year for the record.
+##
+## Plain below ten thousand and SI above it: a run spends most of its length in years with more
+## digits than a column can carry, and "1945" is not "1.9 kyr". The unit is carried above the
+## threshold because "4.2 G" alone does not say what it counts — the same way
+## _announce_star_lifting already writes a date.
+func _summary_year(y: int) -> String:
+	return str(y) if absi(y) < 10000 else Units.format_si(float(y), "yr")
+
+
+## The record as one block of text, for the clipboard.  Two runs are compared by someone pasting
+## them side by side, which is the whole reason the peaks are kept.
+func run_summary_text() -> String:
+	var out: String = "Don't Go Extinct — run record\n"
+	for r: Array in run_summary():
+		out += "%-28s %s\n" % [str(r[0]), str(r[1])]
+	var earned: Array = []
+	for id: String in achievements_earned:
+		earned.append("%s (%s)" % [AchievementData.name_of(id),
+			_summary_year(int(achievements_earned[id]))])
+	earned.sort()
+	if not earned.is_empty():
+		out += "\n" + "\n".join(earned) + "\n"
+	return out
+
+
+## Update the high-water marks.  Four compares on the year tick; nothing here walks anything.
+func _update_peaks() -> void:
+	var pop: float = float(stats.get("current_population", 0.0)) + _region_population()
+	if pop > peak_population:
+		peak_population = pop
+		peak_population_year = year
+	peak_stars = maxi(peak_stars, colonized_stars.size())
+	peak_worlds = maxi(peak_worlds, colonized_planets.size())
+	# Captured the year the front's light ARRIVES, not the year it started: what the player had
+	# when they found out is the figure they can be held to.
+	if stars_at_front < 0 and front_seen:
+		stars_at_front = colonized_stars.size()
+
+
 ## Hand the page the record. Called on every grant and when the page opens, so what is shown
 ## and what is in the save cannot disagree.
 func _push_achievements() -> void:
 	if sidebar and sidebar.achievements_page:
 		sidebar.achievements_page.set_earned(achievements_earned)
+		sidebar.achievements_page.set_record(run_summary(), run_summary_text())
 
 
 ## What last went badly wrong, and when: {"kind": String, "year": int}.

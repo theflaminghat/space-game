@@ -1266,6 +1266,39 @@ So `_update_population` costs exactly what it did when a stock was a single row.
 **`TRAITS` order and not tick order**, or two populations holding the same three traits would
 hash to different keys and be different stocks.
 
+### The run record
+
+`Game.run_summary()` returns `[[label, value], …]`; the ending screen and the records page both
+render it, and `run_summary_text()` is the same thing for the clipboard — two runs get compared
+by someone pasting them side by side, which is the whole reason the peaks are kept.
+
+**Peaks, not final state, and that was already settled.** `game_over_screen._build_stats_text`
+had worked it out and said so: the final population and colony count are *"deliberately
+absent"*, because at the end they are both zero. A run that held six thousand stars for a
+billion years and one that never left Earth finish identically, so the last moment cannot tell
+them apart. The high-water marks are therefore kept **as they happen** — the stats graph is
+downsampled and the year a record was set is not recoverable from it afterwards. Four compares
+on the year tick, nothing walked.
+
+`stars_at_front` is the figure the whole rival-front feature exists to produce: how much of the
+galaxy was yours when somebody else's probes turned up. Captured the year the front's light
+**arrives**, not the year it started — what the player had when they found out is what they can
+be held to — and never moved again. It defaults to `-1`, not `0`, because "the front was never
+seen" and "it arrived before we had anything" are different facts.
+
+**Rows are omitted rather than zeroed.** A run that never met the front and a run that lost
+everything to it are different runs, and a table of blanks reads as a form. The consequence is
+that two summaries are not always the same shape, which is correct: they are records of
+different runs.
+
+**The voice is the constraint, not decoration.** VOICE.md: the game reports, it does not
+narrate. There is no "you held" and no closing sentence, because a summary that told the player
+what their run amounted to would be making the conclusion for them. `verify_run_record` asserts
+the absence of second person and of the banned editorial vocabulary, which is the only part of a
+voice guide a test can hold.
+
+`_build_stats_text` and its two formatters were deleted: both of its lines are now rows.
+
 ### Achievements
 
 `achievements.gd` holds the table; `Game.achievements_earned` maps id → **the year it was

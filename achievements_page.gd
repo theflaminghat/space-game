@@ -25,6 +25,10 @@ const HEADING_COLOR:  Color = Color(0.70, 0.82, 1.0)
 
 var _list: VBoxContainer = null
 var _summary: Label = null
+## The run record, and the text form of it for the clipboard. Both pushed in by Game.
+var _record: GridContainer = null
+var _copy: Button = null
+var _record_text: String = ""
 ## id → the year earned, as Game last pushed it.
 var _earned: Dictionary = {}
 
@@ -54,6 +58,24 @@ func _ready() -> void:
 	_summary.modulate = NOTE_COLOR
 	col.add_child(_summary)
 
+	# The run as a record, above the list. The same rows the ending screen shows, because a
+	# record only readable once you have lost is not a record you can play toward.
+	_record = GridContainer.new()
+	_record.columns = 2
+	_record.add_theme_constant_override("h_separation", 22)
+	_record.add_theme_constant_override("v_separation", 1)
+	col.add_child(_record)
+
+	_copy = Button.new()
+	_copy.text = "Copy record"
+	_copy.add_theme_font_size_override("font_size", 10)
+	_copy.custom_minimum_size = Vector2(128, 22)
+	_copy.pressed.connect(_on_copy)
+	var copy_row := HBoxContainer.new()
+	copy_row.add_child(_copy)
+	col.add_child(copy_row)
+	col.add_child(HSeparator.new())
+
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -72,6 +94,33 @@ func set_earned(earned: Dictionary) -> void:
 	_earned = earned
 	if _list != null:
 		_rebuild()
+
+
+## The run so far, as Game.run_summary() builds it, plus the text form for the clipboard.
+func set_record(rows: Array, text: String) -> void:
+	_record_text = text
+	if _record == null:
+		return
+	for c in _record.get_children():
+		c.queue_free()
+	for row: Array in rows:
+		var k := Label.new()
+		k.text = str(row[0])
+		k.add_theme_font_size_override("font_size", 11)
+		k.add_theme_color_override("font_color", LOCKED_COLOR)
+		_record.add_child(k)
+		var v := Label.new()
+		v.text = str(row[1])
+		v.add_theme_font_size_override("font_size", 11)
+		v.add_theme_color_override("font_color", PENDING_COLOR)
+		_record.add_child(v)
+
+
+func _on_copy() -> void:
+	if _record_text == "":
+		return
+	DisplayServer.clipboard_set(_record_text)
+	_copy.text = "Copied"
 
 
 func _rebuild() -> void:

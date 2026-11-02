@@ -21,7 +21,10 @@ const EPILOGUE_PAUSE := 1.2   # beat after the last line before the button appea
 var _cause_label: Label = null
 var _desc_label:  Label = null
 var _year_label:  Label = null
-var _stats_label: Label = null
+## The run, as a two-column record. Replaces the single stats line: see _fill_record.
+var _record_grid: GridContainer = null
+var _copy_button: Button = null
+var _summary_text: String = ""
 var _graph: StatsGraph  = null   # mirror of the in-game Statistics chart for this run
 
 # ── Menu vs. cinematic layers ───────────────────────────────────────────────────
@@ -113,13 +116,27 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
-	# ── Final stats row ────────────────────────────────────────────────────────
-	_stats_label = Label.new()
-	_stats_label.text = ""
-	_stats_label.add_theme_font_size_override("font_size", 12)
-	_stats_label.add_theme_color_override("font_color", Color(0.58, 0.62, 0.74))
-	_stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(_stats_label)
+	# ── The run, as a record ───────────────────────────────────────────────────
+	# A two-column table rather than a sentence, and PEAKS rather than the last moment: at the
+	# end the population and the colony count are both zero, so a run that held six thousand
+	# stars for a billion years and one that never left Earth read identically. Game.run_summary
+	# builds the rows; this only lays them out.
+	var rec_holder := CenterContainer.new()
+	vbox.add_child(rec_holder)
+	_record_grid = GridContainer.new()
+	_record_grid.columns = 2
+	_record_grid.add_theme_constant_override("h_separation", 26)
+	_record_grid.add_theme_constant_override("v_separation", 2)
+	rec_holder.add_child(_record_grid)
+
+	_copy_button = Button.new()
+	_copy_button.text = "Copy record"
+	_copy_button.add_theme_font_size_override("font_size", 12)
+	_copy_button.custom_minimum_size = Vector2(150, 28)
+	_copy_button.pressed.connect(_on_copy_record)
+	var copy_holder := CenterContainer.new()
+	copy_holder.add_child(_copy_button)
+	vbox.add_child(copy_holder)
 
 	vbox.add_child(HSeparator.new())
 
@@ -236,7 +253,11 @@ func set_graph_history(source: StatsGraph) -> void:
 	_graph.queue_redraw()
 
 ## Display the screen with cause info and final stats.
-func show_game_over(cause: String, description: String, final_year: int, stats: Dictionary, people_ever_lived: float = 0.0) -> void:
+## `summary` is Game.run_summary(): [[label, value], …]. Passed in rather than read, because the
+## screen has no business knowing what a high-water mark is.
+func show_game_over(cause: String, description: String, final_year: int, stats: Dictionary,
+		people_ever_lived: float = 0.0, summary: Array = [], summary_text: String = "") -> void:
+	_summary_text = summary_text
 	# Start the music first — gives the MP3 decoder a head-start so no frames
 	# are dropped when the black screen appears on the next render.
 	if _music_player and not _music_player.playing:
@@ -244,7 +265,7 @@ func show_game_over(cause: String, description: String, final_year: int, stats: 
 	_cause_label.text = cause
 	_desc_label.text  = description
 	_year_label.text  = "Final Year: %s" % _fmt_year(final_year)
-	_stats_label.text = _build_stats_text(stats, people_ever_lived)
+	_fill_record(summary)
 	# Hide the menu and run the cinematic epilogue.
 	_overlay.visible = false
 	_center.visible  = false
@@ -303,36 +324,32 @@ func _on_epilogue_continue() -> void:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-func _build_stats_text(stats: Dictionary, people_ever_lived: float) -> String:
-	var total: float = people_ever_lived   # cumulative humans ever born
-	var entropy: float = float(stats.get("entropy_exported", 0.0))
-	# Final population and colony count are deliberately absent.  At the end they are both zero,
-	# or near enough that stating them adds nothing — what the run amounted to is how many people
-	# got to exist and how much order it moved, not the size of the last moment.
-	# One stat per line; entropy is reported plainly, a number with no comment (see VOICE.md).
-	return "Total humans who ever lived: ~%s\nEntropy exported: %s J/K" % [
-		_fmt_pop_large(total), _fmt_sci(entropy)
-	]
+## Lay out the record. Labels dim, values bright: the eye reads down the right-hand column.
+func _fill_record(summary: Array) -> void:
+	if _record_grid == null:
+		return
+	for c in _record_grid.get_children():
+		c.queue_free()
+	for row: Array in summary:
+		var k := Label.new()
+		k.text = str(row[0])
+		k.add_theme_font_size_override("font_size", 12)
+		k.add_theme_color_override("font_color", Color(0.52, 0.56, 0.68))
+		_record_grid.add_child(k)
+		var v := Label.new()
+		v.text = str(row[1])
+		v.add_theme_font_size_override("font_size", 12)
+		v.add_theme_color_override("font_color", Color(0.80, 0.84, 0.92))
+		_record_grid.add_child(v)
 
-## Scientific-notation string (GDScript's % has no %e, so build it from %f/%d).
-func _fmt_sci(v: float) -> String:
-	if v <= 0.0:
-		return "0"
-	# `expo`, not `exp`: that is a built-in function, and shadowing it hides exp() from the rest
-	# of this scope as well as warning on every reload.
-	var expo: int = int(floor(log(v) / log(10.0)))
-	var mant: float = v / pow(10.0, expo)
-	return "%.2fe%d" % [mant, expo]
 
-## Format very large population figures with appropriate SI suffix.
-func _fmt_pop_large(v: float) -> String:
-	if v >= 1.0e18: return "%.2f Exa"  % (v * 1.0e-18)
-	if v >= 1.0e15: return "%.2f Peta" % (v * 1.0e-15)
-	if v >= 1.0e12: return "%.2f T"    % (v * 1.0e-12)
-	if v >= 1.0e9:  return "%.2f B"    % (v * 1.0e-9)
-	if v >= 1.0e6:  return "%.1f M"    % (v * 1.0e-6)
-	if v >= 1.0e3:  return "%.0f K"    % (v * 1.0e-3)
-	return "%.0f" % v
+## The record to the clipboard, which is how two runs actually get compared.
+func _on_copy_record() -> void:
+	if _summary_text == "":
+		return
+	DisplayServer.clipboard_set(_summary_text)
+	_copy_button.text = "Copied"
+
 
 func _fmt_year(y: int) -> String:
 	if y >= 1_000_000_000:
