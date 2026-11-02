@@ -9821,18 +9821,33 @@ func _push_achievements() -> void:
 ## What last went badly wrong, and when: {"kind": String, "year": int}.
 ##
 ## Only one ending condition actually exists for the three catastrophes — they kill people, and
-## the run ends when there is nobody left, under the single cause "Population collapse". So the
-## ending cannot say what did it unless something remembers, and this is what remembers.
-## Deliberately NOT saved: it is a few years of context for an ending, not run state.
+## the run ends when there is nobody left, under a single cause. So the ending cannot say what
+## did it unless something remembers, and this is what remembers.
+##
+## SAVED, which is a reversal: it was left out as "a few years of context, not run state" while
+## only an achievement read it. The extinction screen reads it now, and a run reloaded from the
+## wrong side of a war would have ended with the screen unable to say there had been one.
 var _last_catastrophe: Dictionary = {}
 
 ## How stale the news of a lost colony has to be to be worth an achievement of its own. Five
 ## hundred light-years is well past the point where governing one was ever possible.
 const ACH_LATE_NEWS_YEARS: float = 500.0
 
-## How recently a catastrophe has to have landed for the ending to be blamed on it. A collapse
-## is not instant — the survivors dwindle — but a war a hundred thousand years ago did not do it.
-const ACH_CATASTROPHE_WINDOW_YEARS: int = 500
+## How recently a catastrophe has to have landed for an ending to be blamed on it. A collapse is
+## not instant — the survivors dwindle — but a war a hundred thousand years ago did not do it.
+const CATASTROPHE_BLAME_WINDOW_YEARS: int = 500
+
+## The catastrophe an ending can still be blamed on, or "" if none can.
+##
+## One place, because the ending screen and the achievement both ask. A window that drifted
+## between the two would name a war on the extinction screen and not in the record, which is the
+## sort of disagreement nobody notices until somebody compares two runs.
+func _recent_catastrophe() -> String:
+	if _last_catastrophe.is_empty():
+		return ""
+	if year - int(_last_catastrophe.get("year", 0)) > CATASTROPHE_BLAME_WINDOW_YEARS:
+		return ""
+	return str(_last_catastrophe.get("kind", ""))
 
 ## Award one.  Idempotent, and returns whether this call was the one that earned it, so a caller
 ## inside a loop can announce the first without checking first.
@@ -9928,6 +9943,42 @@ func _check_achievements() -> void:
 		elif whole.size() == 1 and str(whole[0]) == ACH_EUROPA:
 			grant_achievement("except_europa")
 
+## The cause and description for an extinction by running out of people.
+##
+## The three catastrophes have no ending of their own: each kills a great many people and the
+## run ends when there is nobody left, under one cause. So the screen said the species ran out
+## of people and never what did it — a war, a rock and a plague produced the same six words.
+##
+## Named here rather than at the catastrophe, because a catastrophe is only the cause of an
+## ending if the ending followed it; most do not. The interval is reported rather than elided:
+## a collapse three centuries after a war is a different fact from one the same year, and
+## stating the number is the whole of the difference (VOICE.md — report, do not narrate).
+func _collapse_ending() -> Array:
+	var tail: String = "No humans remain on any world. Inhabited worlds: 0."
+	var kind: String = _recent_catastrophe()
+	if kind == "":
+		return ["Population collapse", tail]
+	var hit: int = int(_last_catastrophe.get("year", year))
+	var gap: int = maxi(year - hit, 0)
+	var what: String = ""
+	var cause: String = "Population collapse"
+	match kind:
+		"asteroid":
+			cause = "Impact"
+			what = "Impactor: year %d." % hit
+		"pandemic":
+			cause = "Pandemic"
+			what = "Outbreak: year %d." % hit
+		"nuclear":
+			cause = "Nuclear war"
+			what = "Exchange: year %d." % hit
+		_:
+			return ["Population collapse", tail]
+	var span: String = "Collapse followed in the same year." if gap == 0 \
+		else "Interval to collapse: %d year%s." % [gap, "" if gap == 1 else "s"]
+	return [cause, "%s %s %s" % [what, span, tail]]
+
+
 ## What the run is remembered for ending as.
 ##
 ## Every ending goes through trigger_game_over, so this is the one place that has to know them.
@@ -9939,16 +9990,9 @@ func _grant_ending_achievement(cause: String) -> void:
 		"Planetary nebula", "Solar envelope expansion":
 			grant_achievement("time_machine")
 		"Population collapse":
-			var kind: String = str(_last_catastrophe.get("kind", ""))
-			# A plain absence check rather than a sentinel year: GDScript will not shift a
-			# negative operand, and a "very long ago" constant is a worse way to say "never".
-			var hit_year: int = int(_last_catastrophe.get("year", 0))
-			var recent: bool = not _last_catastrophe.is_empty() \
-				and year - hit_year <= ACH_CATASTROPHE_WINDOW_YEARS
-			if recent:
-				match kind:
-					"asteroid": grant_achievement("lucifers_hammer")
-					"nuclear":  grant_achievement("canticle")
+			match _recent_catastrophe():
+				"asteroid": grant_achievement("lucifers_hammer")
+				"nuclear":  grant_achievement("canticle")
 			grant_achievement("last_man")
 	# Earned the wrong way: the title, for a run that ended without ever reaching orbit.
 	if not achievements_earned.has("small_step"):
@@ -10977,8 +11021,8 @@ func _update_population(delta_days: float) -> void:
 	# No people left anywhere → extinction.  Humanity also survives in the statistical galaxy
 	# regions, so a full collapse only ends the run once THOSE are empty too.
 	if not game_over and stats["current_population"] + _region_population() < 1.0:
-		trigger_game_over("Population collapse",
-			"No humans remain on any world. Inhabited worlds: 0.")
+		var ending: Array = _collapse_ending()
+		trigger_game_over(str(ending[0]), str(ending[1]))
 
 func _refresh_stats() -> void:
 	stats["year"]             = year

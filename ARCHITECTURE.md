@@ -1266,6 +1266,37 @@ So `_update_population` costs exactly what it did when a stock was a single row.
 **`TRAITS` order and not tick order**, or two populations holding the same three traits would
 hash to different keys and be different stocks.
 
+### The ending says what ended it
+
+The three catastrophes have no ending of their own. An asteroid, a plague and a nuclear war each
+kill a great many people, and the run ends later when there is nobody left — under one cause,
+with one description. So all three produced the same six words: *"No humans remain on any
+world."*
+
+`_last_catastrophe` records what landed and when; `_collapse_ending()` names it. The **interval**
+is reported rather than elided, because a collapse three centuries after a war is a different
+fact from one in the same year and stating the number is the whole of the difference. An
+unrecognised kind falls back to the plain cause rather than producing a blank header.
+
+**One place owns the window.** `_recent_catastrophe()` is asked by both the extinction screen and
+the achievement, so the two cannot drift into naming a war on one and not the other.
+
+`_last_catastrophe` is **saved**, which reverses an earlier decision. It was left out as "a few
+years of context, not run state" while only an achievement read it; the screen reads it now, and
+a run reloaded from the wrong side of a war would have ended unable to say there had been one.
+
+**The test gap this exposed is the general one.** The first version of `verify_ending_cause`
+exercised `_collapse_ending()` directly and never checked that the collapse site *calls* it —
+reverting the trigger to its old hard-coded cause passed every assertion. It now drives a real
+collapse and reads what the screen was given. Two things about the population model make that
+harder than it looks, and both are worth knowing:
+
+- Zeroing `world_pop` does not empty the galaxy. A world left in the roster at zero people still
+  has a carrying capacity and grows back out of it — the population bottoms out near a million
+  and climbs. The roster has to be **emptied**.
+- One tick is not enough. The headcount is delta-tracked and only published whole when a
+  population cycle closes, so a single call leaves the previous total standing.
+
 ### The run record
 
 `Game.run_summary()` returns `[[label, value], …]`; the ending screen and the records page both

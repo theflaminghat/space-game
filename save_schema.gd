@@ -182,6 +182,9 @@ const FIELDS: Array[Dictionary] = [
 	# -1, not 0: "the front was never seen" and "it arrived before we had anything" are
 	# different facts and the summary says different things about them.
 	{"key": "stars_at_front",       "kind": INT,   "default": -1},
+	# What last went badly wrong, so the extinction screen can say what did it. An older save
+	# has none, which reads as "nothing recent" — the same answer a quiet run gives.
+	{"key": "last_catastrophe",     "prop": "_last_catastrophe", "kind": RAW_DICT, "default": null},
 
 	# ── Launches and flights ──
 	{"key": "active_launches",      "custom": true},  # reserved swarm slots are recounted
