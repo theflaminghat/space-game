@@ -1301,6 +1301,73 @@ So `_update_population` costs exactly what it did when a stock was a single row.
 **`TRAITS` order and not tick order**, or two populations holding the same three traits would
 hash to different keys and be different stocks.
 
+### A colony's probes are built with a colony's star
+
+`_vn_launch` charged `ResearchTree.resources["energy"]` whoever launched — so a probe assembled
+four hundred light-years out, by a colony that may already have declared for itself, came out of
+Sol's reserve in the same instant it left. The line directly below the charge already knew
+better: it records `from_star` precisely because *"a replicated probe leaves the colony that
+built it, which is halfway across the map from Sol"*.
+
+**The audit is the useful part, because the gap was much smaller than it had been described as.**
+Of the twenty-odd places energy is spent, every other one is the player acting from the solar
+system — a launch, a laser, a message, a trade's freight, orbital defence — and those correctly
+bill the home grid. Production was already solar-only, because an interstellar colony has no
+`planet_buildings` entry to contribute one. One branch, not a system rewrite.
+
+**And it was never a brake.** A probe costs 16.2 MJ against a starting energy *storage cap* of
+301 TJ: eighteen million probes, before the research that makes any of it reachable. What paces
+replication is `_vn_work_queue`'s round-robin and time budget, which this does not touch. So this
+is a correctness fix and not a rebalance — stated in `verify_energy_locality`, because removing a
+cost invites the question of what it was holding back and the answer is nothing.
+
+Nothing is charged to the colony in its place, deliberately: a colony's economy is already an
+abstraction over its age, and an energy ledger per colony would be fifteen thousand new entries
+modelling something no mechanic reads.
+
+**A regression this uncovered.** `_on_vn_probe_requested` builds its mission itself and never
+calls `_vn_launch`, so moving the `we_are_bob` hook into `_vn_launch` had quietly stopped the
+probe the player sends *by hand* — the one the achievement is named for — from earning it. Both
+paths grant it now; `grant_achievement` is idempotent.
+
+### Interstellar flights fail
+
+The interstellar medium is not empty: roughly one hydrogen atom per cubic centimetre and a dust
+grain now and then. A hull crossing it sweeps that up, and every grain arrives carrying
+(γ−1)mc² — at γ=4 a microgram grain lands with the energy of a hand grenade, and the ship has no
+warning because it is arriving very nearly with its own light. So the hazard is linear in the
+distance swept and in the energy per impact, which is where the (γ−1) comes from.
+
+| | loss |
+|---|---|
+| 4.4 ly at γ=4 *(Alpha Centauri)* | 0.9% |
+| 50 ly at γ=4 | 8.8% |
+| 250 ly at γ=4 *(`VN_HOP_LIMIT_LY`)* | **37%** |
+| 250 ly at γ=1.5 *(the slow boat)* | 7.4% |
+| 10 ly at γ=70 *(top of the slider, next door)* | 34% |
+
+**The speed slider is the point.** It was a trade of energy against travel time; it is now a
+trade against arriving at all, and the cheap slow crossing is the safe one. The swarm absorbs its
+losses by numbers — two probes a colony, so a third failing slows the frontier rather than
+stopping it.
+
+**`loss_chance` lives in `StarMapPanel` beside `plan_flight`, not in Game**, because the launch
+dialog has to quote it. That was not the original plan: the first version put the model in Game,
+and a test assertion that "nothing is a guaranteed loss" failed — correctly, a 2 000 ly crossing
+at γ=60 is hopeless. The model was right and the assertion was wrong, but it exposed the real
+hole: a hopeless flight gave no warning. A risk the player cannot see before committing is a
+trap rather than a decision, so the dialog quotes the figure Game then rolls against.
+
+**Rolled once, at launch, recorded on the mission.** Two reasons that are not interchangeable:
+the outcome has to survive a save, and a per-tick roll would turn a long flight from a risk into
+a certainty.
+
+**The player is told nothing until the silence.** The craft is drawn on its projected course for
+the whole crossing, because that is what is believed — the same rule the lagged colony reports
+follow. There is no telemetry to receive. The expected arrival passes and the sky stays quiet,
+and that is the entire observation. A craft the player sent by hand is reported overdue; a
+replicated probe's loss is silent, for the reason the swarm's arrivals already are.
+
 ### The ending says what ended it
 
 The three catastrophes have no ending of their own. An asteroid, a plague and a nuclear war each

@@ -401,6 +401,37 @@ var vn_hop_limit_ly: float = VN_HOP_LIMIT_LY
 ## The shipped cap.  A var above rather than a bare const so the comparison harness can sweep it.
 const VN_HOP_LIMIT_LY: float = 250.0
 
+## What the player is told when a craft fails to arrive, which is nothing about why.
+##
+## There is no telemetry to receive: the craft was crossing at a sizeable fraction of c, so it
+## was arriving very nearly with its own light, and whatever happened happened in a moment with
+## nobody left to report it. The expected arrival passes and the sky stays quiet — that is the
+## whole observation, and the report says exactly that and stops (VOICE.md).
+func _announce_flight_lost(target: String, probe: bool) -> void:
+	if target == "":
+		return
+	_announce("No arrival at %s" % target,
+		"%s is overdue at %s. No signal. The interstellar medium is not empty at these speeds." % [
+			"The probe" if probe else "The colony ship", target],
+		"flight_lost_%s_%d" % [target, year])
+
+
+## Whether a craft crossing `dist_ly` at `gamma` arrives.
+##
+## The hazard model itself lives in StarMapPanel beside plan_flight, because the launch dialog
+## has to quote the risk before the player commits — see StarMapPanel.loss_chance.
+##
+## Rolled ONCE, at launch, and recorded on the mission. Two reasons, and they are not
+## interchangeable: the outcome has to survive a save, and a per-tick roll would turn a long
+## flight from a risk into a certainty.
+##
+## The player is told nothing now. The craft is drawn on its projected course for the whole
+## crossing, because that is what is believed — the same rule the lagged colony reports follow —
+## and the silence at the far end is the only evidence there ever is.
+func _flight_survives(dist_ly: float, gamma: float, target: String, launch_year: int) -> bool:
+	return _roll("flight_loss", launch_year, target.hash()) \
+		>= StarMapPanel.loss_chance(dist_ly, gamma)
+
 ## How far a colony surveys its OWN neighbourhood before sending the next generation.
 ## A probe that has landed is THERE: it can see the stars around it, which is the whole premise
 ## of an autonomous swarm.  Sized to hold a few hundred sampled stars at the modelled density,
@@ -6848,6 +6879,8 @@ func _on_colonize_requested(star_name: String, gamma_max: float, accel: float) -
 		"end_year":   float(year) + years,
 		"speed_c":    peak_beta,
 		"gamma":      peak_gamma,
+		# Decided here and carried, not decided on arrival: see _flight_survives.
+		"lost":       not _flight_survives(dist, peak_gamma, star_name, year),
 		"accel_time_frac": float(plan.get("accel_time_frac", 0.5)),
 		"accel_dist_frac": float(plan.get("accel_dist_frac", 0.5)),
 	})
@@ -6877,6 +6910,17 @@ func _check_interstellar_arrivals() -> void:
 	for m in interstellar_missions:
 		if float(year) >= float(m.get("end_year", INF)):
 			var target: String = str(m.get("target", ""))
+			# Lost in transit. Nothing arrives, nothing is founded, and the lineage does not go
+			# on — a probe that never landed builds nothing.
+			#
+			# The report is only for a craft the PLAYER sent. An autonomous swarm launches
+			# thousands of these and losing a third of them is its ordinary condition; a line
+			# per loss would bury the timeline, for the same reason the swarm's own arrivals are
+			# already silent. What the player sees of the frontier is where it got to.
+			if bool(m.get("lost", false)):
+				if not bool(m.get("vn", false)) or str(m.get("origin", "")) == "":
+					_announce_flight_lost(target, bool(m.get("vn", false)))
+				continue
 			if target != "" and not _col_star_set.has(target):
 				_reveal_alignment(target)   # first contact: the system's alignment is now known
 				var tpos: Vector3 = _star_pos(target)
@@ -7134,17 +7178,35 @@ func _vn_launch(target_star: String, from_pos: Vector3, orders: Dictionary = {},
 	var plan: Dictionary = StarMapPanel.plan_flight(dist, VN_GAMMA, VN_ACCEL)
 	var mission: String = str(orders.get("mission", "colonize"))
 	var cost: float = float(plan["energy"]) * DoctrineData.mission_mass_frac(mission)
-	if float(ResearchTree.resources.get("energy", 0.0)) < cost:
-		return false
-	ResearchTree.resources["energy"] = maxf(0.0,
-		float(ResearchTree.resources.get("energy", 0.0)) - cost)
-	# Here rather than on the announcement: the announce only covers the probe the PLAYER sends,
-	# and a swarm that has started replicating launches thousands through this same function
-	# without one. This is the point every probe passes and past which none can be refused.
+	# ── Who pays ──────────────────────────────────────────────────────────────
+	#
+	# A probe built at a colony is built with that colony's star, not with the home grid. This
+	# charged ResearchTree.resources["energy"] whoever launched — so a probe assembled four
+	# hundred light-years out, by a colony that may already have declared for itself, was paid
+	# for out of Sol's reserve in the same instant it left. The code one line down already knew
+	# better: it records `from_star` precisely because "a replicated probe leaves the colony
+	# that built it, which is halfway across the map from Sol".
+	#
+	# Nothing is charged to a colony in its place, and that is deliberate rather than unfinished.
+	# A colony's economy is already an abstraction over its age (_colony_infra_at), its stores
+	# are what the trade system draws on, and inventing an energy ledger per colony would be
+	# fifteen thousand new entries to model something no mechanic reads.
+	#
+	# MEASURED, because the honest size of this matters: a probe costs 16.2 MJ against a
+	# starting STORAGE CAP of 301 TJ — eighteen million probes — and von Neumann probes need
+	# deep research before any of this is reachable. The charge was never a brake on the swarm;
+	# what paces replication is _vn_work_queue's round-robin and time budget. So this is a
+	# correctness fix, not a rebalance, and the swarm will expand exactly as it did.
+	if from_star == "":
+		if float(ResearchTree.resources.get("energy", 0.0)) < cost:
+			return false
+		ResearchTree.resources["energy"] = maxf(0.0,
+			float(ResearchTree.resources.get("energy", 0.0)) - cost)
 	grant_achievement("we_are_bob")
 	enroute[target_star] = true
 	interstellar_missions.append({
 		"target": target_star, "vn": true,
+		"lost": not _flight_survives(dist, VN_GAMMA, target_star, year),
 		# Where it actually departed from.  A replicated probe leaves the colony that built it,
 		# which is halfway across the map from Sol — without this the star map drew every
 		# generation of the swarm as if it had come from home.
@@ -9190,6 +9252,8 @@ func _on_vn_probe_requested(star_name: String, gamma_max: float, accel: float,
 	var years: float = float(plan["years"])
 	interstellar_missions.append({
 		"target": star_name, "vn": true,
+		"lost": not _flight_survives(dist, float(plan.get("peak_gamma", gamma_max)),
+			star_name, year),
 		# Orders travel with the probe — and into every probe it builds.
 		"mission": mission, "doctrine": doctrine,
 		"start_year": float(year), "end_year": float(year) + years,
@@ -9197,6 +9261,10 @@ func _on_vn_probe_requested(star_name: String, gamma_max: float, accel: float,
 		"accel_dist_frac": float(plan.get("accel_dist_frac", 0.5)),
 		"speed_c": float(plan.get("speed_c", 0.1)),
 	})
+	# _on_vn_probe_requested builds the mission itself and does NOT go through _vn_launch, so
+	# the hook there does not cover the probe the player sends by hand — which is the one the
+	# achievement is named for. Both paths grant it; grant_achievement is idempotent.
+	grant_achievement("we_are_bob")
 	var mi: Dictionary = DoctrineData.get_mission(mission)
 	_announce("von Neumann probe away",
 		"A self-replicating seed departs for %s under %s orders. %s" % [
@@ -9224,6 +9292,8 @@ func _on_probe_requested(star_name: String, gamma_max: float, accel: float) -> v
 	var years: float = float(plan["years"])
 	probe_missions.append({
 		"target": star_name, "start_year": float(year), "end_year": float(year) + years,
+		"lost": not _flight_survives(dist, float(plan.get("peak_gamma", gamma_max)),
+			star_name, year),
 		"accel_time_frac": float(plan.get("accel_time_frac", 0.5)),
 		"accel_dist_frac": float(plan.get("accel_dist_frac", 0.5)),
 	})
@@ -9242,6 +9312,9 @@ func _check_probe_arrivals() -> void:
 	for m in probe_missions:
 		if float(year) >= float(m.get("end_year", INF)):
 			var t: String = str(m.get("target", ""))
+			if bool(m.get("lost", false)):
+				_announce_flight_lost(t, true)
+				continue       # no intel: the system is exactly as unknown as before
 			_infra_probed[t] = true
 			if star_factions.has(t):
 				_detected_aliens[t] = true

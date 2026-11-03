@@ -89,6 +89,32 @@ static func fmt_beta(g: float) -> String:
 ## max acceleration `a` (m/s²): accelerate to γ, coast, decelerate to rest.  Returns the
 ## game-energy required, Sol-frame travel time (years), the peak β/γ actually reached,
 ## and whether the requested γ was hit (short hops at low accel fall short).
+## ── Interstellar flights fail ─────────────────────────────────────────────────
+##
+## Chance per light-year, per unit of (γ−1), that a craft does not arrive.
+##
+## The interstellar medium is not empty: roughly one hydrogen atom per cubic centimetre, and a
+## dust grain now and then. A hull crossing it sweeps that up, and every grain arrives carrying
+## (γ−1)mc² — at γ=4 a microgram grain lands with the energy of a hand grenade, and the ship has
+## no warning because it is arriving very nearly with its own light. So the hazard is linear in
+## the distance swept and in the energy per impact, which is where the (γ−1) comes from.
+##
+## Calibrated so the near stars are nearly free and the swarm's 250 ly hop limit is a real
+## gamble: 0.9% to Alpha Centauri at γ=4, 37% at the hop limit, 34% for a 10 ly dash at the top
+## of the speed slider. The slider is the point — it was a trade of energy against travel time,
+## and is now a trade against arriving at all.
+##
+## HERE rather than in Game, because the launch dialog has to quote it. A risk the player cannot
+## see before committing is not a decision, it is a trap: the dialog already shows the speed, the
+## travel time and the energy, and this is the fourth number that choice is made on.
+const FLIGHT_HAZARD_PER_LY: float = 6.0e-4
+
+## Probability in [0, 1] that a craft crossing `dist_ly` at `gamma` is lost.
+static func loss_chance(dist_ly: float, gamma: float) -> float:
+	var hazard: float = FLIGHT_HAZARD_PER_LY * maxf(dist_ly, 0.0) * maxf(gamma - 1.0, 0.0)
+	return clampf(1.0 - exp(-hazard), 0.0, 1.0)
+
+
 static func plan_flight(dist_ly: float, gamma_max: float, accel: float) -> Dictionary:
 	var dist_m: float = maxf(dist_ly, 1.0e-4) * LY_M
 	var a: float = maxf(accel, 1.0e-4)
@@ -2734,9 +2760,14 @@ func _update_dialog_info() -> void:
 		if not bool(plan["reaches"]):
 			speed_str += " (peaks %s)" % _fmt_speed(float(plan["peak_gamma"]))
 		var tail := "" if count <= 1 else "  ·  ×%d = %s total" % [count, Units.format_si(total, "J")]
-		text = "%s  ·  %s  ·  %s travel  ·  %s each%s%s" % [
+		# The loss risk, next to the speed that sets it. Stated flatly and with no advice: the
+		# player can read a percentage and the slider is right there (VOICE.md).
+		var risk: float = loss_chance(dist, float(plan["peak_gamma"]))
+		var risk_str: String = "<0.1%% loss risk" if risk < 0.001 \
+			else "%.1f%% loss risk" % (risk * 100.0)
+		text = "%s  ·  %s  ·  %s travel  ·  %s each%s  ·  %s%s" % [
 			speed_str, _fmt_accel(a), _fmt_years(years), Units.format_si(per, "J"),
-			tail, "" if affordable else "   ✗ insufficient energy"]
+			tail, risk_str, "" if affordable else "   ✗ insufficient energy"]
 		if _dlg_kind == "vnprobe":
 			# Say what the orders actually commit to — a probe cannot be recalled or re-tasked.
 			var mi: Dictionary = DoctrineData.get_mission(_selected_mission())
