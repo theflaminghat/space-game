@@ -18,6 +18,7 @@ script per model rather than a modelling pass and a texturing pass.
 """
 import bpy, bmesh, math
 import numpy as np
+from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 
@@ -28,23 +29,32 @@ def setup():
     return bpy.context.scene
 
 
-def mat(value, bands=(), windings=0, amp=0.0, grime=0.10):
-    """A material: a base colour, optional ridging, and a little grime.
+def mat(value, bands=(), windings=0, amp=0.0):
+    """A material: one flat base colour, broken only by hard-edged construction seams.
 
     `value` is either a float (a neutral grey of that value) or an (r, g, b) triple.
-    The pattern is a scalar either way and multiplies through the colour, so ridging and
-    grime darken a gold blanket or a blue solar cell exactly as they darkened grey.
+    The seam mask is a scalar either way and multiplies through the colour, so a seam
+    darkens a gold blanket or a blue solar cell exactly as it darkened grey.
 
-    The pattern is driven from OBJECT coordinates, not UVs.  smart_project lays the
-    islands out for packing efficiency, so anything authored in UV space would run in
-    an arbitrary direction on each island; object space makes the ridges follow the
-    hull.
+    Every variation here is DISCRETE: a texel is either on a plate or in a seam, with
+    nothing in between, and the plates themselves are one unbroken colour.  There is no
+    noise wash and no gradient.  A hull is built out of plates bolted together, so the
+    only thing that should vary across one is the line where it meets the next; anything
+    smoother reads as dirt or as a lighting mistake, and anything random reads as
+    decoration.  Detail that means something - lines, conduit, hatches, ports - is
+    geometry instead, built from the primitives below.
 
-      bands    - [(axis, frequency)] for straight ridges: plating seams, solar cells.
-      windings - an INTEGER count of ridges around the Z axis, for a coil.  Integer
-                 matters: the angle comes from atan2, which jumps by 2*pi across its
-                 branch cut, and sin(n*theta) is continuous there only when n is a
-                 whole number.  A fractional count puts one mismatched band in the ring.
+    The mask is driven from OBJECT coordinates, not UVs.  smart_project lays the islands
+    out for packing efficiency, so anything authored in UV space would run in an arbitrary
+    direction on each island; object space makes the seams follow the hull.
+
+      bands    - [(axis, frequency)] for straight seams: plating joins, solar cells.
+      windings - an INTEGER count of seams around the Z axis, for a girth weld or a rib.
+                 Integer matters: the angle comes from atan2, which jumps by 2*pi across
+                 its branch cut, and n*theta/(2*pi) steps by a whole number there - so its
+                 fractional part is continuous only when n is an integer.  A fractional
+                 count puts one mismatched band in the ring.
+      amp      - how much darker a seam is than the plate it borders.
 
     Deliberately NOT metallic.  This is baked with a DIFFUSE/COLOR pass, and Cycles
     scales diffuse albedo down by metalness - so setting it would darken the map by the
@@ -77,29 +87,30 @@ def mat(value, bands=(), windings=0, amp=0.0, grime=0.10):
     sep = mk("ShaderNodeSeparateXYZ")
     nt.links.new(coord.outputs["Object"], sep.inputs[0])
 
-    # Ridges: sin(x) folded to 0..1, then squared so the dark lines read as narrow
-    # seams between plates rather than a soft sine wash.
-    def ridge(phase):
-        return op("POWER", op("MULTIPLY_ADD", op("SINE", phase), 0.5, 0.5), 2.0)
+    # One cycle of `turns` is one plate and the seam after it.  GREATER_THAN is what makes
+    # the edge hard: the result is exactly 0 on the plate and exactly 1 in the seam, so the
+    # plate is flat colour right up to the join.  SEAM is the last 12% of the pitch, about
+    # as narrow as a 512-map can resolve and still land a clean line.
+    SEAM = 0.88
 
-    pattern = None
+    def seam_mask(turns):
+        return op("GREATER_THAN", op("FRACT", turns), SEAM)
+
+    # The masks are OR-ed, not multiplied: a seam is a seam wherever either family puts one,
+    # which gives crossing plate joins.  Multiplying would have darkened only the points
+    # where two seams meet, leaving the long lines invisible.
+    mask = None
     for axis, freq in bands:
-        seam = ridge(op("MULTIPLY", sep.outputs[axis], freq))
-        pattern = seam if pattern is None else op("MULTIPLY", pattern, seam)
+        turns = op("MULTIPLY", sep.outputs[axis], freq / (2.0 * math.pi))
+        s_ = seam_mask(turns)
+        mask = s_ if mask is None else op("MAXIMUM", mask, s_)
 
     if windings:
         angle = op("ARCTAN2", sep.outputs["Y"], sep.outputs["X"])
-        seam = ridge(op("MULTIPLY", angle, float(windings)))
-        pattern = seam if pattern is None else op("MULTIPLY", pattern, seam)
+        s_ = seam_mask(op("MULTIPLY", angle, float(windings) / (2.0 * math.pi)))
+        mask = s_ if mask is None else op("MAXIMUM", mask, s_)
 
-    out = None if pattern is None else op("MULTIPLY_ADD", pattern, amp, 1.0 - amp)
-
-    noise = mk("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 90.0
-    noise.inputs["Detail"].default_value = 4.0
-    nt.links.new(coord.outputs["Object"], noise.inputs["Vector"])
-    dirt = op("MULTIPLY_ADD", noise.outputs["Fac"], grime, 1.0 - grime)
-    out = dirt if out is None else op("MULTIPLY", out, dirt)
+    out = op("MULTIPLY_ADD", mask, -amp, 1.0) if mask is not None else op("ADD", 1.0, 0.0)
 
     base = mk("ShaderNodeRGB")
     base.outputs[0].default_value = (rgb[0], rgb[1], rgb[2], 1.0)
@@ -109,7 +120,7 @@ def mat(value, bands=(), windings=0, amp=0.0, grime=0.10):
     nt.links.new(out, tint.inputs[2])      # float into a colour socket broadcasts to grey
     nt.links.new(tint.outputs[0], bsdf.inputs["Base Color"])
 
-    # The same pattern again as an emission tap, so finish() can bake it on its own as a
+    # The same mask again as an emission tap, so finish() can bake it on its own as a
     # height field.  Left unlinked from the output: it is swapped in for one pass only.
     #
     # Not a Bump node, which is the obvious way and does not work.  Bump takes the screen
@@ -153,6 +164,44 @@ def torus(major, minor, loc, value, major_seg=16, minor_seg=6, rot=(0, 0, 0), **
     bpy.ops.mesh.primitive_torus_add(
         major_radius=major, minor_radius=minor, major_segments=major_seg,
         minor_segments=minor_seg, location=loc, rotation=rot)
+    o = bpy.context.active_object
+    o.data.materials.append(mat(value, **kw))
+    return o
+
+
+# ── Functional detail.  Small parts that say what the hardware does. ─────────────
+
+def pipe(a, b, r, value, segments=6, **kw):
+    """A cylinder spanning two points: a transfer line, a cable run, a strut.
+
+    Takes endpoints rather than a centre and a rotation because that is how the thing is
+    actually specified - this line leaves THAT tank and arrives at THIS manifold - and
+    working back to an Euler triple by hand is where a run ends up a degree off and
+    floating.  to_track_quat aims local Z down the span, which is the primitive's own axis.
+    """
+    a, b = Vector(a), Vector(b)
+    span = b - a
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=segments, radius=r, depth=span.length, location=(a + b) / 2.0,
+        rotation=span.to_track_quat('Z', 'Y').to_euler())
+    o = bpy.context.active_object
+    o.data.materials.append(mat(value, **kw))
+    return o
+
+
+def hatch(loc, r, value, axis='Z', depth=0.005, segments=8, **kw):
+    """A shallow disc standing proud of a surface: an access hatch, a port, a thruster bell.
+
+    `axis` is the surface normal it sits on - 'X', 'Y', 'Z', or a direction vector for a
+    face that does not line up with one, like the outboard side of a tank sitting at 45
+    degrees.  Taking the normal rather than an Euler triple is what keeps a hatch flush:
+    a hatch a few degrees out of plane cuts a crescent into the hull behind it.
+    """
+    if isinstance(axis, str):
+        axis = {'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}[axis]
+    rot = Vector(axis).to_track_quat('Z', 'Y').to_euler()
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=segments, radius=r, depth=depth, location=loc, rotation=rot)
     o = bpy.context.active_object
     o.data.materials.append(mat(value, **kw))
     return o
@@ -236,12 +285,17 @@ def _floating(parts, tol=2.0e-3):
     return out
 
 
-def _height_to_normal(height, strength=7.0):
+def _height_to_normal(height, strength=3.0):
     """Turn a baked height field into an encoded tangent-space normal map.
 
     Done numerically rather than with a Bump node for the reason given in mat(): bump
     cannot bake.  The slope at each texel comes from a central difference of its
-    neighbours, which is exact for a field that was itself generated procedurally.
+    neighbours.
+
+    The field is a step now that the seams are hard-edged, and a step differentiates to a
+    single spike either side of the edge - which is what a panel groove should look like,
+    one texel of wall on each side and flat plate between.  Hence the modest strength: at
+    7.0 the spike clipped, and a clipped normal lights as a hard ridge rather than a join.
 
     Row 0 of a Blender image is the BOTTOM row, so the row axis already runs the same way
     as V and the green channel needs no flip for the OpenGL convention Godot expects.

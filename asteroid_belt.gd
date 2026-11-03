@@ -88,10 +88,7 @@ func _init() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = HUB_COLOR
 	mat.roughness = 1.0
-	# The same faint self-light the moons carry, so a small dark body stays readable.
-	mat.emission_enabled = true
-	mat.emission = HUB_COLOR
-	mat.emission_energy_multiplier = 0.15
+	# No self-light: a rock is lit by the sun or it is not lit.
 	set_surface_override_material(0, mat)
 
 

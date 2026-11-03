@@ -324,8 +324,6 @@ func _make_panel_material() -> StandardMaterial3D:
 	mat.albedo_color = Color(0.16, 0.22, 0.42)        # dark blue photovoltaic
 	mat.metallic     = 0.7
 	mat.roughness    = 0.3
-	mat.emission_enabled = true
-	mat.emission     = Color(0.12, 0.18, 0.36)        # faint glow, catching sunlight
-	mat.emission_energy_multiplier = 0.5
+	# No emission: a collector is lit by the star it is collecting from, and its back is dark.
 	mat.cull_mode    = BaseMaterial3D.CULL_DISABLED   # thin panels visible both sides
 	return mat

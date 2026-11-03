@@ -30,7 +30,7 @@ parts = []
 
 # Emitter face: hexagonal, with the element grid crossing it.
 parts.append(S.cyl(0.070, 0.016, (0, 0, 0.031), V_FACE, segments=6,
-                   bands=[('X', 600.0), ('Y', 600.0)], amp=0.40, grime=0.04))
+                   bands=[('X', 600.0), ('Y', 600.0)], amp=0.40))
 parts.append(S.cyl(0.010, 0.030, (0, 0, 0.017), V_MAST))
 
 # Bus, its mount, and a pair of small fins.
@@ -39,6 +39,6 @@ parts.append(S.box((0.050, 0.050, 0.040), (0, 0, -0.009), V_BUS,
 parts.append(S.cyl(0.034, 0.012, (0, 0, -0.033), V_MOUNT, bands=[('Z', 520.0)], amp=0.14))
 for sx in (-1, 1):
     parts.append(S.box((0.030, 0.004, 0.030), (sx * 0.035, 0, -0.009), V_FIN,
-                       bands=[('Z', 520.0)], amp=0.30, grime=0.05))
+                       bands=[('Z', 520.0)], amp=0.30))
 
 S.finish(parts, "MicrowaveUplink", out, tex_out, tag="UPLINK")

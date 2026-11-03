@@ -35,7 +35,7 @@ background_mode = 1
 background_color = Color(0.0321569, 0.0578824, 0.135059, 1)
 ambient_light_source = 2
 ambient_light_color = Color(0.0771765, 0.106118, 0.176863, 1)
-ambient_light_energy = 0.4
+ambient_light_energy = 0.0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_imku0"]
 

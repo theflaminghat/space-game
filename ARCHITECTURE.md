@@ -1301,6 +1301,37 @@ So `_update_population` costs exactly what it did when a stock was a single row.
 **`TRAITS` order and not tick order**, or two populations holding the same three traits would
 hash to different keys and be different stocks.
 
+### Everything is lit by the sun, and only by the sun
+
+The scene carried an ambient fill of 0.4 and a faint self-emission on almost every material —
+orbital structures, moons, asteroids, Dyson collectors — each justified as keeping a small dark
+body readable where no light reached it. Together they meant **nothing on screen was ever
+actually dark**: there was no night side anywhere in the system.
+
+Ambient is now 0 and the emissions are gone. The one `OmniLight3D` at the sun is the whole of
+the lighting. The sun keeps its own emission, because it is the light source, and the
+disassembly shader keeps its `heat` term, because a planet glowing from its own exposed mantle
+is real incandescence rather than fill.
+
+Measured by sweeping the camera around a planet and summing frame luminance: **0.0 at 135°, 180°
+and 225°**, full brightness sunward.
+
+Two things that looked like faults and were not:
+
+- **The first render came back black everywhere.** The camera pivot had put the camera on
+  Earth's night side, which is now genuinely dark. The light reaches Earth comfortably — 21.9
+  units against a range of 4096 with no falloff.
+- **The `OmniLight3D` looked misplaced.** The scene file has the sun at (-3.64, -0.12, 0.01)
+  while the light sits at `WorldRoot` origin, which reads as lighting the system from a point
+  beside the sun. At runtime both are at the origin — the scene transform is overridden — so a
+  function written to "fix" it was deleted rather than shipped with a comment asserting
+  something false.
+
+`verify_lane_models` has now had its material contract change twice in one session, and both
+prior versions are recorded in its header: the lane colour as flat emission (which made a laser
+dish uniformly pink whatever its map said), then emission routed through the albedo map (which
+fixed the colour and left the real problem untouched).
+
 ### What makes an engineered plague likely
 
 The old model was `base x (1 + 0.4·biotech_nodes) x (1 + 2·ai) x (2 / (1 + worlds)) x (BASE_LE /

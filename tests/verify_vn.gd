@@ -63,9 +63,37 @@ func _run() -> void:
 	var first: Array = g._nearest_uncolonised(Vector3.ZERO, 1, INF, false)
 	check(not first.is_empty(), "there is a first target to seed from")
 	g._vn_launch(str(first[0]), Vector3.ZERO, {"mission": "colonize"}, "")
+	# ── How long this runs, and why it is exactly this long ──
+	#
+	# Profiled at 250-year resolution. The frontier reaches the observation range (325 ly) by
+	# year 1000 and then STALLS there until about 2000, because the swarm cannot target what Sol
+	# has not yet resolved; it breaks out at 2250 and climbs. Those stalled years are
+	# load-bearing — getting past the observation range is the whole assertion below — so they
+	# cannot be cut, and raising the range by hand would make that assertion trivially true.
+	#
+	# What CAN go is everything after the breakout. The original ran 4 x 1500 = 6000 years, and
+	# the frontier saturated against DETAILED_RADIUS_LY by year 4500: the last block measured
+	# nothing the one before it had not already shown, at 32 seconds a block.
+	#
+	#     1000 yr   297 ly    16 s        3000 yr  1964 ly   76 s
+	#     2000 yr   322 ly    54 s        4500 yr  2451 ly  ~110 s
+	#     2500 yr  1552 ly    67 s        6000 yr  2451 ly   128 s
+	#
+	# 4 x 625 reaches 2500 years: past the observation range, still climbing, nowhere near the
+	# detailed radius. The whole test was 190 s against the suite's 240 s TIMEOUT, which is the
+	# sort of margin that turns an unrelated parse error into an undiagnosable hang.
+	const FRONTIER_BLOCKS: int = 4
+	# 750 and not 625. At 625 the whole run is 73 s and every assertion holds, but the marks come
+	# out [289, 433, 433, 1731]: the breakout lands INSIDE the final block, so "still moving
+	# outward late on" is carried by it arriving on time, and one block's slip would fail it for
+	# a reason that has nothing to do with the swarm. At 750 they come out
+	# [323, 433, 1516, 1954] — breakout a block early, final block still climbing, margin to
+	# spare. It costs 30 s (73 -> 103), which is more than it looks like it should and is still
+	# the right trade for a test whose thin margin is the thing being fixed.
+	const FRONTIER_YEARS_PER_BLOCK: int = 750
 	var marks: Array = []
-	for block in range(4):
-		for _i in range(1500):
+	for block in range(FRONTIER_BLOCKS):
+		for _i in range(FRONTIER_YEARS_PER_BLOCK):
 			g.year += 1
 			rt.resources["energy"] = 1.0e40
 			g._check_interstellar_arrivals()
@@ -73,7 +101,7 @@ func _run() -> void:
 		for cs in g.colonized_stars:
 			frontier = maxf(frontier, g._star_pos(str(cs)).length())
 		marks.append(frontier)
-	print("frontier over 6000 years: %s ly" % str(marks))
+	print("frontier over %d years: %s ly" % [FRONTIER_BLOCKS * FRONTIER_YEARS_PER_BLOCK, str(marks)])
 	print("settled %d stars, %d regions, %d lineages" % [
 		g.colonized_stars.size(), g._regions.size(), g._vn_seeds.size()])
 
@@ -90,9 +118,14 @@ func _run() -> void:
 	# swarm however large it grew: expansion ran flat instead of compounding, and a colony that
 	# arrived while those twelve were out launched nothing and was never revisited.
 	check(not ("VN_MAX_INFLIGHT" in g), "the population cap is gone")
-	var peak: int = 0
-	for _b in range(6):
-		for _i in range(400):
+	# Sampled from where the run above left off rather than simulating another 2 400 years for
+	# it. That loop cost 46 s and asserted something the state entering it already satisfies
+	# several thousand times over — the swarm is carrying thousands of probes by year 2 500. The
+	# short continuation is still here because the claim is that it KEEPS flying them, not that
+	# it once did.
+	var peak: int = g._vn_inflight()
+	for _b in range(2):
+		for _i in range(100):
 			g.year += 1
 			rt.resources["energy"] = 1.0e40
 			g._check_interstellar_arrivals()

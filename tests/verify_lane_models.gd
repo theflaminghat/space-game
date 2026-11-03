@@ -12,13 +12,15 @@ extends SceneTree
 ##       exporter that split the mesh by material would cost draw calls for nothing.
 ##   UVs - the override's albedo_texture is sampled with them.  A mesh without UVs reads as
 ##       flat colour.
-##   COLOUR FROM THE MAP, AND NOWHERE ELSE - the maps carry the hardware's own colour, so
+##   COLOUR FROM THE MAP, LIGHT FROM THE SUN - the maps carry the hardware's own colour, so
 ##       albedo_color stays WHITE (it MULTIPLIES through the texture, and tinting a blue
-##       solar panel amber gives mud) and the emission stays WHITE too, carrying the SAME
-##       map.  The lane's grouping colour used to live in that emission, and because
-##       emission without a texture floods every texel equally it was, at the strength it
-##       needs here, the only colour left: a laser dish came out uniformly pink whatever
-##       its map said.  All three halves are checked because all three were wrong at once.
+##       solar panel amber gives mud), and there is NO emission at all: everything in the
+##       system is lit by the sun and a structure on the night side is black.  Both halves
+##       have been wrong, in sequence.  The lane's grouping colour used to live in the
+##       emission, and because emission without a texture floods every texel equally it was
+##       the only colour left - a laser dish came out uniformly pink whatever its map said.
+##       Routing that emission through the map fixed the colour and left the real problem,
+##       which was that nothing on screen was ever actually dark.
 ##   SIZE - the lanes sit 0.04 apart in radius around a body.  Much over ~0.3 units and a
 ##       hull reaches into its neighbours; the box these replaced was 0.18.
 ##   RADIAL AXIS IS +Y - _update_infra() builds Basis(t1, radial, t2), so each model's +Y
@@ -418,26 +420,20 @@ func _run() -> void:
 			check(std_m.albedo_color == Color.WHITE,
 				"%s: nothing tints the map — albedo_color is white, not %s, or the "
 					% [what, str(std_m.albedo_color)] + "hardware colours would be muddied")
-			# The self-light goes through the SAME MAP. Without a texture, emission floods the
-			# whole hull with one value — and at the strength it needs to be visible in this
-			# scene's lighting, that wash was the only colour left: a laser dish came out
-			# uniformly pink and a telescope uniformly blue, with the gold blanket and the cell
-			# grids underneath invisible.
-			check(std_m.emission_enabled, "%s: the structure lights itself" % what)
-			check(std_m.emission_texture == textures.get(kind),
-				"%s: and does it through its own map, so the glow follows the plating "
-					% what + "rather than flooding the hull: %s" % str(std_m.emission_texture))
-			# WHITE, and that is the whole rule: the colour comes from the map and from
-			# nowhere else. A lane tint here would be put over every texel equally, which is
-			# what made a laser dish uniformly pink whatever its map said.
-			check(std_m.emission.is_equal_approx(Color.WHITE),
-				"%s: the self-light adds no colour of its own: %s" % [what, str(std_m.emission)])
-			# Two lanes with different grouping colours must now look identical in everything
-			# but their map. Checked against the lane's own colour so a reintroduced tint fails
-			# here rather than being noticed on screen months later.
-			check(not std_m.emission.is_equal_approx(want as Color)
-					or (want as Color).is_equal_approx(Color.WHITE),
-				"%s: and is not the lane's colour %s" % [what, str(want)])
+			# NO self-light. Everything in the system is lit by the sun and nothing else, so a
+			# structure on the night side of its planet is black — which is what it would be.
+			#
+			# This has been wrong twice in two different ways, which is why it is asserted at
+			# all. It carried the LANE COLOUR as flat emission, and because emission without a
+			# texture floods every texel equally that wash was the only colour left: a laser
+			# dish came out uniformly pink whatever its map said. Routing the emission through
+			# the map fixed the colour and left the real problem — that nothing on screen was
+			# ever actually dark.
+			check(not std_m.emission_enabled,
+				"%s: the structure does not light itself" % what)
+			check(std_m.emission_energy_multiplier == 0.0
+					or not std_m.emission_enabled,
+				"%s: and carries no emission energy" % what)
 			var np2: String = str(entry["texture"]).replace("_albedo.png", "_normal.png")
 			if ResourceLoader.exists(np2):
 				check(std_m.normal_enabled and std_m.normal_texture != null,

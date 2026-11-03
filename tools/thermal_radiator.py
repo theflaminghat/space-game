@@ -29,7 +29,7 @@ parts.append(S.box((0.230, 0.010, 0.010), (0, 0, 0), V_SPINE, bands=[('X', 300.0
 for x in (-0.073, 0.0, 0.073):
     for sy in (-1, 1):
         parts.append(S.box((0.066, 0.070, 0.004), (x, sy * 0.038, 0), V_PANEL,
-                           bands=[('X', 520.0)], amp=0.32, grime=0.05))
+                           bands=[('X', 520.0)], amp=0.32))
 
 parts.append(S.box((0.030, 0.030, 0.016), (0, 0, 0), V_MANIFOLD,
                    bands=[('Z', 500.0)], amp=0.16))

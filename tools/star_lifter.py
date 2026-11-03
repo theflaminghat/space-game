@@ -42,7 +42,7 @@ parts = []
 # The bell: wide mouth at -Z facing the star, narrowing to the throat at +Z.
 # The ribs come from an angular pattern, which on a cone runs them down the flare.
 parts.append(S.cone(0.085, 0.022, 0.140, (0, 0, -0.012), V_BELL, segments=16,
-                    windings=16, amp=0.22, grime=0.07))
+                    windings=16, amp=0.22))
 
 # Throat head on the outward end, where the lifted mass leaves for the tanks.
 parts.append(S.cyl(0.020, 0.024, (0, 0, 0.070), V_THROAT, bands=[('Z', 420.0)], amp=0.16))
@@ -52,7 +52,7 @@ parts.append(S.cyl(0.020, 0.024, (0, 0, 0.070), V_THROAT, bands=[('Z', 420.0)], 
 # more triangles than the rest of the model put together, for a tube 5mm across.
 for major, z in ((0.082, -0.062), (0.059, -0.012), (0.037, 0.038)):
     parts.append(S.torus(major, 0.005, (0, 0, z), V_COIL,
-                         major_seg=12, minor_seg=3, grime=0.04))
+                         major_seg=12, minor_seg=3))
 
 # Collection tankage, clamped round the throat end where the mass arrives.
 for i in range(3):

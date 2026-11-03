@@ -31,6 +31,6 @@ for i, tilt in enumerate((18.0, -22.0, 26.0)):
     parts.append(S.box((0.120, 0.080, 0.0015),
                        (math.cos(a) * 0.058, math.sin(a) * 0.058, 0), V_FILM,
                        rot=(math.radians(tilt), 0, a),
-                       bands=[('X', 420.0)], amp=0.22, grime=0.03))
+                       bands=[('X', 420.0)], amp=0.22))
 
 S.finish(parts, "RadiatorSwarm", out, tex_out, tag="RADSWARM")

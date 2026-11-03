@@ -29,6 +29,6 @@ parts.append(S.cyl(0.006, 0.230, (0, 0, 0), V_TETHER, bands=[('Z', 240.0)], amp=
 # the tether runs through them and the run is one piece.
 for z in (-0.090, -0.045, 0.0, 0.045, 0.090):
     parts.append(S.cyl(0.026, 0.008, (0, 0, z), V_APERTURE, segments=6,
-                       bands=[('X', 700.0), ('Y', 700.0)], amp=0.35, grime=0.04))
+                       bands=[('X', 700.0), ('Y', 700.0)], amp=0.35))
 
 S.finish(parts, "SwarmRelayNetwork", out, tex_out, tag="SWARMRELAY")

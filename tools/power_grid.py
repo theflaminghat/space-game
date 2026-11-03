@@ -21,7 +21,8 @@ tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
 V_RECTENNA = (0.11, 0.15, 0.32)   # rectenna face
-V_BUS      = (0.80, 0.64, 0.30)   # bus
+V_BUS      = (0.38, 0.40, 0.44)   # switchgear box - electrical, so no blanket on it
+V_BUSBAR   = (0.76, 0.48, 0.27)   # copper busbars gathering the face into it
 V_MAST     = (0.40, 0.41, 0.44)   # masts
 V_DISH     = (0.87, 0.87, 0.85)   # relay dishes
 
@@ -29,7 +30,7 @@ parts = []
 
 # Rectenna face, with the cell grid the Orbital Vault's panels use.
 parts.append(S.box((0.160, 0.115, 0.006), (0, 0, -0.048), V_RECTENNA,
-                   bands=[('X', 380.0), ('Y', 460.0)], amp=0.45, grime=0.04))
+                   bands=[('X', 380.0), ('Y', 460.0)], amp=0.45))
 
 # Bus, straddling the panel's upper face.
 parts.append(S.box((0.044, 0.044, 0.034), (0, 0, -0.030), V_BUS,
@@ -39,6 +40,17 @@ parts.append(S.box((0.044, 0.044, 0.034), (0, 0, -0.030), V_BUS,
 for sx in (-1, 1):
     parts.append(S.cyl(0.005, 0.040, (sx * 0.020, 0, 0.005), V_MAST))
     parts.append(S.cone(0.006, 0.028, 0.016, (sx * 0.020, 0, 0.030), V_DISH,
-                        segments=10, rot=(0, sx * math.radians(30), 0), grime=0.04))
+                        segments=10, rot=(0, sx * math.radians(30), 0)))
+
+# Busbars running across the face into the switchgear, and a feed horn at each dish's
+# focus.  A rectenna's whole job is to collect current and hand it somewhere, so the
+# conductors doing it are the detail worth having.
+for sy in (-1, 1):
+    parts.append(S.pipe((-0.074, sy * 0.020, -0.042), (0.074, sy * 0.020, -0.042),
+                        0.0040, V_BUSBAR, bands=[('X', 500.0)], amp=0.25))
+for sx in (-1, 1):
+    parts.append(S.hatch((sx * 0.026, 0, 0.034), 0.005, V_BUS,
+                         axis=(sx * 0.5, 0, 0.87), depth=0.010,
+                         bands=[('Z', 900.0)], amp=0.25))
 
 S.finish(parts, "PowerGrid", out, tex_out, tag="GRID")

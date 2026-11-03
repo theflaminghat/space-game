@@ -43,7 +43,7 @@ parts.append(S.cyl(0.026, 0.130, (0, 0, -0.005), V_BENCH, segments=10,
 parts.append(S.cyl(0.034, 0.040, (0, 0, 0.078), V_MIRROR, segments=10,
                    bands=[('Z', 420.0)], amp=0.16))
 parts.append(S.cyl(0.038, 0.022, (0, 0, 0.108), V_APERTURE, segments=10,
-                   bands=[('Z', 600.0)], amp=0.12, grime=0.04))
+                   bands=[('Z', 600.0)], amp=0.12))
 
 # Aft instrument module.
 parts.append(S.cyl(0.040, 0.050, (0, 0, -0.095), V_AFT, segments=10,
@@ -58,6 +58,6 @@ for sx in (-1, 1):
     parts.append(S.cyl(0.006, 0.034, (sx * 0.037, 0, -0.020), V_BENCH,
                        rot=(0, math.radians(90), 0), bands=[('Z', 600.0)], amp=0.12))
     parts.append(S.box((0.110, 0.056, 0.004), (sx * 0.105, 0, -0.020), V_PANEL,
-                       bands=[('X', 420.0), ('Y', 560.0)], amp=0.45, grime=0.04))
+                       bands=[('X', 420.0), ('Y', 560.0)], amp=0.45))
 
 S.finish(parts, "SpaceTelescope", out, tex_out, tag="SCOPE")

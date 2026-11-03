@@ -28,7 +28,12 @@ S.setup()
 
 V_LANCE  = (0.34, 0.33, 0.36)   # refractory lances
 V_SHIELD = (0.90, 0.89, 0.84)   # ablative shield
-V_STACK  = (0.80, 0.64, 0.30)   # control stack
+V_STACK  = (0.88, 0.63, 0.16)   # gold MLI over the control stack: a blanketed avionics
+                                # bay on the cold side of a shield really is insulated,
+                                # which is why the gold stays here and came off the
+                                # structure on the other models
+V_FEED   = (0.45, 0.48, 0.54)   # injector feed lines
+V_CLAMP  = (0.24, 0.26, 0.30)   # the clamps holding each lance through the shield
 V_VANE   = (0.87, 0.87, 0.85)   # radiator vanes
 
 parts = []
@@ -47,7 +52,7 @@ for i in range(4):
 
 # Shield: the face that sits closest to the star, so the brightest value here.
 parts.append(S.cyl(0.058, 0.012, (0, 0, 0.054), V_SHIELD, segments=12,
-                   windings=12, amp=0.28, grime=0.05))
+                   windings=12, amp=0.28))
 
 # Control stack and its radiator vanes, on the cold side.
 parts.append(S.cyl(0.030, 0.055, (0, 0, 0.089), V_STACK, bands=[('Z', 420.0)], amp=0.18))
@@ -58,6 +63,18 @@ for i in range(4):
     a = math.radians(90 * i)
     parts.append(S.box((0.040, 0.004, 0.045),
                        (math.cos(a) * 0.045, math.sin(a) * 0.045, 0.094),
-                       V_VANE, rot=(0, 0, a), grime=0.06))
+                       V_VANE, rot=(0, 0, a)))
+
+# Injector feed lines: off the shield's underside rim and inboard to each outer lance,
+# with a clamp collar where that lance passes through the shield.  An array of lances has
+# to be fed something, and the plumbing saying so is what keeps it from reading as a
+# bundle of spikes.
+for i in range(4):
+    a = math.radians(45 + 90 * i)
+    c, s_ = math.cos(a), math.sin(a)
+    parts.append(S.pipe((c * 0.052, s_ * 0.052, 0.046), (c * 0.039, s_ * 0.039, 0.008),
+                        0.0040, V_FEED, bands=[('Z', 500.0)], amp=0.22))
+    parts.append(S.cyl(0.014, 0.008, (c * 0.038, s_ * 0.038, 0.044), V_CLAMP,
+                       segments=8, bands=[('Z', 900.0)], amp=0.25))
 
 S.finish(parts, "CoreMixingArray", out, tex_out, tag="MIXER")

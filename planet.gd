@@ -753,21 +753,19 @@ func _create_moons() -> void:
 		moon.scale = Vector3(msize, msize, msize)
 		moon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
-		# A little self-emission keeps moons readable even on the night side / when the
-		# scene has no light reaching them.
+		# Grey level only — a moon is lit by the sun like everything else, and its night side
+		# is black. This used to carry a self-emission to keep it readable where no light
+		# reached, which is the same thing as saying it was never unlit.
 		var g: float = rng.randf_range(0.55, 0.80)
 		if tex:
 			var smat := ShaderMaterial.new()
 			smat.shader = POLAR_BLUR_SHADER
 			smat.set_shader_parameter("albedo_tex", tex)
-			smat.set_shader_parameter("self_light", 0.18)
+			smat.set_shader_parameter("self_light", 0.0)   # sunlight only
 			moon.set_surface_override_material(0, smat)
 		else:
 			var mat := StandardMaterial3D.new()
 			mat.albedo_color = Color(g, g, g * 0.96)
-			mat.emission_enabled = true
-			mat.emission = Color(g, g, g)
-			mat.emission_energy_multiplier = 0.18
 			moon.set_surface_override_material(0, mat)
 		add_child(moon)
 
@@ -971,16 +969,13 @@ func _infra_material(tex_path: String = "") -> StandardMaterial3D:
 	if nrm != null:
 		m.normal_enabled = true
 		m.normal_texture = nrm
-	# Self-light, so the structures read at all in a scene where most of a lane is in its
-	# planet's shadow most of the time.
+	# NO self-light. Everything in the system is lit by the sun and nothing else, so a structure
+	# on the night side of its planet is black — which is what it would be.
 	#
-	# Through the ALBEDO MAP and with a WHITE multiplier: the glow follows the hardware's own
-	# plating and panels and adds no colour of its own. A flat emission would put its colour
-	# over every texel equally, which is exactly what this stopped doing.
-	m.emission_enabled = true
-	m.emission_texture = m.albedo_texture
-	m.emission       = Color.WHITE
-	m.emission_energy_multiplier = 0.20
+	# This carried a faint emission for years, then briefly carried it through the albedo map so
+	# the glow followed the plating. Both were the same compromise: a stand-in for lighting,
+	# keeping hardware readable where the sun does not reach it. It also meant nothing on screen
+	# was ever actually dark.
 	return m
 
 ## Build one MultiMesh lane per orbital-infrastructure type (all under this planet, in its

@@ -41,7 +41,7 @@ parts = []
 # The loop.  32 segments: a big thin hoop shows its polygon count, where the storage
 # ring's fat tube hides it at 20.
 parts.append(S.torus(R_MAJOR, R_TUBE, (0, 0, 0), V_LOOP,
-                     major_seg=32, minor_seg=5, windings=16, amp=0.12, grime=0.08))
+                     major_seg=32, minor_seg=5, windings=16, amp=0.12))
 
 # Three tap stations on the loop - far fewer and smaller than the storage ring's six
 # cryostat blocks, so they read as punctuation on a cable rather than as the machine.

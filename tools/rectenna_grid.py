@@ -26,9 +26,9 @@ parts = []
 
 for v in (-0.100, -0.050, 0.0, 0.050, 0.100):
     parts.append(S.box((0.250, 0.012, 0.004), (0, v, 0), V_BAR,
-                       bands=[('X', 420.0)], amp=0.28, grime=0.05))
+                       bands=[('X', 420.0)], amp=0.28))
     parts.append(S.box((0.012, 0.250, 0.004), (v, 0, 0), V_BAR,
-                       bands=[('Y', 420.0)], amp=0.28, grime=0.05))
+                       bands=[('Y', 420.0)], amp=0.28))
 
 parts.append(S.cyl(0.026, 0.014, (0, 0, 0), V_NODE, bands=[('Z', 520.0)], amp=0.16))
 

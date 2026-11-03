@@ -32,7 +32,9 @@ tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
 V_HULL   = (0.58, 0.62, 0.66)   # drum hull
-V_CAP    = (0.80, 0.64, 0.30)   # end caps
+V_CAP    = (0.52, 0.56, 0.60)   # end caps - pressure structure, so steel and not gold
+V_CABLE  = (0.15, 0.16, 0.19)   # conduit feeding the mirror drives
+V_PORT   = (0.24, 0.26, 0.30)   # airlock hatches
 V_DOCK   = (0.56, 0.58, 0.62)   # docking ports
 V_MIRROR = (0.90, 0.92, 0.95)   # sunlight mirrors
 
@@ -41,7 +43,7 @@ parts = []
 # The drum itself.  12 sides: it has to read as round, where the depot's tanks are
 # happy being faceted at 8.
 parts.append(S.cyl(0.068, 0.180, (0, 0, 0), V_HULL, segments=12,
-                   windings=12, amp=0.60, grime=0.08))
+                   windings=12, amp=0.60))
 
 # End caps, and a docking port on each.
 for sz in (-1, 1):
@@ -64,6 +66,18 @@ for i in range(3):
                        V_CAP, rot=(0, math.radians(90), a)))
     parts.append(S.box((0.004, 0.055, 0.180),
                        (math.cos(a) * 0.095, math.sin(a) * 0.095, 0),
-                       V_MIRROR, rot=(0, 0, a), grime=0.03))
+                       V_MIRROR, rot=(0, 0, a)))
+
+# Conduit running the length of the drum to each mirror's drive, and an airlock hatch
+# beside each docking port.  A spun habitat has to steer its mirrors, and the cable that
+# does it is the thing that reads as machinery rather than as a painted drum.
+for i in range(3):
+    a = math.radians(60 + 120 * i)
+    c, s_ = math.cos(a), math.sin(a)
+    parts.append(S.pipe((c * 0.070, s_ * 0.070, -0.088), (c * 0.070, s_ * 0.070, 0.088),
+                        0.0035, V_CABLE, bands=[('Z', 600.0)], amp=0.30))
+for sz in (-1, 1):
+    parts.append(S.hatch((0.044, 0.0, sz * 0.100), 0.013, V_PORT, depth=0.006,
+                         bands=[('Z', 900.0)], amp=0.25))
 
 S.finish(parts, "OrbitalHabitat", out, tex_out, tag="HABITAT")

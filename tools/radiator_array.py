@@ -41,6 +41,6 @@ for i in range(6):
     a = math.radians(60 * i)
     parts.append(S.box((0.085, 0.004, 0.140),
                        (math.cos(a) * 0.050, math.sin(a) * 0.050, 0),
-                       V_FIN, rot=(0, 0, a), bands=[('Z', 520.0)], amp=0.38, grime=0.05))
+                       V_FIN, rot=(0, 0, a), bands=[('Z', 520.0)], amp=0.38))
 
 S.finish(parts, "RadiatorArray", out, tex_out, tag="RADIATOR")

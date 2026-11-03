@@ -24,7 +24,7 @@ V_HUB  = (0.80, 0.64, 0.30)   # hub, blanketed
 parts = []
 
 parts.append(S.box((0.230, 0.230, 0.0015), (0, 0, 0), V_SAIL,
-                   bands=[('X', 180.0), ('Y', 180.0)], amp=0.14, grime=0.02))
+                   bands=[('X', 180.0), ('Y', 180.0)], amp=0.14))
 for a in (45.0, -45.0):
     parts.append(S.box((0.320, 0.006, 0.006), (0, 0, 0.004), V_SPAR,
                        rot=(0, 0, math.radians(a))))

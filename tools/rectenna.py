@@ -25,7 +25,7 @@ V_BUS  = (0.80, 0.64, 0.30)   # bus
 parts = []
 
 parts.append(S.cone(0.020, 0.085, 0.040, (0, 0, 0.010), V_DISH, segments=14,
-                    rot=(math.radians(25), 0, 0), windings=14, amp=0.18, grime=0.04))
+                    rot=(math.radians(25), 0, 0), windings=14, amp=0.18))
 parts.append(S.cyl(0.010, 0.050, (0, 0, -0.030), V_MAST, bands=[('Z', 420.0)], amp=0.16))
 parts.append(S.box((0.040, 0.040, 0.030), (0, 0, -0.062), V_BUS,
                    bands=[('Z', 380.0)], amp=0.20))

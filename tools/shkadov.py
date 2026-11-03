@@ -32,7 +32,7 @@ parts = []
 # next, so the stack is one piece rather than three discs hovering above each other.
 for radius, z in ((0.140, 0.0), (0.100, 0.008), (0.060, 0.016)):
     parts.append(S.cyl(radius, 0.012, (0, 0, z), V_MIRROR, segments=16,
-                       windings=16, amp=0.16, grime=0.02))
+                       windings=16, amp=0.16))
 
 parts.append(S.cyl(0.008, 0.040, (0, 0, -0.024), V_BOOM, bands=[('Z', 420.0)], amp=0.18))
 parts.append(S.box((0.030, 0.030, 0.020), (0, 0, -0.052), V_BUS,

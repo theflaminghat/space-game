@@ -39,6 +39,6 @@ for sy in (-1, 1):
 for sx in (-1, 1):
     parts.append(S.cyl(0.006, 0.045, (sx * 0.034, 0, -0.004), V_STRUT))
 parts.append(S.box((0.100, 0.070, 0.004), (0, 0, 0.026), V_MIRROR,
-                   rot=(math.radians(28), 0, 0), grime=0.02))
+                   rot=(math.radians(28), 0, 0)))
 
 S.finish(parts, "PowerRelaySatellite", out, tex_out, tag="RELAY")

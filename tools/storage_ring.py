@@ -50,6 +50,6 @@ for i in range(4):
     a = math.radians(90 * i)
     parts.append(S.box((0.085, 0.010, 0.007),
                        (math.cos(a) * 0.070, math.sin(a) * 0.070, 0),
-                       V_SPOKE, rot=(0, 0, a), grime=0.08))
+                       V_SPOKE, rot=(0, 0, a)))
 
 S.finish(parts, "StorageRing", out, tex_out, tag="RING")
