@@ -947,15 +947,20 @@ static func _model_mesh(kind: String) -> Mesh:
 	_model_mesh_cache[kind] = mesh
 	return mesh
 
-## Material: the lane's texture (its own baked map, or the shared checker) tinted with the
-## lane's colour + faint self-glow so the structures read in the scene's limited lighting.
-func _infra_material(color: Color, tex_path: String = "") -> StandardMaterial3D:
+## Material for one orbital lane: its own baked map, lit enough to read in a scene that is
+## mostly shadow.
+##
+## NO LANE TINT. The colour comes from the map and from nowhere else. The lane's grouping colour
+## used to be applied as flat emission, and because emission without a texture floods the whole
+## hull with one value it was, at the strength it needs to be visible here, the only colour left
+## — a laser dish came out uniformly pink and a telescope uniformly blue, with the gold blanket
+## and the cell grids underneath invisible. The maps carry the hardware's own colour; that is
+## what they are for.
+func _infra_material(tex_path: String = "") -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_texture = _lane_texture(tex_path)
-	# WHITE, not the lane colour.  The maps carry the hardware's own colour now — gold
-	# blanket, blue solar cells, white tankage — and albedo_color MULTIPLIES through the
-	# texture, so tinting a blue panel amber would give mud.  Tinting only ever worked
-	# because the maps were deliberately greyscale.
+	# WHITE. albedo_color MULTIPLIES through the texture, so any tint here would muddy the
+	# hardware colours the map carries — gold blanket, blue solar cells, white tankage.
 	m.albedo_color   = Color.WHITE
 	m.metallic       = 0.3
 	m.roughness      = 0.7
@@ -966,12 +971,15 @@ func _infra_material(color: Color, tex_path: String = "") -> StandardMaterial3D:
 	if nrm != null:
 		m.normal_enabled = true
 		m.normal_texture = nrm
-	# The lane's colour lives here now, and carries the whole of the grouping INFRA_LANES
-	# describes — amber for heat, blue for the power link, grey for storage, green for
-	# people.  It has to be stronger than the 0.15 it was when it only had to warm a
-	# surface already tinted that colour: this is the only lane cue left.
+	# Self-light, so the structures read at all in a scene where most of a lane is in its
+	# planet's shadow most of the time.
+	#
+	# Through the ALBEDO MAP and with a WHITE multiplier: the glow follows the hardware's own
+	# plating and panels and adds no colour of its own. A flat emission would put its colour
+	# over every texel equally, which is exactly what this stopped doing.
 	m.emission_enabled = true
-	m.emission       = color
+	m.emission_texture = m.albedo_texture
+	m.emission       = Color.WHITE
 	m.emission_energy_multiplier = 0.20
 	return m
 
@@ -996,7 +1004,7 @@ func _create_infra_lanes() -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "%s_infra_%s" % [name, str(spec["type"]).replace(" ", "_")]
 		mmi.multimesh = mm
-		mmi.material_override = _infra_material(spec["color"], str(spec.get("texture", "")))
+		mmi.material_override = _infra_material(str(spec.get("texture", "")))
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var ext: float = float(spec["radius"]) + 0.5
 		mmi.custom_aabb = AABB(Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))

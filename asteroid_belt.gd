@@ -208,7 +208,10 @@ func _create_infra_lanes() -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "%s_infra_%s" % [BODY_NAME, str(spec["type"]).replace(" ", "_")]
 		mmi.multimesh = mm
-		mmi.material_override = _infra_material(spec["color"])
+		# The texture too, which this never passed: the belt's structures were falling back to
+		# the shared checker and reading only as their lane colour. They are the same hardware
+		# in the same lanes as a planet's, and they get the same maps.
+		mmi.material_override = _infra_material(str(spec.get("texture", "")))
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mmi.custom_aabb = AABB(Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
 		_rocks.add_child(mmi)

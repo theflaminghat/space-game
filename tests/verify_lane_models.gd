@@ -12,10 +12,13 @@ extends SceneTree
 ##       exporter that split the mesh by material would cost draw calls for nothing.
 ##   UVs - the override's albedo_texture is sampled with them.  A mesh without UVs reads as
 ##       flat colour.
-##   COLOURED MAP, WHITE TINT - the maps carry the hardware's own colour, so albedo_color
-##       must stay WHITE.  It MULTIPLIES through the texture, and tinting a blue solar
-##       panel with an amber lane colour gives mud.  The lane's grouping lives in the
-##       material's emission instead, which is why both halves are checked.
+##   COLOUR FROM THE MAP, AND NOWHERE ELSE - the maps carry the hardware's own colour, so
+##       albedo_color stays WHITE (it MULTIPLIES through the texture, and tinting a blue
+##       solar panel amber gives mud) and the emission stays WHITE too, carrying the SAME
+##       map.  The lane's grouping colour used to live in that emission, and because
+##       emission without a texture floods every texel equally it was, at the strength it
+##       needs here, the only colour left: a laser dish came out uniformly pink whatever
+##       its map said.  All three halves are checked because all three were wrong at once.
 ##   SIZE - the lanes sit 0.04 apart in radius around a body.  Much over ~0.3 units and a
 ##       hull reaches into its neighbours; the box these replaced was 0.18.
 ##   RADIAL AXIS IS +Y - _update_infra() builds Basis(t1, radial, t2), so each model's +Y
@@ -415,9 +418,26 @@ func _run() -> void:
 			check(std_m.albedo_color == Color.WHITE,
 				"%s: nothing tints the map — albedo_color is white, not %s, or the "
 					% [what, str(std_m.albedo_color)] + "hardware colours would be muddied")
-			check(std_m.emission_enabled and std_m.emission == want,
-				"%s: the lane's own colour is carried by the emission instead: %s vs %s"
-					% [what, str(std_m.emission), str(want)])
+			# The self-light goes through the SAME MAP. Without a texture, emission floods the
+			# whole hull with one value — and at the strength it needs to be visible in this
+			# scene's lighting, that wash was the only colour left: a laser dish came out
+			# uniformly pink and a telescope uniformly blue, with the gold blanket and the cell
+			# grids underneath invisible.
+			check(std_m.emission_enabled, "%s: the structure lights itself" % what)
+			check(std_m.emission_texture == textures.get(kind),
+				"%s: and does it through its own map, so the glow follows the plating "
+					% what + "rather than flooding the hull: %s" % str(std_m.emission_texture))
+			# WHITE, and that is the whole rule: the colour comes from the map and from
+			# nowhere else. A lane tint here would be put over every texel equally, which is
+			# what made a laser dish uniformly pink whatever its map said.
+			check(std_m.emission.is_equal_approx(Color.WHITE),
+				"%s: the self-light adds no colour of its own: %s" % [what, str(std_m.emission)])
+			# Two lanes with different grouping colours must now look identical in everything
+			# but their map. Checked against the lane's own colour so a reintroduced tint fails
+			# here rather than being noticed on screen months later.
+			check(not std_m.emission.is_equal_approx(want as Color)
+					or (want as Color).is_equal_approx(Color.WHITE),
+				"%s: and is not the lane's colour %s" % [what, str(want)])
 			var np2: String = str(entry["texture"]).replace("_albedo.png", "_normal.png")
 			if ResourceLoader.exists(np2):
 				check(std_m.normal_enabled and std_m.normal_texture != null,
