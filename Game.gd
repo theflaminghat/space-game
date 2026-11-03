@@ -901,7 +901,12 @@ var _impact_cooldown_ms: int = 0     # Time.get_ticks_msec() floor before next i
 ## research — there is no engineered-pandemic risk before the capability exists.
 const PANDEMIC_GAP_MIN: int = 800
 const PANDEMIC_GAP_MAX: int = 2_500
-const PANDEMIC_BASE: float  = 0.03
+## Rebalanced with the model that replaced the old one (see pandemic_probability). The new
+## terms multiply to about 1.8 for an ordinary standard-diversity civilisation, so holding the
+## old 0.03 would have doubled the rate as a side effect of a rewrite that was not supposed to
+## change how often this happens. 0.017 puts that civilisation back where it was; everything
+## after that is the player's own doing.
+const PANDEMIC_BASE: float  = 0.017
 const PANDEMIC_BIOTECH: Array = [
 	"advanced_biomedical_engineering", "bioinformatics", "genome_engineering", "synthetic_biology",
 ]
@@ -11747,24 +11752,119 @@ func _resolve_cluster_strike(cluster_name: String, kind: String, count: int) -> 
 ## Read by the check above and by the forecast, which is the point of it being a function: a
 ## forecast computed from its own copy of this arithmetic would quietly start lying the first
 ## time the real one was tuned.
+## The odds of an engineered plague this year.
+##
+## Measured over the SOLAR SYSTEM, because that is where one spreads: _trigger_pandemic reaches
+## Earth and the in-system colonies, which trade and travel with one another, and leaves the
+## interstellar colonies alone — they are years of light away.
+##
+## ── What this replaced ──
+##
+## base x (1 + 0.4 x biotech_nodes) x (1 + 2 x ai) x (2 / (1 + worlds)) x (BASE_LE / le)
+##
+## Four problems, one of them a double count:
+##
+##   - `2 / (1 + worlds)` divided the ODDS by the colony count, and _trigger_pandemic already
+##     divides the TOLL by it. At five worlds that is 0.33 x 0.2 — expected losses fell about
+##     fifteenfold for settling the system. And the direction was wrong to begin with: more
+##     settled worlds, trading and travelling, is more coupling between reservoirs and so a
+##     better chance of something getting out, not a worse one. Colonies blunt the toll. They
+##     do not make the outbreak less likely.
+##   - Population did not appear at all. Two billion and twenty billion gave identical odds, in
+##     a game that tracks people one at a time and models what a world can hold.
+##   - Life expectancy stood in for public health, but in this game `le` is driven by the
+##     LONGEVITY SPLICE — so engineering people to live longer made them less likely to catch a
+##     plague. Engineered longevity is not sanitation. Dropped.
+##   - A count of unlocked research nodes never falls. A civilisation that learned
+##     bioengineering a thousand years ago and stopped was as exposed as one editing genomes
+##     this year.
+##
+## ── What it is now ──
+##
+## Every term is something the game already simulates, and three of them are things the player
+## is doing rather than things they once learned.
 func pandemic_probability() -> float:
 	var biotech: int = 0
 	for node_id: String in PANDEMIC_BIOTECH:
 		if ResearchTree.is_unlocked(node_id):
 			biotech += 1
 	if biotech == 0:
+		return 0.0        # no engineered-pandemic risk before the capability exists
+
+	var worlds: Array = _home_worlds()
+	var pop: float = 0.0
+	var cap: float = 0.0
+	var div_pop: float = 0.0      # population-weighted genetic diversity
+	var splices: int = 0
+	for w: String in worlds:
+		var wp: float = float(world_pop.get(w, 0.0))
+		if wp <= 0.0:
+			continue
+		pop += wp
+		cap += maxf(_world_capacity(w), 1.0)
+		var st: Dictionary = stock_of(w)
+		div_pop += wp * StockData.diversity_of(st)
+		if str(st.get("splice", "")) != "":
+			splices += 1
+	if pop <= 0.0:
 		return 0.0
-	var inhabited: int = 1 + colonized_planets.size()
+
+	# ── What is being done to the genome right now ──
+	# A splice in progress is a laboratory working on a live human genome. The capability gate
+	# above says it is possible; this says it is happening.
+	var editing: float = 1.0 + PANDEMIC_SPLICE_WEIGHT * float(splices)
+
+	# ── How alike everyone is ──
+	# The strongest term, and the one the rest of the game has been building toward: a
+	# population spliced into one optimised genome is a monoculture, and a monoculture is what
+	# a pathogen is for. diversity_of is 1.0 for a broad founding and 0.45 for a minimal one,
+	# and narrows further as a lineage drifts.
+	var diversity: float = clampf(div_pop / pop, StockData.DIVERSITY_FLOOR, 1.0)
+	var uniformity: float = 1.0 + PANDEMIC_UNIFORMITY_WEIGHT * (1.0 - diversity)
+
+	# ── How many hosts, and how close together ──
+	# Crowding against what the worlds can actually hold, not a raw headcount: ten billion on a
+	# world built for ten billion is a different place from ten billion on one built for fifty.
+	var crowding: float = 1.0 + PANDEMIC_CROWDING_WEIGHT * clampf(pop / maxf(cap, 1.0), 0.0, 1.5)
+
+	# ── How much the worlds touch each other ──
+	# Replaces the inverted dilution. Flights in the air are the actual coupling between
+	# otherwise separate reservoirs, and it is traffic rather than world count that carries
+	# something from one to the next.
+	var traffic: float = 1.0 + PANDEMIC_TRAFFIC_WEIGHT \
+		* clampf(float(active_launches.size()) / PANDEMIC_TRAFFIC_FULL, 0.0, 1.0)
+
+	# ── What is watching for it ──
+	# The compute slider labelled "Epidemiological modelling" bought foresight and nothing else:
+	# the player could see an outbreak coming and do nothing about it. Surveillance now reduces
+	# the odds as well, saturating, so pointing everything at it never reaches zero.
+	var watch: float = track_compute("pandemic")
+	var caught: float = watch / (watch + PANDEMIC_SURVEILLANCE_HALF)
+	var surveillance: float = 1.0 - PANDEMIC_SURVEILLANCE_MAX * caught
+
 	var ai: float = PoliticsData.ai_autonomy(policies)
-	var le: float = _life_expectancy()
-	# More bioengineering and more AI raise the odds; spreading across worlds lowers
-	# them; poor public health (low life expectancy) raises them.
 	var prob: float = PANDEMIC_BASE \
 		* (1.0 + 0.4 * float(biotech)) \
 		* (1.0 + 2.0 * ai) \
-		* (2.0 / (1.0 + float(inhabited))) \
-		* clampf(BASE_LIFE_EXPECTANCY / le, 0.5, 3.0)
+		* editing * uniformity * crowding * traffic * surveillance
 	return clampf(prob, 0.0, 0.95)
+
+## Per world actively running a splice. A handful of worlds editing at once is a civilisation
+## with its hands in the genome; the weight is what makes that a decision rather than a detail.
+const PANDEMIC_SPLICE_WEIGHT: float = 0.35
+## At zero diversity the odds roughly triple. The largest single term, deliberately: it is the
+## one the player chooses outright when they pick a founding stock and keep splicing it.
+const PANDEMIC_UNIFORMITY_WEIGHT: float = 2.0
+## At capacity, half again. Above it (the clamp allows 1.5) more still.
+const PANDEMIC_CROWDING_WEIGHT: float = 0.5
+## Flights in the air at which the coupling term is fully on.
+const PANDEMIC_TRAFFIC_FULL: float = 40.0
+const PANDEMIC_TRAFFIC_WEIGHT: float = 0.6
+## Compute at which surveillance is half as good as it will ever get. Earth in 1945 thinks at
+## about 3e26 FLOP/s, so a serious allocation is needed before this bites.
+const PANDEMIC_SURVEILLANCE_HALF: float = 2.0e26
+## The most surveillance can ever take off. Never zero: something always gets out.
+const PANDEMIC_SURVEILLANCE_MAX: float = 0.65
 
 ## A synthetic plague kills much of the population — divided across inhabited worlds,
 ## so colonies blunt it.  Survivable by design unless the species is already fragile.

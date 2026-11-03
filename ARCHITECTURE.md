@@ -1301,6 +1301,48 @@ So `_update_population` costs exactly what it did when a stock was a single row.
 **`TRAITS` order and not tick order**, or two populations holding the same three traits would
 hash to different keys and be different stocks.
 
+### What makes an engineered plague likely
+
+The old model was `base x (1 + 0.4·biotech_nodes) x (1 + 2·ai) x (2 / (1 + worlds)) x (BASE_LE /
+le)`, and four things were wrong with it:
+
+- **The colony count divided the odds, and `_trigger_pandemic` was already dividing the toll by
+  it.** At five worlds that is 0.33 × 0.2 — expected losses fell about fifteenfold for settling
+  the system. The direction was wrong anyway: more settled worlds, trading and travelling, is
+  more coupling between reservoirs, not less. Colonies blunt the **toll**; they do not make an
+  outbreak less likely.
+- **Population never appeared.** Two billion and twenty billion gave identical odds, in a game
+  that tracks people one at a time and models what a world can hold.
+- **Life expectancy stood in for public health**, but `le` here is driven by the longevity
+  splice — so engineering people to live longer made them less likely to catch a plague.
+- **A count of unlocked research nodes never falls.** A civilisation that learned bioengineering
+  a thousand years ago and stopped was as exposed as one editing genomes this year.
+
+Now, over the solar system — which is where a plague spreads, since `_trigger_pandemic` reaches
+Earth and the in-system colonies and leaves the interstellar ones alone:
+
+| term | from | at |
+|---|---|---|
+| `editing` | splices running **now** (`st["splice"]`) | 7.9% baseline |
+| `uniformity` | population-weighted `diversity_of()` | **16.6%** on minimal founders |
+| `crowding` | `pop / _world_capacity` | 15.6% at 4× population |
+| `traffic` | `active_launches` | 19.0% with 40 flights up |
+| `surveillance` | `track_compute("pandemic")` | −20%+ fully allocated |
+
+`uniformity` is the largest term on purpose: it is the one the rest of the game has been
+building toward. A population spliced into one optimised genome is a monoculture, and the
+founding-stock choice — until now a trade of launch mass against capability — is also a bet
+about disease.
+
+`surveillance` is the lever the UI already implied. The compute slider labelled "Epidemiological
+modelling" bought foresight and nothing else: the player could watch an outbreak coming and do
+nothing about it. It saturates, so pointing everything at it never reaches zero.
+
+**`PANDEMIC_BASE` moved 0.03 → 0.017.** The new terms multiply to about 1.8 for an ordinary
+standard-diversity civilisation, so holding the old base would have doubled the rate as a side
+effect of a rewrite that was not supposed to change how often this happens. 0.017 puts that
+civilisation back where it was; everything above it is the player's own doing.
+
 ### A colony's probes are built with a colony's star
 
 `_vn_launch` charged `ResearchTree.resources["energy"]` whoever launched — so a probe assembled
