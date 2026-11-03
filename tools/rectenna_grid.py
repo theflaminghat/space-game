@@ -20,7 +20,8 @@ tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
 V_BAR  = (0.16, 0.22, 0.38)   # receiving bars
-V_NODE = (0.80, 0.64, 0.30)   # centre node
+V_NODE   = (0.44, 0.46, 0.50)   # centre node - a junction box, so bare
+V_BUSBAR = (0.76, 0.48, 0.27)   # copper collection bars feeding it
 
 parts = []
 
@@ -31,5 +32,19 @@ for v in (-0.100, -0.050, 0.0, 0.050, 0.100):
                        bands=[('Y', 420.0)], amp=0.28))
 
 parts.append(S.cyl(0.026, 0.014, (0, 0, 0), V_NODE, bands=[('Z', 520.0)], amp=0.16))
+
+# Collection bars from the node out along the two centre lines, and a tie-down clamp
+# where each outer bar crosses them.  The lattice is the antenna; these are the harness
+# that takes what it gathers to one place.
+for ax in ('X', 'Y'):
+    for s_sign in (-1, 1):
+        a = (s_sign * 0.118, 0) if ax == 'X' else (0, s_sign * 0.118)
+        parts.append(S.pipe((0, 0, 0.005), (a[0], a[1], 0.005), 0.0035, V_BUSBAR,
+                            bands=[(ax, 500.0)], amp=0.25))
+for v in (-0.100, -0.050, 0.050, 0.100):
+    parts.append(S.hatch((v, 0, 0.005), 0.008, V_NODE, depth=0.006,
+                         bands=[('Z', 900.0)], amp=0.25))
+    parts.append(S.hatch((0, v, 0.005), 0.008, V_NODE, depth=0.006,
+                         bands=[('Z', 900.0)], amp=0.25))
 
 S.finish(parts, "StellarRectennaGrid", out, tex_out, tag="RECTGRID")

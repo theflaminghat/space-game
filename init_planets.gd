@@ -61,12 +61,73 @@ var _swarm_poll_accum: float = 0.0
 
 
 func _ready() -> void:
+	_build_sunlight()
 	# The belt is a world of its own; it sits alongside the planets under this node.
 	add_child(AsteroidBelt.new())
 	_build_swarm()
 	SolarSystem.active_changed.connect(_sync_visibility)
 	SolarSystem.paused_changed.connect(_sync_visibility)
 	_sync_visibility()
+
+
+## ── The sun lights the system from its SURFACE ────────────────────────────────
+##
+## One OmniLight3D at the sun's centre is a point source, and a point source lights exactly half
+## of everything: a hard terminator at 90 degrees, identical whether you are at Neptune or
+## hanging just outside the photosphere. That is wrong in the place this game spends its late
+## hours — a Dyson collector sits at about 2.4 units from a sun whose own radius is 2.35, so the
+## star fills most of its sky and should be lighting it from well past the horizon.
+##
+## Godot has no sphere area light for diffuse. OmniLight3D.light_size only widens the penumbra
+## of SHADOWS, and shadows are off here (an omni shadow at this range is a system-sized cubemap).
+## So the extent is built out of lights: six of them on the photosphere, on the octahedral axes,
+## each carrying a sixth of the energy.
+##
+## What that buys, and it is the whole point: a surface far away sees all six from effectively
+## one direction and is lit exactly as before, while a surface near the terminator sees only
+## some of them and fades instead of cutting off. Close in, the wrap is dramatic — which is
+## correct, because angular size is what matters and the sun's angular size is what changes.
+const SUN_LIGHT_COUNT: int = 6
+
+## Build the shell, sized from the sun's own mesh so the two cannot disagree.
+func _build_sunlight() -> void:
+	var sun: MeshInstance3D = get_node_or_null("sun") as MeshInstance3D
+	if sun == null:
+		return
+	var sphere := sun.mesh as SphereMesh
+	var radius: float = (sphere.radius if sphere != null else 0.5) * sun.scale.x
+
+	# The scene's single central light is what this replaces. Taken as the template first, so
+	# its range, attenuation and colour stay in one place — the scene file — rather than being
+	# restated here.
+	var template: OmniLight3D = null
+	var world: Node = get_parent()
+	if world != null:
+		for n: Node in world.get_children():
+			if n is OmniLight3D:
+				template = n as OmniLight3D
+				break
+	if template == null:
+		return
+
+	# Octahedral axes: evenly spread, no preferred plane, and six is enough to close the gap at
+	# the terminator without lighting the system six times over.
+	var axes: Array[Vector3] = [
+		Vector3.RIGHT, Vector3.LEFT, Vector3.UP, Vector3.DOWN, Vector3.FORWARD, Vector3.BACK,
+	]
+	for a: Vector3 in axes:
+		var l := OmniLight3D.new()
+		l.light_energy = template.light_energy / float(SUN_LIGHT_COUNT)
+		l.light_color = template.light_color
+		l.omni_range = template.omni_range
+		l.omni_attenuation = template.omni_attenuation
+		l.shadow_enabled = false
+		# Children of the sun, so they are wherever it is.
+		sun.add_child(l)
+		# The sun's own scale is inherited, so the offset is in MESH units, not world ones.
+		l.position = a * (radius / maxf(sun.scale.x, 0.0001))
+	# The centre light has been replaced by the shell; leaving it would be a seventh source.
+	template.queue_free()
 
 
 # ── Per-frame orbital motion ───────────────────────────────────────────────────

@@ -52,4 +52,14 @@ for i in range(4):
                        (math.cos(a) * 0.070, math.sin(a) * 0.070, 0),
                        V_SPOKE, rot=(0, 0, a)))
 
+# Cryogen transfer lines from the hub out to every cryostat, and a relief valve on each.
+# The coil is the store; the plumbing keeping it cold is what says so.
+for i in range(6):
+    a = math.radians(15 + 60 * i)
+    c, s_ = math.cos(a), math.sin(a)
+    parts.append(S.pipe((c * 0.028, s_ * 0.028, 0.010), (c * (R_COIL - 0.012), s_ * (R_COIL - 0.012), 0.016),
+                        0.0032, (0.52, 0.54, 0.58), bands=[('Z', 600.0)], amp=0.25))
+    parts.append(S.hatch((c * R_COIL, s_ * R_COIL, 0.030), 0.008, (0.24, 0.26, 0.30),
+                         depth=0.006, bands=[('Z', 900.0)], amp=0.25))
+
 S.finish(parts, "StorageRing", out, tex_out, tag="RING")

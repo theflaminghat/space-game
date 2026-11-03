@@ -21,7 +21,8 @@ tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
 V_FACE  = (0.22, 0.26, 0.36)   # emitter face
-V_BUS   = (0.80, 0.64, 0.30)   # bus
+V_BUS   = (0.40, 0.42, 0.46)   # driver box - electrical, so bare
+V_FEED  = (0.76, 0.48, 0.27)   # copper feeds, driver up to the emitter face
 V_MAST  = (0.40, 0.41, 0.44)   # mast
 V_MOUNT = (0.56, 0.58, 0.62)   # mount
 V_FIN   = (0.87, 0.87, 0.85)   # fins
@@ -40,5 +41,16 @@ parts.append(S.cyl(0.034, 0.012, (0, 0, -0.033), V_MOUNT, bands=[('Z', 520.0)], 
 for sx in (-1, 1):
     parts.append(S.box((0.030, 0.004, 0.030), (sx * 0.035, 0, -0.009), V_FIN,
                        bands=[('Z', 520.0)], amp=0.30))
+
+# Feeds from the driver box up around the mast into the emitter face, and a hatch on the
+# box.  A phased array is driven element by element, and the conductors that do it are
+# the only thing on this shape that says which way the power flows.
+for i in range(3):
+    a = math.radians(120 * i)
+    c, s_ = math.cos(a), math.sin(a)
+    parts.append(S.pipe((c * 0.022, s_ * 0.022, -0.004), (c * 0.030, s_ * 0.030, 0.026),
+                        0.0030, V_FEED, bands=[('Z', 600.0)], amp=0.25))
+parts.append(S.hatch((0, -0.026, -0.009), 0.012, (0.24, 0.26, 0.30), axis='Y',
+                     depth=0.006, bands=[('Z', 800.0)], amp=0.25))
 
 S.finish(parts, "MicrowaveUplink", out, tex_out, tag="UPLINK")

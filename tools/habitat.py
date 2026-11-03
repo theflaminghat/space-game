@@ -33,7 +33,7 @@ S.setup()
 
 V_HULL   = (0.58, 0.62, 0.66)   # drum hull
 V_CAP    = (0.52, 0.56, 0.60)   # end caps - pressure structure, so steel and not gold
-V_CABLE  = (0.15, 0.16, 0.19)   # conduit feeding the mirror drives
+V_CABLE  = (0.76, 0.48, 0.27)   # copper trunk feeding the mirror drives
 V_PORT   = (0.24, 0.26, 0.30)   # airlock hatches
 V_DOCK   = (0.56, 0.58, 0.62)   # docking ports
 V_MIRROR = (0.90, 0.92, 0.95)   # sunlight mirrors

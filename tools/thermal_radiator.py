@@ -20,7 +20,8 @@ S.setup()
 
 V_PANEL    = (0.87, 0.87, 0.85)   # high-emissivity panels
 V_SPINE    = (0.40, 0.41, 0.44)   # spine
-V_MANIFOLD = (0.80, 0.64, 0.30)   # manifold
+V_MANIFOLD = (0.76, 0.48, 0.27)   # copper manifold - plumbing, not insulation
+V_LINE     = (0.68, 0.44, 0.26)   # the coolant runs it feeds
 
 parts = []
 
@@ -33,5 +34,14 @@ for x in (-0.073, 0.0, 0.073):
 
 parts.append(S.box((0.030, 0.030, 0.016), (0, 0, 0), V_MANIFOLD,
                    bands=[('Z', 500.0)], amp=0.16))
+
+# Coolant runs from the manifold out along the spine and into every panel.  Six plates on
+# a bar are a frame; six plates fed from one manifold are a radiator.
+for sy in (-1, 1):
+    parts.append(S.pipe((-0.112, sy * 0.009, 0.0), (0.112, sy * 0.009, 0.0),
+                        0.0030, V_LINE, bands=[('X', 500.0)], amp=0.25))
+    for x in (-0.073, 0.0, 0.073):
+        parts.append(S.pipe((x, sy * 0.009, 0.0), (x, sy * 0.030, 0.0),
+                            0.0026, V_LINE, bands=[('Y', 600.0)], amp=0.25))
 
 S.finish(parts, "ThermalRadiator", out, tex_out, tag="THERMAL")

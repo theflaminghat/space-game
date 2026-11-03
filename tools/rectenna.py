@@ -20,7 +20,9 @@ S.setup()
 
 V_DISH = (0.87, 0.87, 0.85)   # collector dish
 V_MAST = (0.40, 0.41, 0.44)   # mast
-V_BUS  = (0.80, 0.64, 0.30)   # bus
+V_BUS   = (0.40, 0.42, 0.46)   # converter box - electrical, so bare
+V_GUIDE = (0.76, 0.48, 0.27)   # copper waveguide, feed horn down to the converter
+V_HORN  = (0.24, 0.26, 0.30)   # the feed horn itself
 
 parts = []
 
@@ -29,5 +31,13 @@ parts.append(S.cone(0.020, 0.085, 0.040, (0, 0, 0.010), V_DISH, segments=14,
 parts.append(S.cyl(0.010, 0.050, (0, 0, -0.030), V_MAST, bands=[('Z', 420.0)], amp=0.16))
 parts.append(S.box((0.040, 0.040, 0.030), (0, 0, -0.062), V_BUS,
                    bands=[('Z', 380.0)], amp=0.20))
+
+# Feed horn at the dish's focus and the waveguide carrying it down the mast to the
+# converter.  Without them the dish is a bowl pointed at nothing, which is the one thing
+# a collector must not look like.
+parts.append(S.hatch((0, -0.022, 0.058), 0.009, V_HORN, axis=(0, -0.42, 0.91),
+                     depth=0.012, bands=[('Z', 800.0)], amp=0.25))
+parts.append(S.pipe((0, -0.020, 0.054), (0, -0.012, -0.050), 0.0035, V_GUIDE,
+                    bands=[('Z', 600.0)], amp=0.25))
 
 S.finish(parts, "OrbitalRectenna", out, tex_out, tag="RECTENNA")

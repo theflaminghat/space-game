@@ -27,7 +27,10 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_BENCH    = (0.80, 0.64, 0.30)   # blanketed optical bench
+V_BENCH    = (0.88, 0.63, 0.16)   # gold MLI over the optical bench - Chandra's really is
+                                  # blanketed, so this is the one place gold is earned
+V_YOKE     = (0.40, 0.41, 0.44)   # graphite wing yokes
+V_PORT     = (0.24, 0.26, 0.30)   # instrument hatches
 V_MIRROR   = (0.56, 0.58, 0.62)   # mirror housing
 V_APERTURE = (0.87, 0.87, 0.85)   # sunshade aperture
 V_AFT      = (0.50, 0.52, 0.56)   # instrument module
@@ -55,9 +58,17 @@ for sx in (-1, 1):
     # Yoke from the bench out to the wing root.  Without it the panel hangs in the
     # vacuum beside the spacecraft: the bench is 0.026 in radius and the wing root is
     # out at 0.050, and nothing crossed that gap.
-    parts.append(S.cyl(0.006, 0.034, (sx * 0.037, 0, -0.020), V_BENCH,
+    parts.append(S.cyl(0.006, 0.034, (sx * 0.037, 0, -0.020), V_YOKE,
                        rot=(0, math.radians(90), 0), bands=[('Z', 600.0)], amp=0.12))
     parts.append(S.box((0.110, 0.056, 0.004), (sx * 0.105, 0, -0.020), V_PANEL,
                        bands=[('X', 420.0), ('Y', 560.0)], amp=0.45))
+
+# Harness down the bench from the aft module to the mirror housing, and a radiator hatch
+# on the instrument module.  An observatory is read out from the back, so the cable that
+# does it runs the length of it.
+parts.append(S.pipe((0.028, 0, -0.072), (0.028, 0, 0.070), 0.0030, (0.15, 0.16, 0.19),
+                    bands=[('Z', 600.0)], amp=0.30))
+parts.append(S.hatch((0, 0.042, -0.095), 0.014, V_PORT, axis='Y', depth=0.006,
+                     bands=[('Z', 800.0)], amp=0.25))
 
 S.finish(parts, "SpaceTelescope", out, tex_out, tag="SCOPE")

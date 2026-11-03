@@ -60,4 +60,14 @@ for i in range(3):
     parts.append(S.cyl(0.014, 0.045, (math.cos(a) * 0.060, math.sin(a) * 0.060, 0.043),
                        V_TANK, bands=[('Z', 400.0)], amp=0.18))
 
+# Transfer lines from the throat down to each collection tank, and a fill hatch on every
+# tank.  The bell states the direction of flow; the plumbing states where it ends up.
+for i in range(3):
+    a = math.radians(120 * i)
+    c, s_ = math.cos(a), math.sin(a)
+    parts.append(S.pipe((c * 0.016, s_ * 0.016, 0.070), (c * 0.058, s_ * 0.058, 0.058),
+                        0.0040, (0.52, 0.50, 0.48), bands=[('Z', 600.0)], amp=0.25))
+    parts.append(S.hatch((c * 0.060, s_ * 0.060, 0.067), 0.008, (0.24, 0.26, 0.30),
+                         depth=0.006, bands=[('Z', 900.0)], amp=0.25))
+
 S.finish(parts, "StarLifter", out, tex_out, tag="LIFTER")

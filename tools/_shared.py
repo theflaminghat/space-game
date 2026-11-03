@@ -9,8 +9,10 @@ Everything here exists to satisfy what planet.gd's MultiMesh lanes impose:
   * Real UVs                   - the lane's material supplies the texture.
   * +Z is radial-outward       - glTF maps Blender +Z to Godot +Y, which is the
                                  'radial' column of the instance Basis.
-  * GREYSCALE texture          - the lane sets albedo_color and the map multiplies
-                                 through it, so the bake carries value, not hue.
+  * COLOUR texture             - the lane tints nothing any more, so the baked map is
+                                 the only thing saying what the hardware is made of.
+  * DISCRETE values            - flat plates separated by hard seams, no noise and no
+                                 gradients; detail that means something is geometry.
 
 The per-part values have to be assigned BEFORE the join, because afterwards it is
 one mesh and the parts are gone - which is why building and baking live in one

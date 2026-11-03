@@ -1316,6 +1316,24 @@ is real incandescence rather than fill.
 Measured by sweeping the camera around a planet and summing frame luminance: **0.0 at 135°, 180°
 and 225°**, full brightness sunward.
 
+**The sun emits from its surface, not from a point at its centre.** One light at the centre of a
+body of radius 2.35 is lighting the system from inside the star, and a point source lights
+exactly half of everything with a hard terminator at 90° — identical at Neptune and hanging just
+off the photosphere, which is the one place it is most wrong.
+
+Godot has no sphere area light for diffuse. `OmniLight3D.light_size` widens only *shadow*
+penumbra, and shadows are off here (an omni shadow at `omni_range = 4096` is a system-sized
+cubemap). So the extent is built out of lights: `SUN_LIGHT_COUNT` of them on the photosphere at
+the octahedral axes, each carrying a sixth of the energy, sized from the sun's own mesh so the
+two cannot disagree. The scene's central light is freed rather than left as a seventh source.
+
+**Measured, because the honest size of this is small.** A probe sphere just outside the
+photosphere has a lit share of 0.262 under a point source and 0.268 under the shell; at Earth
+the brightness profiles are identical to within noise. Both are correct. The wrap region is lit
+by one or two of the six at grazing incidence, so it is a dim penumbra rather than a bright
+extension — which is what a sphere source does — and at Earth the sun's angular radius is 6°, so
+there is nothing to see. This is a correctness fix, not a visual transformation.
+
 Two things that looked like faults and were not:
 
 - **The first render came back black everywhere.** The camera pivot had put the camera on

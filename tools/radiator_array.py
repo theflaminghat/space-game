@@ -26,7 +26,8 @@ S.setup()
 
 V_FIN    = (0.87, 0.87, 0.85)   # radiating fins
 V_SPINE  = (0.56, 0.58, 0.62)   # coolant spine
-V_COLLAR = (0.80, 0.64, 0.30)   # manifold collars
+V_COLLAR = (0.76, 0.48, 0.27)   # copper manifold collars - plumbing, not insulation
+V_LINE   = (0.68, 0.44, 0.26)   # the coolant risers they feed
 
 parts = []
 
@@ -42,5 +43,16 @@ for i in range(6):
     parts.append(S.box((0.085, 0.004, 0.140),
                        (math.cos(a) * 0.050, math.sin(a) * 0.050, 0),
                        V_FIN, rot=(0, 0, a), bands=[('Z', 520.0)], amp=0.38))
+
+# A coolant riser up the leading edge of every fin, off the manifold at each end.  A
+# radiator that is not plumbed to anything is a sheet of metal; the risers are what make
+# the six fins read as one loop.
+for i in range(6):
+    a = math.radians(60 * i)
+    c, s_ = math.cos(a), math.sin(a)
+    parts.append(S.pipe((c * 0.088, s_ * 0.088, -0.062), (c * 0.088, s_ * 0.088, 0.062),
+                        0.0035, V_LINE, bands=[('Z', 600.0)], amp=0.25))
+    parts.append(S.pipe((c * 0.022, s_ * 0.022, 0.082), (c * 0.088, s_ * 0.088, 0.062),
+                        0.0030, V_LINE, bands=[('Z', 600.0)], amp=0.25))
 
 S.finish(parts, "RadiatorArray", out, tex_out, tag="RADIATOR")
