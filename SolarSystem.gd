@@ -121,7 +121,7 @@ var star_drift_dist_ly: float = 0.0
 ## nothing nearby, where a nan would silently poison every comparison that touched it.
 const DRIFT_POSITION_MAX_LY: float = 1.0e18
 var star_velocity_ms: float = 0.0
-## Unit vector the mirrors push along, and the star it is aimed at ("" for a bare heading).
+## Unit vector the mirror pushes along, and the star it is aimed at ("" for a bare heading).
 var star_thrust_dir: Vector3 = Vector3.ZERO
 var star_thrust_target: String = ""
 ## Mirror coverage: the share of the sky the statites cover, derived from what is standing.
@@ -255,7 +255,7 @@ func _clamp_position(pos: Vector3, dir: Vector3, step: float) -> Vector3:
 
 
 ## Aim the thruster along a heading (any non-zero vector; it is normalised here).  Aiming does
-## not move the star: the mirrors do, and only while they are standing.
+## not move the star: the mirror does, and only while it is standing.
 func aim_star_thrust(dir: Vector3, target_name: String = "") -> void:
 	if dir.length_squared() <= 0.0:
 		return

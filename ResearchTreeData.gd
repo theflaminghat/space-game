@@ -1124,7 +1124,7 @@ static func build() -> Array:
 	nodes.append(make.call(
 		"stellar_propulsion",
 		"Stellar Propulsion",
-		"Statite mirrors flown at stellar scale, turning a star's own radiation pressure into thrust on the star itself — a Shkadov thruster, which moves a solar system rather than anything in it.",
+		"One statite mirror flown at stellar scale, standing over the photosphere and turning the star's own radiation pressure into thrust on the star itself — a Shkadov thruster, which moves a solar system rather than anything in it.",
 		["solar_shading", "megastructure_materials"],
 		{"science": 5000},
 		46.0,

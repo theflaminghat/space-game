@@ -139,7 +139,7 @@ static func years_rejuvenated(joules: float) -> float:
 # ── Stellar propulsion (the Shkadov thruster) ─────────────────────────────────
 ## A statite mirror hung on one side of the star reflects its light back, and the star feels the
 ## recoil.  Nothing is thrown away and nothing is spent: the engine is the star's own radiation,
-## so it costs only what the mirrors cost to build, and it pushes for as long as the star burns.
+## so it costs only what the mirror costs to build, and it pushes for as long as the star burns.
 ##
 ## Thrust is the momentum of the light it turns around.  A perfect one-sided mirror would give
 ## the whole L/c; a real one gives a small fraction of it, because a statite has to hover on the

@@ -83,7 +83,7 @@ const ACHIEVEMENTS: Array[Dictionary] = [
 	{"id": "stealing_fire", "group": "stellar", "name": "Stealing Fire",
 	 "desc": "Lift a tenth of the Sun's mass.", "note": "after Prometheus"},
 	{"id": "accelerando", "group": "stellar", "name": "Accelerando",
-	 "desc": "Enclose the Sun.", "note": "after Charles Stross"},
+	 "desc": "Fly the Shkadov mirror at its full size.", "note": "after Charles Stross"},
 
 	# ── Taking worlds apart ────────────────────────────────────────────────────
 	{"id": "core_sample", "group": "unmaking", "name": "Core Sample",

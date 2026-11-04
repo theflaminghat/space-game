@@ -803,8 +803,10 @@ static func _mechanics_page(key: String, game: Node) -> String:
 				_building_link("Sunshade Constellation"), _n(StarModel.MAX_SHADE_FRACTION * 100.0)])
 			t += _li("[b]Stellar husbandry.[/b] %s mix unburnt hydrogen from the envelope into the core, taking years off the star's clock at %s J a year — far cheaper per year than lifting, and it costs no mass and no light. It cannot wind Sol back past the year the run began." % [
 				_building_link("Core Mixing Array"), _n(StarModel.HUSBANDRY_ENERGY_PER_YEAR)])
-			t += _li("[b]Stellar propulsion.[/b] %s hung to one side of the Sun reflect its light back, and the star feels the recoil — a Shkadov thruster. It spends nothing: the engine is the star, and the mirrors only have to stand. Thrust is %s of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century and light-years over geological time. Aim it at a star from the star map; every distance the game measures from Sol moves with it." % [
-				_building_link("Shkadov Mirror"), "%d %%" % int(round(StarModel.MIRROR_THRUST_EFFICIENCY * 100.0))])
+			t += _li("[b]Stellar propulsion.[/b] One %s, standing over the photosphere, reflects the Sun's light back, and the star feels the recoil — a Shkadov thruster. It spends nothing: the engine is the star, and the sail only has to stand. There is one of it and there can only be one; retrofitting it to the next level makes it wider, and the share of the star's sky it covers is the thrust — up to %s %% at full size. Thrust is %s of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century and light-years over geological time. Aim it at a star from the star map; every distance the game measures from Sol moves with it." % [
+				_building_link("Shkadov Mirror"),
+				_n(BuildingData.max_mirror_coverage() * 100.0),
+				"%d %%" % int(round(StarModel.MIRROR_THRUST_EFFICIENCY * 100.0))])
 			t += _li("The run survives the loss of the Sol system only if the species holds something beyond it: an interstellar colony, a share of a star cluster, or a settled galaxy region.")
 			t += _li("Sun's luminosity now: %.2f L☉." % SolarSystem.sun_luminosity_lsun(int(g.year)))
 		"interstellar":

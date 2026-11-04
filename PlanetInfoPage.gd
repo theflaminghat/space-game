@@ -208,7 +208,7 @@ func _set_star_rows(star: Dictionary) -> void:
 	var rejuv: float = float(star.get("rejuvenated", 0.0))
 	_star_rows["rejuvenated"]["value"].text = "none" if rejuv <= 0.0 else Units.format_si(rejuv, "yr")
 	_star_rows["rejuvenated"]["value"].modulate = Color(0.55, 0.85, 1.0) if rejuv > 0.0 else Color(1, 1, 1)
-	# Where the star is going, once there are mirrors pushing it.
+	# Where the star is going, once the mirror is pushing it.
 	var mirrors: float = float(star.get("mirrors", 0.0))
 	var drift: float = float(star.get("drift", 0.0))
 	if mirrors <= 0.0 and drift <= 0.0:

@@ -56,7 +56,15 @@ func _run() -> void:
 		if not (b.get("allowed_types", []) as Array).has("star"):
 			continue
 		var n: int = g._count_building("sun", nm)
-		if n <= 0:
+		# A structure there can only be one of stands as exactly one, on the BASE tier alone:
+		# the cap counts every tier of it together (buildings.gd "max_count"), so a sandbox
+		# that gave each tier its own would load three mirrors against a cap of one.
+		var cap: int = int(b.get("max_count", 0))
+		if cap > 0:
+			var want: int = cap if int(b.get("level", 1)) == 1 else 0
+			if n != want:
+				missing.append("%s (%d standing, wanted %d)" % [nm, n, want])
+		elif n <= 0:
 			missing.append(nm)
 		var req: String = str(U.BUILDING_UNLOCK_REQUIREMENTS.get(nm, ""))
 		if req != "" and not rt.is_unlocked(req):

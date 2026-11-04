@@ -59,15 +59,18 @@ const PLANET_LOADOUT: Dictionary = {
 ## PER_LANE is what fills one orbital lane: planet.gd draws at most INFRA_MAX_PER_LANE (64) of a
 ## type, so this is the count at which a lane looks full and stops gaining anything visually.
 ##
-## The four stellar-engineering levers are deliberately NOT given a full lane.  Unlike a rectenna
-## or a radiator, each of them acts on the star itself the moment the save is loaded: sunshades
-## dim the Earth, lifters burn the reserve and strip the Sun, mirrors push the whole system off
-## its mark.  A sandbox that starts with those maxed has already made the player's decisions for
-## them, so they get a working installation to scale up or tear down instead.
+## The stellar-engineering levers are deliberately NOT given a full lane.  Unlike a rectenna or a
+## radiator, each of them acts on the star itself the moment the save is loaded: sunshades dim the
+## Earth, lifters burn the reserve and strip the Sun, the mirror pushes the whole system off its
+## mark.  A sandbox that starts with those maxed has already made the player's decisions for them,
+## so they get a working installation to scale up or tear down instead.
+##
+## The Shkadov Mirror is not in the list because it does not need to be: there can only be one of
+## it ("max_count"), and _sun_loadout gives a capped structure exactly its one.
 const SUN_PER_LANE: int = 64
 const SUN_STELLAR_ENGINEERING: int = 4
 const STELLAR_LEVERS: Array = [
-	"Star Lifter", "Sunshade Constellation", "Core Mixing Array", "Shkadov Mirror",
+	"Star Lifter", "Sunshade Constellation", "Core Mixing Array",
 ]
 
 ## Collectors in the Dyson swarm.  The swarm's real cap is Game._swarm_max(), which is lane
@@ -178,6 +181,17 @@ static func _sun_loadout() -> Dictionary:
 		if not (b.get("allowed_types", []) as Array).has("star"):
 			continue
 		var nm: String = str(b["name"])
+		# A structure there can only be one of gets exactly its one, on the BASE tier.  The cap
+		# counts every tier together (buildings.gd "max_count"), so giving each tier its one
+		# would write a save holding three mirrors against a cap of one — and the base tier
+		# rather than the top one for the same reason the levers get four and not a full lane: a
+		# sandbox that starts with the thruster at full size has already chosen where the solar
+		# system is going.
+		var cap: int = int(b.get("max_count", 0))
+		if cap > 0:
+			if int(b.get("level", 1)) == 1:
+				out[nm] = cap
+			continue
 		out[nm] = SUN_STELLAR_ENGINEERING if _is_stellar_lever(nm) else SUN_PER_LANE
 	return out
 

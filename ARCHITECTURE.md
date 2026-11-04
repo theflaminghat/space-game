@@ -549,10 +549,14 @@ branch on, which defaults alone can never express.
 `INFRA_LANES` — one ring per orbital structure type, with the instance count polled from the
 roster. `asteroid_belt.gd` extends it. `init_planets.gd` draws the Dyson swarm.
 
-**Everything in solar orbit sits inside Mercury's.** The lanes span 3.01 to 7.99 world units
+**Everything in solar orbit sits inside Mercury's.** The lanes span 4.79 to 8.37 world units
 against a solar surface at 2.35 and Mercury's **perihelion** at 8.58 — perihelion, not the 10.47
 mean, because Mercury is eccentric enough (0.21) that a band sized to the mean would be swallowed
-once a year. The Dyson swarm shares the band at 3.05–5.30.
+once a year. The Dyson swarm hugs the star inside it at 3.05–4.39. The band used to run
+3.01–7.99, straight through the collector shell with most of the infrastructure embedded in it.
+
+**One structure is not in a lane at all:** the Shkadov Mirror stands on the photosphere, in the
+gap between the star and the swarm. See §5.
 
 Tightened that far, consecutive lanes are closer in radius than the structures are wide, so what
 keeps them clear of one another is the angle between their orbital **planes**, stepped by the
@@ -595,7 +599,7 @@ are unaffected.
 | Lifting | Star Lifter | 1.908 × 10¹¹ J/kg (binding energy), 60% efficient | Mass off the star; dims it, lengthens its life, banks hydrogen |
 | Shading | Sunshade Constellation | Build cost only | Intercepts light; offsets warming, cuts solar output |
 | Husbandry | Core Mixing Array | 1.145 × 10³¹ J per year of life | Winds the star's clock back; no mass or light lost |
-| Propulsion | Shkadov Mirror | Build cost only | Thrust = 0.16% of L/c; moves Sol, and every distance with it |
+| Propulsion | Shkadov Mirror | Build cost only | Thrust = 0.16% of L/c × the share of sky it covers; moves Sol, and every distance with it |
 
 **Two clocks.** `StarModel.stellar_age(year, mass, offset)` converts calendar year to the star's
 own age; `year_of_age()` inverts it. Lifting slows the star's clock (lifetime ∝ M⁻²·⁵); husbandry
@@ -608,6 +612,90 @@ helium ignition: no giant branch, no engulfment, no nebula — `sun_red_giant_ye
 **Dimming has a price.** `_climate_capacity_factor()` penalises the *net* of CO₂ warming and the
 light Earth is not receiving, so lifting a quarter of the Sun is a climate catastrophe in the cold
 direction — and the player's own emissions become a counterweight.
+
+### One mirror, and its size is the physics
+
+The Shkadov thruster is **one structure** — `"max_count": 1` in `buildings.gd`, enforced by
+`Game.build_room()` and counted across the **whole family**, because the tiers are separate
+catalogue entries and a cap read per entry would let the player stand three mirrors by building
+one of each size. It is the only capped structure in the game; everything else returns
+`BUILD_ROOM_UNLIMITED`. A queued **retrofit** is deliberately not counted, because an upgrade
+consumes the structure it replaces rather than adding one.
+
+So levelling it up is the only way to make it push harder, and what levelling it up buys is
+literally a bigger mirror. `mirror_coverage` — the share of the star's sky the sail subtends — is
+the whole of its physics (`StarModel.shkadov_thrust_n` turns it straight into newtons) and the
+whole of its picture: `Planet.mirror_radius()` draws it at the width that coverage implies, read
+off `SolarSystem.star_mirror_coverage`, which is the same number the thrust comes from. **The
+picture cannot drift from the physics**, and a mirror with no coverage — none built, or the one
+built switched off — is a mirror furled, and not drawn. The three tiers come out at 0.5%, 1.75%
+and 6.125% of the sky; the top of that is about what a determined build-out of the old
+thousand-segment fleet reached, now reached in three steps instead of by grinding, and the
+`accelerando` achievement reads the ceiling off the catalogue rather than naming a number, so
+retuning the coverage cannot leave an achievement nobody can earn (it asked for 0.99 of the sky
+before, which one mirror never reaches).
+
+**It is drawn with no lane, and scaled *with* the star.** Every lane cancels its body's scale so
+its structures come out a constant world size on any planet; the mirror does the opposite,
+because coverage is an **angle** and a sail holding a share of the sky has to grow with the star
+it stands on — so it swells up the giant branch with the Sun and its coverage stays honest. It
+also does not orbit (a statite hovers; it is held off the star by the light it reflects) and is
+not hidden with the lanes past 100×, because a thing that does not move cannot smear.
+
+**Where the plane of the sail goes is solved, not chosen.** The model is not a bare disc: it has
+a boom and a statite bus reaching 0.062 back towards the star out of a 0.140 radius, and scaled
+up to full size that is 0.17 local units. Hung at a flat 0.5 + gap its bus would be a third of
+the way inside the photosphere, so `MIRROR_GAP` is held at the **deepest point** and the plane
+solved for:
+
+    d = (0.5 + gap) / (1 − (back/radius)·tan θ)
+
+which leaves `d·tan θ` as the rim — so the coverage is still exactly the coverage — while the
+sail rises a little as it widens and its bus flies at a constant height whatever its size. The
+denominator runs to zero as θ approaches the angle whose tangent is radius/back, which is why
+`MIRROR_MAX_HALF_ANGLE` bounds the *picture* at 45° (14.6% of the sky, more than twice the
+catalogue's biggest): nothing the player can build comes near it, but the dev console and the
+tests set coverage to 1.0 directly and would otherwise solve the sail to the size of the inner
+system.
+
+Flat rather than dished for the same reason: a flat sheet laid against a sphere never enters it
+however wide it grows, because the sphere curves away underneath, while a curved cap made bigger
+by scaling a mesh would scale its radius of curvature with it and lift off the surface.
+
+**It is the one piece of infrastructure in the game that glows.** Everything built is lit by
+the sun and nothing else, so a structure on the night side is black — which is what it would be. Not this one: the
+sun's six lights all sit *on* the photosphere, inside the sail's standoff, so not one of them
+can reach its outward face, and a full-size mirror viewed down its own axis measured 0,0,0
+across the whole disc. A hole in the frame rather than a megastructure. What is actually there
+is a temperature: the sail stands in 3.4 × 10⁷ W/m², reflecting 99% of that still leaves
+3.4 × 10⁵ W/m² to shed, and a thin sheet radiating from both faces settles near 1300 K — a
+heating element, dull orange, far dimmer than the star it stands on. So the glow is derived, it
+is on one structure, and it is the colour of the temperature it comes from; it is not the faint
+stand-in emission that used to live on every lane material and was removed for being a
+substitute for light. `verify_lane_models` holds the lanes dark and `verify_shkadov` holds this
+one lit.
+
+**A save from before the cap carries a fleet**, and `load_game` collapses it: the biggest tier
+standing is kept, the rest are dropped unrefunded, and the mirror's active-count entries go with
+them so the one kept comes back **switched on**. Without that a loaded fleet would stand over
+its cap for ever with its coverage saturated at a full sky, and a fleet the player had idled
+would restore as a single idle mirror — a thruster that silently stopped working, which is the
+failure `save_schema.gd`'s own header is about.
+
+**At full size the sail reaches into the collector shell, and is not asked not to.** The swarm's
+inner lane is at 1.3 solar radii and a flat disc standing on the photosphere has its rim further
+from the star than its centre, so the biggest mirror's rim is at 1.6. Unlike two lanes, which
+would be embedded in each other everywhere, this is one object on one side of the star covering
+6% of the sky — the collectors it reaches past are behind a mirror, which is where a Shkadov
+thruster really does put them. `verify_infra_band` prints the measurement rather than asserting a
+limit, so the number cannot move without someone reading the reason.
+
+**The bill of materials is the sail's own mass.** 0.5% of the sky at the photosphere is
+3.0 × 10¹⁶ m², and a statite has to hover on the light it reflects, which puts it near
+10⁻⁴ kg/m² — about 3 × 10⁹ tonnes. The authored costs come to 5 × 10⁹ tonnes once
+`Units.MASS_SCALE` is applied: the same number to within a factor of two. They are a hundred
+times the old per-segment cost because one mirror now does what a hundred segments did, so the
+price of a given thrust is unchanged.
 
 ### Taking the planets apart
 
@@ -1330,9 +1418,11 @@ body readable where no light reached it. Together they meant **nothing on screen
 actually dark**: there was no night side anywhere in the system.
 
 Ambient is now 0 and the emissions are gone. The one `OmniLight3D` at the sun is the whole of
-the lighting. The sun keeps its own emission, because it is the light source, and the
-disassembly shader keeps its `heat` term, because a planet glowing from its own exposed mantle
-is real incandescence rather than fill.
+the lighting. The sun keeps its own emission, because it is the light source; the disassembly
+shader keeps its `heat` term, because a planet glowing from its own exposed mantle is real
+incandescence rather than fill; and the Shkadov sail keeps one, because standing on the
+photosphere it runs at about 1300 K and really does glow (§5). Three exceptions, each of them a
+temperature rather than a readability allowance.
 
 Measured by sweeping the camera around a planet and summing frame luminance: **0.0 at 135°, 180°
 and 225°**, full brightness sunward.

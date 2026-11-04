@@ -285,7 +285,7 @@ func _lineage(args: Array) -> void:
 ## `shkadov [multiplier]` — read or set the thruster's acceleration multiplier.
 ##
 ## With no argument this is a status readout, which is the more useful half: a multiplier means
-## nothing without knowing whether any mirrors are actually standing, and a thruster with no
+## nothing without knowing whether the mirror is actually standing, and a thruster with no
 ## coverage and no aim does nothing however large the number is.
 func _shkadov(args: Array) -> void:
 	var sol: Node = _game.get_node_or_null("/root/SolarSystem")
@@ -304,7 +304,7 @@ func _shkadov(args: Array) -> void:
 	var cov: float = float(sol.star_mirror_coverage)
 	_log("  multiplier      x%s" % _fmt(float(sol.star_thrust_mult)))
 	_log("  mirror coverage %.4f%s" % [cov,
-		"" if cov > 0.0 else "   [color=#e0a84a](no mirrors — the thruster is inert)[/color]"])
+		"" if cov > 0.0 else "   [color=#e0a84a](no mirror — the thruster is inert)[/color]"])
 	var aim: String = str(sol.star_thrust_target)
 	var aimed: bool = (sol.star_thrust_dir as Vector3).length_squared() > 0.0
 	_log("  aim             %s" % (

@@ -71,6 +71,43 @@ const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacit
 	"beam_send", "beam_recv", "star_lift_power", "shade_fraction", "husbandry_power",
 	"mirror_coverage", "disassembly_rate"]
 
+# ── Structures there can only be one of ───────────────────────────────────────
+## "max_count": n caps how many of a structure may stand on ONE BODY — used by the Shkadov
+## Mirror, which is one mirror and not a fleet of them.  Levelling it up is then the only way to
+## make it do more, which is what a megastructure should be: the thing gets bigger rather than
+## more numerous.
+##
+## Counted per BASE NAME, across every tier together.  The tiers are separate catalogue entries
+## (see all()), so a cap read per entry would let the player stand three mirrors by building one
+## of each size.  Game.build_room() is the enforcement and counts what is queued as well;
+## everything without the key has no cap at all.
+##
+## Deliberately not erased by _scaled() the way "min_count" is: a floor under the grid belongs to
+## the base tier alone, but a ceiling on the family has to be carried by every tier of it or the
+## higher ones would be uncapped.
+
+## Every tier of `base_name` by catalogue name, in level order — "Mine" → ["Mine", "Mine II",
+## "Mine III"].  Built once over all(), because the callers that need it (the per-family count a
+## cap is measured against) would otherwise rescan the whole catalogue per structure.
+static var _tier_names: Dictionary = {}
+static func tiers(base_name: String) -> Array:
+	if _tier_names.is_empty():
+		for b: Dictionary in all():
+			var base: String = str(b.get("base_name", b["name"]))
+			if not _tier_names.has(base):
+				_tier_names[base] = []
+			(_tier_names[base] as Array).append(str(b["name"]))
+	return _tier_names.get(base_name, [])
+
+## The coverage the biggest mirror in the catalogue gives — what "the thruster at full size"
+## means.  Read rather than written down, so the achievement for it cannot drift out of step with
+## the numbers below.
+static func max_mirror_coverage() -> float:
+	var best: float = 0.0
+	for b: Dictionary in all():
+		best = maxf(best, float(b.get("mirror_coverage", 0.0)))
+	return best
+
 # ── Single buildings, not complexes ───────────────────────────────────────────
 ## Entries were originally authored at REGIONAL FLEET scale — one "Coal Plant" meant 132 GW of
 ## national generating capacity, not a power station.  "units" is how many real buildings an
@@ -303,7 +340,7 @@ const DESCRIPTIONS: Dictionary = {
 	"Swarm Relay Network": "Phased transmitting apertures strung between the swarm's collectors and the worlds that use the power.",
 	"Orbital Ring Store": "Superconducting loop of orbital diameter, holding current indefinitely. Stellar-scale energy storage.",
 	"Sunshade Constellation": "Light sails flown sunward of the inner worlds, held in place by the pressure of the light they block. They do nothing to the star — they stand between it and the planets. Shading offsets greenhouse warming directly, so a cooked Earth recovers, but every solar collector on a shaded world makes proportionally less, and shading past what the CO₂ is doing cools the world below its ceiling again.",
-	"Shkadov Mirror": "A statite sail flown to one side of the Sun: it reflects the star's light back, and the star feels the recoil. It burns nothing and needs no crew — the engine is the star itself, and the mirrors only have to exist. Thrust is a fraction of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century; left standing for geological time it moves the solar system light-years. A brighter star pushes harder and a lighter one is easier to push, so lifting cuts both ways. Aim it from the star map.",
+	"Shkadov Mirror": "A statite sail flown to one side of the Sun: it reflects the star's light back, and the star feels the recoil. It burns nothing and needs no crew — the engine is the star itself, and the mirror only has to stand. There is one of it, hanging over the photosphere; retrofitting it to the next level makes it wider, and the share of the star's sky it covers is the thrust. Thrust is a fraction of the star's light-momentum against its whole mass, so the answer comes in millimetres per second per century; left standing for geological time it moves the solar system light-years. A brighter star pushes harder and a lighter one is easier to push, so lifting cuts both ways. Aim it from the star map.",
 	"Core Mixing Array": "Driven circulation reaching from the Sun's envelope into its core, feeding it unburnt hydrogen it would never otherwise meet. Costs energy and returns time: the star's clock runs backwards while the array works, though never past the year the run began. Unlike lifting it removes no mass, so the Sun keeps its light — and yields nothing but the extra years.",
 	"Planetary Disassembler": "Mass drivers, orbital catchers and autonomous excavation that lift a world into orbit a layer at a time — atmosphere, then crust, then mantle, then core, because you cannot reach a core through a mantle. Draws energy at the binding energy of what it removes, which for a planet is four to five orders of magnitude cheaper per kilogram than lifting the same mass off the Sun. What comes up lands in the body's own inventory; what is left when the last layer goes is nothing at all, and anything still held there is carried home. A world shrinks as it is eaten: its carrying capacity falls with its mass, and the people on it go with it.",
 	"Star Lifter": "Magnetic nozzles standing off the photosphere, driving a controlled wind off the Sun and collecting it as hydrogen. Draws its rated power from the civilisation's reserve and converts it into lifted mass at the binding energy of the material removed. Every kilogram taken off Sol dims it slightly and lengthens its life: the red-giant date moves further away for as long as the lifters run. The hydrogen lands in the Sun's own inventory.",
@@ -915,18 +952,37 @@ const BUILDINGS := [
 	# letting the star feel the recoil.  The only structure in the game that moves the solar
 	# system itself.
 	#
-	# It burns nothing: the engine is the star, and the mirrors only have to exist.  What they
-	# cost is time — the thrust is a fraction of L/c against two thousand billion billion billion
+	# It burns nothing: the engine is the star, and the mirror only has to stand.  What it costs
+	# is time — the thrust is a fraction of L/c against two thousand billion billion billion
 	# kilograms, so the star answers in millimetres per second per century and the payoff is a
-	# civilisation-long project measured in light-years.  "mirror_coverage" is the share of the
-	# sky one segment covers.
+	# civilisation-long project measured in light-years.
+	#
+	# ONE OF IT ("max_count": 1).  A Shkadov thruster is a single arc standing over one side of
+	# the photosphere, not a fleet of panels, so levelling it up is the only way to make it push
+	# harder — and what levelling it up buys is literally a bigger mirror (see
+	# Planet.mirror_radius, which draws it at the width this coverage implies).
+	#
+	# "mirror_coverage" is the share of the star's sky the sail subtends, which is the whole of
+	# its physics: StarModel.shkadov_thrust_n turns it straight into newtons.  The three tiers
+	# come out at 0.5 %, 1.75 % and 6.125 % of the sky — the top of that is about what a
+	# determined build-out of the old thousand-segment fleet reached, now reached by one
+	# structure in three steps instead of by grinding.
+	#
+	# The bill of materials is the sail's own mass, not a figure picked to feel expensive: 0.5 %
+	# of the sky at the photosphere is 3.0e16 m², and a statite has to hover on the light it
+	# reflects, which puts it near 1e-4 kg/m² — so about 3e9 tonnes.  The costs below come to
+	# 5e9 tonnes once Units.MASS_SCALE is applied, which is the same number to within a factor
+	# of two.  They are a hundred times the old per-segment cost because one mirror now does
+	# what a hundred segments did, so the price of a given thrust is unchanged.
 	{"name": "Shkadov Mirror",
 		"category": "support",
 		"allowed_types": ["star"],
-		"cost": {"Metamaterial": 9_000_000, "Aerogel": 14_000_000, "Graphene": 11_000_000,
-			"SelfHealingComposite": 6_000_000, "energy": 40_000_000},
+		"max_count": 1,
+		"cost": {"Metamaterial": 900_000_000, "Aerogel": 1_400_000_000,
+			"Graphene": 1_100_000_000, "SelfHealingComposite": 600_000_000,
+			"energy": 4_000_000_000},
 		"production": {},
-		"mirror_coverage": 5.0e-5},
+		"mirror_coverage": 5.0e-3},
 
 	# Core Mixing Array — the surgical end of stellar engineering.  Where a lifter throws mass
 	# away, this stirs the star: circulation driven from outside, carrying unburnt hydrogen from

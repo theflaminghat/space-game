@@ -35,6 +35,26 @@ func _run() -> void:
 	var def: Dictionary = g._find_building_def("Shkadov Mirror")
 	check(not def.is_empty() and float(def.get("mirror_coverage", 0.0)) > 0.0, "the mirror exists")
 	check((def.get("allowed_types", []) as Array) == ["star"], "it belongs on the star")
+	check(int(def.get("max_count", 0)) == 1, "and there is one of it")
+	# Every tier carries the cap, or the bigger ones would be uncapped: _scaled() erases
+	# "min_count" (a floor belongs to the base tier alone) and must NOT erase this.
+	for tier: String in BuildingData.tiers("Shkadov Mirror"):
+		check(int(g._find_building_def(tier).get("max_count", 0)) == 1,
+			"%s carries the cap too" % tier)
+	# Levelling it up is the only way to make it push harder, so each tier must cover more sky
+	# than the one below it, and the biggest of them is what the achievement asks for.
+	var covs: Array = []
+	for tier: String in BuildingData.tiers("Shkadov Mirror"):
+		covs.append(float(g._find_building_def(tier).get("mirror_coverage", 0.0)))
+	check(covs.size() >= 2, "it has tiers at all: %d" % covs.size())
+	for i in range(1, covs.size()):
+		check(float(covs[i]) > float(covs[i - 1]),
+			"tier %d covers more sky than tier %d: %s vs %s" % [
+				i + 1, i, str(covs[i]), str(covs[i - 1])])
+	check(absf(BuildingData.max_mirror_coverage() - float(covs[covs.size() - 1])) < 1.0e-12,
+		"and the catalogue's biggest coverage is the top tier's: %s" % str(
+			BuildingData.max_mirror_coverage()))
+	print("mirror coverage by tier: %s" % str(covs))
 	check(str(load("res://unlocks.gd").BUILDING_UNLOCK_REQUIREMENTS.get("Shkadov Mirror", "")) == "stellar_propulsion",
 		"gated by stellar propulsion")
 	check(root.get_node("ResearchTree").get_research_node("stellar_propulsion") != null, "the node exists")
@@ -45,10 +65,12 @@ func _run() -> void:
 	g._mark_prod_dirty(); g._recompute_production_cache()
 	g._run_star_thrust(365.25 * 1.0e6)
 	check(ss.star_drift_ly.length() == 0.0, "no mirrors, no motion")
-	for i in range(2000): g.planet_buildings["sun"].append("Shkadov Mirror")
+	var top: String = str(BuildingData.tiers("Shkadov Mirror")[-1])
+	g.planet_buildings["sun"] = [top]
 	g._mark_prod_dirty(); g._recompute_production_cache()
-	print("coverage from 2000 mirrors: ", ss.star_mirror_coverage)
-	check(ss.star_mirror_coverage > 0.0, "the mirrors register")
+	print("coverage from one %s: %s" % [top, str(ss.star_mirror_coverage)])
+	check(absf(ss.star_mirror_coverage - BuildingData.max_mirror_coverage()) < 1.0e-12,
+		"the one mirror registers at its own coverage")
 	g._run_star_thrust(365.25 * 1.0e6)
 	check(ss.star_drift_ly.length() == 0.0, "unaimed, it does not move the star")
 
@@ -57,13 +79,14 @@ func _run() -> void:
 	var d0: float = g._star_distance_ly(target)
 	check(g.aim_star_thruster(target), "the thruster can be aimed")
 	check(ss.star_thrust_target == target, "and remembers its aim")
-	# 600 Myr in 1 Myr steps.  2000 mirrors are only 10% coverage, and distance goes as
-	# acceleration x time squared, so 200 Myr covers 0.2 ly - nowhere near the light-year
-	# milestone checked at the end.  600 Myr covers about 1.9.
-	for i in range(600):
+	# 800 Myr in 1 Myr steps.  One mirror at full size covers 6.125 % of the sky, which
+	# accelerates Sol at 6.3e-17 m/s^2, and distance goes as acceleration x time squared - so a
+	# century of it is nothing and 800 Myr is about 2.1 ly, far enough past the light-year
+	# milestone checked at the end and nowhere near overshooting the target 6 ly away.
+	for i in range(800):
 		g._run_star_thrust(365.25 * 1.0e6)
 	var d1: float = g._star_distance_ly(target)
-	print("after 600 Myr: moved %s ly at %s m/s; %s %.4f ly → %.4f ly" % [
+	print("after 800 Myr: moved %s ly at %s m/s; %s %.4f ly → %.4f ly" % [
 		ss.star_drift_ly.length(), ss.star_velocity_ms, target, d0, d1])
 	check(ss.star_drift_ly.length() > 0.0, "the star moved")
 	check(d1 < d0, "the target is closer than it was")
@@ -222,6 +245,217 @@ func _run() -> void:
 	g._migrate_star_drift()
 	check(absf(ss.star_drift_dist_ly - 5.0) < 1.0e-6,
 		"an old save takes it from the vector: %s" % str(ss.star_drift_dist_ly))
+
+	# ── One mirror, and only one ──
+	#
+	# The cap is enforced in try_build and not only greyed out in the panel, because automation
+	# rules and the dev console build through the same call.  Counted across the WHOLE FAMILY:
+	# the tiers are separate catalogue entries, so a cap read per entry would let the player
+	# stand three mirrors by building one of each size.
+	ss.reset_star()
+	g.planet_buildings["sun"] = []
+	g.build_queue.erase("sun")
+	g._mark_prod_dirty(); g._recompute_production_cache()
+	var rt: Node = root.get_node("ResearchTree")
+	rt.force_unlock("stellar_propulsion")
+	rt.force_unlock(g.SOLAR_ORBIT_RESEARCH)
+	# The tier gate, so the retrofit below is refused by the cap or by nothing.
+	rt.force_unlock("precision_manufacturing")
+	check(g._is_body_buildable("sun"), "solar orbit is a build site")
+	# Pay for four of EVERY tier, so what refuses the second mirror is the cap and not the bill -
+	# the one failure mode an "it was refused" assertion cannot tell apart on its own.
+	for tier: String in BuildingData.tiers("Shkadov Mirror"):
+		for res: String in (g._find_building_def(tier).get("cost", {}) as Dictionary):
+			var need: float = float((g._find_building_def(tier)["cost"] as Dictionary)[res]) * 4.0
+			if res == "energy":
+				rt.resources["energy"] = maxf(float(rt.resources.get("energy", 0.0)), need)
+			else:
+				g._add_stockpile(res, need, "sun")
+	check(g.build_room("sun", "Shkadov Mirror") == 1, "with none standing there is room for one")
+	check(g.try_build("sun", "Shkadov Mirror"), "and the first one is built")
+	check(g.build_room("sun", "Shkadov Mirror") == 0,
+		"which takes the only slot while it is still in the queue")
+	check(not g.try_build("sun", "Shkadov Mirror"), "so a second is refused")
+	check(not g.try_build("sun", "Shkadov Mirror II"),
+		"and so is a bigger one — the cap counts every tier together")
+	# Finish the job, and the cap holds against the standing structure rather than the queue.
+	var mjobs: Array = g.build_queue["sun"]
+	check(mjobs.size() == 1, "exactly one mirror is queued: %d" % mjobs.size())
+	g._complete_build("sun", mjobs[0])
+	g.build_queue["sun"] = []
+	g._mark_prod_dirty(); g._recompute_production_cache()
+	check(g._count_building("sun", "Shkadov Mirror") == 1, "the mirror is standing")
+	check(g.build_room("sun", "Shkadov Mirror") == 0, "and still fills the only slot")
+	check(not g.try_build("sun", "Shkadov Mirror III"), "nothing else may join it")
+	# Everything else in the catalogue is uncapped and says so, or a cap bug would quietly stop
+	# the game being playable rather than showing up here.
+	check(g.build_room("sun", "Orbital Habitat") >= 1000,
+		"an uncapped structure has room without limit: %d" % g.build_room("sun", "Orbital Habitat"))
+	# Retrofitting is how it gets bigger, and the cap must not stand in the way of it.
+	check(g.try_upgrade("sun", "Shkadov Mirror"), "the standing mirror can be retrofitted")
+	var ujobs: Array = g.build_queue["sun"]
+	check(ujobs.size() == 1 and str(ujobs[0].get("upgrade_from", "")) == "Shkadov Mirror",
+		"the retrofit is queued against the mirror standing")
+	check(g.build_room("sun", "Shkadov Mirror") == 0,
+		"and the family is still at its cap, not over it")
+	g._complete_build("sun", ujobs[0])
+	g.build_queue["sun"] = []
+	g._mark_prod_dirty(); g._recompute_production_cache()
+	check(g._count_building("sun", "Shkadov Mirror") == 0
+		and g._count_building("sun", "Shkadov Mirror II") == 1,
+		"the retrofit consumed the mirror and left the bigger one")
+	check(g.build_room("sun", "Shkadov Mirror") == 0, "which is still the only one there can be")
+	# What the build panel is handed, which is the other half of the cap: without the room in
+	# the row its "+" buttons stay live and every click is silently refused.
+	var was_planet: String = g.current_planet
+	g.current_planet = "sun"
+	var mrow: Dictionary = {}
+	for row: Dictionary in g._get_catalog_for_display():
+		if str(row.get("name", "")) == "Shkadov Mirror":
+			mrow = row
+	g.current_planet = was_planet
+	check(not mrow.is_empty(), "the build panel is offered the mirror")
+	check(int(mrow.get("max_count", 0)) == 1, "with its cap")
+	check(int(mrow.get("build_room", -1)) == 0, "and with no room left while one stands")
+
+	# ── A save from before the cap carries a fleet, and comes back as one mirror ──
+	#
+	# Nothing takes the extras away on its own: build_room refuses MORE mirrors but a loaded
+	# fleet would stand over its cap for ever, with its coverage saturated at a full sky. And
+	# the one kept has to come back SWITCHED ON, or a fleet the player had idled restores as a
+	# single idle mirror - a thruster that silently stopped working, which is the failure
+	# save_schema.gd's own header is about.
+	g.planet_buildings["sun"] = []
+	g.build_queue.erase("sun")
+	for _i in range(40):
+		g.planet_buildings["sun"].append("Shkadov Mirror")
+	for _i in range(3):
+		g.planet_buildings["sun"].append("Shkadov Mirror II")
+	g.planet_buildings["sun"].append("Orbital Habitat")
+	g.active_buildings["sun"] = {"Shkadov Mirror": 0, "Shkadov Mirror II": 0}
+	g.save_game("user://saves/shkadov_fleet.json")
+	g.planet_buildings["sun"] = []
+	g.active_buildings.erase("sun")
+	g.load_game("user://saves/shkadov_fleet.json")
+	check(g._count_building("sun", "Shkadov Mirror") == 0,
+		"the fleet is gone: %d left" % g._count_building("sun", "Shkadov Mirror"))
+	check(g._count_building("sun", "Shkadov Mirror II") == 1,
+		"and the biggest tier it held is the one kept")
+	check(g._count_building("sun", "Orbital Habitat") == 1, "nothing else on the Sun is touched")
+	check(g.build_room("sun", "Shkadov Mirror") == 0,
+		"the loaded roster is AT its cap, not over it")
+	check(g.active_count("sun", "Shkadov Mirror II") == 1,
+		"the mirror kept is switched on, whatever the fleet's switches said")
+	check(ss.star_mirror_coverage > 0.0,
+		"so the thruster works after the load: %s" % str(ss.star_mirror_coverage))
+
+	# ── Drawn at the width its coverage claims ──
+	#
+	# The mirror is not laid out in a lane: there is one of it, it does not orbit, and it stands
+	# at the photosphere.  Its size comes off SolarSystem.star_mirror_coverage, the same number
+	# StarModel.shkadov_thrust_n turns into newtons, so what follows is what stops the picture
+	# drifting from the physics.
+	var P = load("res://planet.gd")
+	for spec: Dictionary in P.INFRA_LANES:
+		check(str(spec["type"]) != "Shkadov Mirror", "the mirror has no orbital lane")
+	var sun: Node3D = g.get_node("WorldRoot/Planets/sun")
+	var mnode: MeshInstance3D = sun.get_node_or_null("sun_shkadov_mirror")
+	check(mnode != null, "the star raised the mirror's node")
+	if mnode != null:
+		check(mnode.mesh != null and not (mnode.mesh is BoxMesh),
+			"with its model and not the box fallback")
+		var bounds: AABB = mnode.mesh.get_aabb()
+		var model_r: float = bounds.size.x * 0.5
+		var model_back: float = -bounds.position.y
+		check(model_r > 0.0 and model_back > 0.0,
+			"the sail is a disc with a boom behind it: radius %.3f, reach %.3f" % [
+				model_r, model_back])
+		print("sail model: radius %.3f, reaches %.3f back towards the star" % [
+			model_r, model_back])
+		# The angle is the only place the coverage enters, so it has to invert exactly: a cap of
+		# half-angle th covers (1 - cos th)/2 of the sky.  Up to the clamp, which 0.14 is under.
+		for cov: float in [5.0e-3, 1.75e-2, 6.125e-2, 0.14]:
+			var th: float = P.mirror_half_angle(cov)
+			check(absf((1.0 - cos(th)) * 0.5 - cov) < 1.0e-9,
+				"%s of the sky inverts to %.2f deg and back" % [str(cov), rad_to_deg(th)])
+		# Two invariants, at every size the game or the console can ask for.
+		for cov: float in [5.0e-3, 1.75e-2, 6.125e-2, 0.14, 1.0]:
+			var th: float = P.mirror_half_angle(cov)
+			var d: float = P.mirror_standoff(cov, bounds)
+			var r: float = P.mirror_radius(cov, bounds)
+			check(absf(r / d - tan(th)) < 1.0e-9,
+				"at %s its rim subtends the angle it is drawn for: %.6f vs %.6f" % [
+					str(cov), r / d, tan(th)])
+			# The deepest point of the structure - the statite bus on its boom, not the plating -
+			# flies MIRROR_GAP above the photosphere at EVERY size.  That is what "it sits at the
+			# surface of the Sun" means for a model that reaches back towards the star: hung at a
+			# flat 0.5 + gap, its bus would be a third of the way inside the photosphere by the
+			# time the sail was full size.
+			var deepest: float = d - model_back * (r / model_r)
+			check(absf(deepest - (0.5 + P.MIRROR_GAP)) < 1.0e-6,
+				"and its bus flies at the surface: %.6f vs %.6f" % [deepest, 0.5 + P.MIRROR_GAP])
+		var r1: float = P.mirror_radius(5.0e-3, bounds)
+		var r2: float = P.mirror_radius(1.75e-2, bounds)
+		var r3: float = P.mirror_radius(6.125e-2, bounds)
+		print("drawn radius by tier: %.4f, %.4f, %.4f; standoff %.4f, %.4f, %.4f (surface 0.500)"
+			% [r1, r2, r3, P.mirror_standoff(5.0e-3, bounds),
+				P.mirror_standoff(1.75e-2, bounds), P.mirror_standoff(6.125e-2, bounds)])
+		check(r2 > r1 and r3 > r2,
+			"levelling it up makes it wider: %.4f < %.4f < %.4f" % [r1, r2, r3])
+		# The whole sail has to stay clear of the band, or the biggest mirror would be drawn
+		# through the innermost lane of orbital infrastructure (the Core Mixing Array at 1.020).
+		var rim: float = sqrt(pow(P.mirror_standoff(6.125e-2, bounds), 2.0) + r3 * r3)
+		var innermost: float = INF
+		for spec: Dictionary in P.INFRA_LANES:
+			innermost = minf(innermost, float(spec["radius"]))
+		check(rim < innermost,
+			"and at full size its rim is still inside the band: %.4f vs %.4f" % [rim, innermost])
+		# Driven to 1.0 by the dev console and by the tests above, where the standoff's own
+		# denominator would otherwise run to zero and solve the sail to the size of the system.
+		check(P.mirror_half_angle(1.0) <= P.MIRROR_MAX_HALF_ANGLE + 1.0e-9,
+			"a full sky is held at the widest the picture can carry: %.2f deg" % rad_to_deg(
+				P.mirror_half_angle(1.0)))
+		check(is_finite(P.mirror_radius(1.0, bounds)) and P.mirror_radius(1.0, bounds) > r3,
+			"and is still a number: %s" % str(P.mirror_radius(1.0, bounds)))
+
+		var xf: Transform3D = P.mirror_transform(6.125e-2, bounds)
+		check(xf.basis.determinant() > 0.0,
+			"it is not drawn mirrored: determinant %+.4f" % xf.basis.determinant())
+		check(xf.basis.y.normalized().dot(xf.origin.normalized()) > 0.9999,
+			"+Y points away from the star, which is what the model is built to")
+		check(P.mirror_transform(1.75e-2, bounds).basis.get_scale().x
+			> P.mirror_transform(5.0e-3, bounds).basis.get_scale().x,
+			"and the transform carries the width as scale")
+
+		# The node itself: hidden with no mirror, shown at the coverage standing.
+		ss.set_star_mirror_coverage(0.0)
+		sun._update_star_mirror()
+		check(not mnode.visible, "no coverage, no mirror drawn")
+		ss.set_star_mirror_coverage(6.125e-2)
+		sun._update_star_mirror()
+		check(mnode.visible, "the mirror standing is drawn")
+		check(absf(mnode.transform.origin.length() - P.mirror_standoff(6.125e-2, bounds))
+			< 1.0e-6, "where the geometry puts it: %.4f" % mnode.transform.origin.length())
+		# Scaled WITH the star, unlike every lane, because coverage is an angle: the drawn rim
+		# has to hold the same share of the sky however big the star has grown.
+		var drawn: float = mnode.transform.basis.get_scale().x * model_r
+		check(absf(drawn - r3) < 1.0e-5,
+			"and as wide as its coverage says: %.4f vs %.4f" % [drawn, r3])
+
+		# The sail's back RADIATES, and it is the only thing in the game that does.  The sun's
+		# six lights all sit on the photosphere, inside the sail's standoff, so not one of them
+		# can reach its outward face: without this a full-size mirror viewed down its own axis
+		# measures 0,0,0 across the whole disc - a hole in the frame rather than a
+		# megastructure.  It is a temperature (about 1300 K at the flux it stands in), not the
+		# faint stand-in emission that was removed from every lane, which is why the lane
+		# materials have to stay dark for this assertion to mean anything.
+		var mat := mnode.material_override as StandardMaterial3D
+		check(mat != null and mat.emission_enabled, "the sail's back radiates")
+		check(mat != null and mat.albedo_texture != null, "and still carries its baked map")
+		var lane_mat := sun._infra_material(
+			"res://models/orbital_habitat_albedo.png") as StandardMaterial3D
+		check(lane_mat != null and not lane_mat.emission_enabled,
+			"while a lane material carries no self-light at all")
 
 	ss.reset_star()
 	print("FAILS: ", fails)

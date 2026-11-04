@@ -131,6 +131,21 @@ func _run() -> void:
 	check(g.achievements_earned.has("caravan"), "a hundred light-years does")
 	ss.star_drift_dist_ly = 0.0
 
+	# Accelerando asks for the Shkadov mirror at its full size, and reads what that is off the
+	# catalogue.  It used to ask for 0.99 of the sky, which was reachable by the twenty
+	# thousandth of the old mirror segments and is not reachable at all now that there is one
+	# mirror — an achievement nobody can earn, which is exactly what this file exists to catch.
+	g.achievements_earned = {}
+	var full: float = BuildingData.max_mirror_coverage()
+	check(full > 0.0 and full < 1.0, "the biggest mirror covers some of the sky: %s" % str(full))
+	ss.set_star_mirror_coverage(full * 0.5)
+	g._check_achievements()
+	check(not g.achievements_earned.has("accelerando"), "half a mirror is not Accelerando")
+	ss.set_star_mirror_coverage(full)
+	g._check_achievements()
+	check(g.achievements_earned.has("accelerando"), "the mirror at full size is")
+	ss.set_star_mirror_coverage(0.0)
+
 	g.achievements_earned = {}
 	g.year = int(g.ACH_TAU_ZERO_YEAR) + 1
 	g._check_achievements()

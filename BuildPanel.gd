@@ -110,13 +110,24 @@ func apply_counts(catalog: Array) -> void:
 		# Each batch button is gated on whether that many can actually be acted on.
 		var dem: Array = r["demolish"]
 		var ups: Array = r["upgrade"]
+		var bld: Array = r["build"]
 		var can_up: bool = bool(building.get("can_upgrade", false))
+		# A capped family runs out of room as it is built, so the "+" buttons have to be patched
+		# here too — everything else leaves them as _populate set them.
+		var cap: int = int(r.get("max_count", 0))
+		var room: int = int(building.get("build_room", 1 << 24))
 		for i in range(BATCH_SIZES.size()):
 			var n: int = int(BATCH_SIZES[i])
 			if i < dem.size():
 				(dem[i] as Button).disabled = count - n < int(r["min_count"])
 			if i < ups.size():
 				(ups[i] as Button).disabled = not can_up or count < n
+			if cap > 0 and i < bld.size():
+				(bld[i] as Button).disabled = not bool(r.get("available", true)) \
+					or not bool(r.get("buildable", true)) or n > room
+		var cap_lbl: Label = r.get("cap_label", null)
+		if cap > 0 and cap_lbl != null:
+			cap_lbl.text = _cap_text(cap, room, count)
 		for k: String in (building.get("have", {}) as Dictionary):
 			have_all[k] = building["have"][k]
 		# Roll this level up into its family's header figures.
@@ -311,6 +322,10 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	var count:     int  = building.get("count", 0)
 	var buildable: bool = building.get("buildable", true)
 	var min_count: int  = building.get("min_count", 0)
+	var max_count: int  = building.get("max_count", 0)
+	# How many more of this family the world will take — Game.BUILD_ROOM_UNLIMITED for anything
+	# with no cap, which is everything but the Shkadov Mirror.
+	var room:      int  = int(building.get("build_room", 1 << 24))
 	var dimmed:    bool = not available and count == 0
 
 	# Level heading + this level's own count.  A single-level building skips the heading, but the
@@ -352,6 +367,13 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	if eff_text != "":
 		parent.add_child(_detail_label(eff_text,
 			Color(0.45, 0.85, 0.80) if not dimmed else Color(0.40, 0.45, 0.45)))
+
+	# A structure there can only be one of says so.  Without this the row is a line of greyed-out
+	# "+" buttons, which reads as "you cannot afford this" when it means "you already have it".
+	var cap_label: Label = null
+	if max_count > 0:
+		cap_label = _detail_label(_cap_text(max_count, room, count), Color(0.72, 0.80, 0.90))
+		parent.add_child(cap_label)
 
 	# Storage contribution (storage buildings only).
 	var stor: Dictionary = building.get("storage", {})
@@ -458,7 +480,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		var b := Button.new()
 		b.text = "+%d" % n
 		b.custom_minimum_size = Vector2(44, 24)
-		b.disabled = not available or not buildable
+		b.disabled = not available or not buildable or n > room
 		b.pressed.connect(_on_build_pressed.bind(bname, n))
 		build_row.add_child(b)
 		build_btns.append(b)
@@ -512,7 +534,8 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		"count": count_label, "demolish": demolish_btns, "build": build_btns,
 		"available": available, "min_count": min_count, "upgrade": upgrade_btns,
 		"active_slider": active_slider, "active_label": active_lbl,
-		"supply_bar": supply_bar,
+		"supply_bar": supply_bar, "max_count": max_count, "cap_label": cap_label,
+		"buildable": buildable,
 	}
 
 
@@ -597,12 +620,28 @@ func _format_effects(building: Dictionary) -> String:
 	if building.has("atmo_rate") and float(building["atmo_rate"]) > 0.0:
 		parts.append("Condenses %s/day from the atmosphere"
 			% Units.format_si(float(building["atmo_rate"]), "g"))
+	# The share of the star's sky a Shkadov mirror subtends, which is the whole of its physics
+	# (StarModel.shkadov_thrust_n) and the whole of what levelling it up buys.
+	if building.has("mirror_coverage") and float(building["mirror_coverage"]) > 0.0:
+		parts.append("Covers %.2f%% of the star's sky"
+			% (float(building["mirror_coverage"]) * 100.0))
 	if building.has("habitat") and float(building["habitat"]) > 0.0:
 		parts.append("Houses %s people" % Units.format_si(float(building["habitat"]), ""))
 	if building.has("shelter") and float(building["shelter"]) > 0.0:
 		parts.append("Shelters %s through nuclear war and impacts"
 			% Units.format_si(float(building["shelter"]), ""))
 	return "  ".join(parts)
+
+## What a capped family's row says about its one slot: that there is one, that this is the copy
+## filling it, or — on the tiers that are not standing — that the way to a bigger one is the
+## retrofit button and not the build button.
+func _cap_text(cap: int, room: int, count: int) -> String:
+	var only: String = "Only one can stand" if cap == 1 else "Only %d can stand" % cap
+	if room > 0:
+		return only
+	if count > 0:
+		return only + " — this one does"
+	return only + ", and one already does: retrofit it instead"
 
 ## Compact storage-capacity string shown in green next to storage buildings.
 ##   {"minerals": 1e6, "energy": 1e6} → "+1.0 Mg  +1.0 MJ"

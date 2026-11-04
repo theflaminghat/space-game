@@ -4492,8 +4492,8 @@ func _sun_structure_total(key: String) -> float:
 ## to be kept in step with the roster.
 func _sync_star_shades() -> void:
 	SolarSystem.set_star_shade(_sun_structure_total("shade_fraction"))
-	# The Shkadov mirrors are sails too, and like the shades they cost nothing to run — they only
-	# have to be standing.  Their coverage is what decides how hard the star is pushed.
+	# The Shkadov mirror is a sail too, and like the shades it costs nothing to run — it only
+	# has to be standing.  Its coverage is what decides how hard the star is pushed.
 	SolarSystem.set_star_mirror_coverage(_sun_structure_total("mirror_coverage"))
 
 
@@ -4554,7 +4554,7 @@ func _run_star_lifters(delta_days: float) -> void:
 	_announce_star_lifting(before)
 
 
-## Let the mirrors push for this slice, and say so at every light-year.  The engine spends
+## Let the mirror push for this slice, and say so at every light-year.  The engine spends
 ## nothing, so unlike the lifters there is no reserve to draw on — it just runs.
 func _run_star_thrust(delta_days: float) -> void:
 	if SolarSystem.star_mirror_coverage <= 0.0:
@@ -4571,7 +4571,7 @@ func _run_star_thrust(delta_days: float) -> void:
 	StarMapPanel.set_cluster_origin(SolarSystem.sol_position())
 	if floori(now) > floori(before) and now >= 1.0:
 		_announce("Sol has moved %s light-years" % Units.format_si(now, "").strip_edges(),
-			"The Shkadov mirrors have shifted the solar system %s light-years from where it began, at %s. Every distance measured from Sol has moved with it." % [
+			"The Shkadov mirror has shifted the solar system %s light-years from where it began, at %s. Every distance measured from Sol has moved with it." % [
 				Units.format_si(now, "").strip_edges(),
 				Units.format_si(SolarSystem.star_velocity_ms, "m/s")],
 			"star_drift_%d" % floori(now))
@@ -4589,7 +4589,7 @@ func aim_star_thruster(star_name: String) -> bool:
 		return false
 	SolarSystem.aim_star_thrust(heading, star_name)
 	_announce("Thruster aimed at %s" % star_name,
-		"The Shkadov mirrors are trimmed to push Sol towards %s, %s light-years away. The aim is a heading, not a guidance system: it holds until it is set again, and the star does not stop when it gets there." % [
+		"The Shkadov mirror is trimmed to push Sol towards %s, %s light-years away. The aim is a heading, not a guidance system: it holds until it is set again, and the star does not stop when it gets there." % [
 			star_name, Units.format_si(heading.length(), "").strip_edges()],
 		"star_aim_%s_%d" % [star_name, year])
 	return true
@@ -6167,6 +6167,9 @@ func _get_catalog_for_display() -> Array:
 		entry["supply"] = clampf(float((_fuel_factor.get(current_planet, {}) as Dictionary)
 			.get(b["name"], 1.0)), 0.0, 1.0)
 		entry["in_progress"] = _queued_count(current_planet, b["name"])
+		# How many more of it this world will take — BUILD_ROOM_UNLIMITED for everything with
+		# no "max_count", so the panel's batch buttons can compare against it unconditionally.
+		entry["build_room"] = build_room(current_planet, str(b["name"]))
 		# Current stockpile (on this planet) of each cost resource so the panel can
 		# dim the ones the player can't yet afford here.
 		var have: Dictionary = {}
@@ -6244,6 +6247,37 @@ func _fits_body(building: Dictionary, planet_name: String) -> bool:
 	var allowed: Array = building.get("allowed_types", [])
 	return allowed.is_empty() or allowed.has(str(PLANET_TYPES.get(planet_name, "rocky")))   # moons → rocky
 
+## Stand-in for "no cap at all", which is every structure in the catalogue but one.  Returned
+## as a number rather than handled with a special case so every caller can just compare against
+## how many it wants to build; it is far larger than any batch the panel offers.
+const BUILD_ROOM_UNLIMITED: int = 1 << 24
+
+## How many more `building_name` this body will take.
+##
+## A structure carrying "max_count" (see BuildingData) is counted across its WHOLE FAMILY —
+## every tier of it together — because a cap of one Shkadov Mirror means one mirror and not one
+## of each size.  Standing structures and queued ones both count, so the cap cannot be beaten by
+## filling the build queue.
+##
+## A queued RETROFIT is deliberately NOT counted: an upgrade consumes the structure it replaces
+## rather than adding one (see _complete_build), so the copy it will eat is already in the tally
+## and counting the job as well would read the family as over its cap while it is being levelled.
+func build_room(planet_name: String, building_name: String) -> int:
+	var def: Dictionary = _find_building_def(building_name)
+	var cap: int = int(def.get("max_count", 0))
+	if cap <= 0:
+		return BUILD_ROOM_UNLIMITED
+	var base: String = str(def.get("base_name", building_name))
+	var spoken_for: int = 0
+	for tier: String in BuildingData.tiers(base):
+		spoken_for += _count_building(planet_name, tier)
+	for job: Dictionary in (build_queue.get(planet_name, []) as Array):
+		if str(job.get("upgrade_from", "")) != "":
+			continue
+		if str(_find_building_def(str(job.get("building", ""))).get("base_name", "")) == base:
+			spoken_for += 1
+	return maxi(0, cap - spoken_for)
+
 ## Attempt to build one `building_name` on `planet_name`.  Returns true on success,
 ## false if it's invalid, research-locked, or unaffordable (the automation executor
 ## relies on the return value to know when to stop topping up a maintained count).
@@ -6260,6 +6294,11 @@ func try_build(planet_name: String, building_name: String) -> bool:
 	# queue has no notion of a cap — so it is enforced here, against everything already spoken
 	# for: panels standing, satellites in flight, and arrays already queued.
 	if str(building.get("base_name", building_name)) == SWARM_BUILDING and swarm_room() <= 0:
+		return false
+	# A structure there can only be one of.  The build panel greys its buttons out, but
+	# automation rules and the dev console call try_build directly, so the cap is enforced here
+	# for the same reason _fits_body is.
+	if build_room(planet_name, building_name) <= 0:
 		return false
 
 	# A generated tier carries its own gate; the base tier uses the authored table.
@@ -10033,7 +10072,12 @@ func _check_achievements() -> void:
 		grant_achievement("caravan")
 	if SolarSystem.star_mass_msun <= 0.90:
 		grant_achievement("stealing_fire")
-	if SolarSystem.star_mirror_coverage >= 0.99:
+	# The thruster at full size.  There is only one mirror and only three sizes of it, so this
+	# is "the biggest one, standing" — read off the catalogue rather than written down here, so
+	# retuning the coverage cannot leave an achievement nobody can reach.  It used to ask for
+	# 0.99 of the sky, which a fleet of five-hundredths-of-a-percent segments could in principle
+	# reach by the twenty thousandth of them and which one mirror never can.
+	if SolarSystem.star_mirror_coverage >= BuildingData.max_mirror_coverage() - 1.0e-9:
 		grant_achievement("accelerando")
 
 	# ── Thinking ──
@@ -10556,6 +10600,38 @@ func load_game(path: String = "") -> void:
 			var _earth_list: Array = planet_buildings["earth"]
 			for _i in range(_sun_depots):
 				_earth_list.append("Matter Depot")
+
+		# The Shkadov thruster used to be a FLEET of statite segments, each covering five
+		# hundredths of a percent of the star's sky, and a save can hold hundreds of them.  It
+		# is ONE mirror now (buildings.gd "max_count") at a hundred times the coverage per
+		# structure — so the one kept is worth the hundred it replaces — and the biggest tier
+		# standing is what is kept.  Nothing is refunded, which is what every other retirement
+		# here does.
+		#
+		# Without this a loaded fleet would sit over its cap for ever: build_room refuses more
+		# but nothing takes the extras away, and the coverage saturates at a full sky, which is
+		# a thruster sixteen times stronger than anything buildable.
+		#
+		# The active-count entries for the mirror go with them, so the one kept comes back
+		# SWITCHED ON.  A fleet left idle would otherwise restore as a single idle mirror, which
+		# is the exact failure save_schema.gd's own header is about: a reloaded thruster that stops
+		# working with nothing on screen to say why.
+		if planet_buildings.has("sun"):
+			var _mirror_tiers: Array = BuildingData.tiers("Shkadov Mirror")
+			var _sun_roster: Array = planet_buildings["sun"]
+			var _biggest: int = -1
+			for _b: String in _sun_roster:
+				_biggest = maxi(_biggest, _mirror_tiers.find(_b))
+			if _biggest >= 0:
+				var _without_mirrors: Array = []
+				for _b: String in _sun_roster:
+					if not _mirror_tiers.has(_b):
+						_without_mirrors.append(_b)
+				_without_mirrors.append(str(_mirror_tiers[_biggest]))
+				planet_buildings["sun"] = _without_mirrors
+				var _sun_active: Dictionary = active_buildings.get("sun", {})
+				for _t: String in _mirror_tiers:
+					_sun_active.erase(_t)
 
 		if _migrated_arrays > 0:
 			solar_satellites_deployed = clampi(
