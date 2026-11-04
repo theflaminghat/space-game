@@ -134,15 +134,22 @@ func _run() -> void:
 		var y0: float = g._planet_tabs.offset_top
 		check(h0 > 100.0, "the panel has a height: %f" % h0)
 		g._top_bar_bg.size.y += 20.0
-		g._layout_planet_tabs()
+		g._layout_menu_panels()
 		check(absf(g._planet_tabs.offset_top - (y0 + 20.0)) <= 0.5,
 			"a taller bar pushes the panel down: %f -> %f" % [y0, g._planet_tabs.offset_top])
+		# The launch panel opens beside it, is anchored to the same corner, and carried the same
+		# stale offset of 52. It is placed off the same measurement now, so it moves with it.
+		check(absf(g.launch_panel.offset_top - g._planet_tabs.offset_top) <= 0.5,
+			"the launch panel's top is the planet panel's: %f vs %f" % [
+				g.launch_panel.offset_top, g._planet_tabs.offset_top])
 		check(absf((g._planet_tabs.offset_bottom - g._planet_tabs.offset_top) - h0) <= 0.5,
 			"and it keeps its height on the way: %f -> %f" % [
 				h0, g._planet_tabs.offset_bottom - g._planet_tabs.offset_top])
 		g._top_bar_bg.size.y -= 20.0
-		g._layout_planet_tabs()
+		g._layout_menu_panels()
 		check(absf(g._planet_tabs.offset_top - y0) <= 0.5, "and comes back: %f" % g._planet_tabs.offset_top)
+		check(absf(g.launch_panel.offset_top - y0) <= 0.5,
+			"and the launch panel with it: %f" % g.launch_panel.offset_top)
 
 		# And re-laying out does not eat a little more each pass.
 		for _p in range(3):
@@ -242,5 +249,74 @@ func _run() -> void:
 			"and that width is the floor the code sets, not the text: %f vs %f" % [
 				short_b, g.RES_BOX_MIN_W])
 
+
+	# ── Every menu panel is square, and opens clear of the sidebar ──
+	#
+	# Three different things carry a panel: a plain Control with a PanelBackground behind it, a
+	# PanelContainer, and the planet panel's TabContainer. Only the first was square — the other
+	# two take their backing from Godot's default theme, which rounds it by 3px — so the UI was
+	# square around the outside and rounded everywhere inside it.
+	#
+	# Swept over whatever the sidebar holds rather than over a list of names, because that is how
+	# Game._sharpen_menu_panels works: a page added later has to come out square without this
+	# test being told it exists.
+	var pages: Array = []
+	for n: Node in g.sidebar.get_children():
+		if n is Control and str(n.name) != "sidebar":
+			pages.append(n)
+	check(pages.size() >= 8, "the sidebar holds its pages: %d" % pages.size())
+	var panels: Array = pages.duplicate()
+	panels.append(g._planet_tabs)
+	for n: Node in g._planet_tabs.get_children():
+		if n is Control:
+			panels.append(n)
+	panels.append(g.launch_panel)
+	var rounded: Array = []
+	for n: Node in panels:
+		var c := n as Control
+		for r: int in _radii(c, "panel"):
+			if r != 0:
+				rounded.append("%s %s: %d" % [c.get_class(), str(c.name), r])
+		var bg := c.get_node_or_null("PanelBackground") as Control
+		if bg != null:
+			for r2: int in _radii(bg, "panel"):
+				if r2 != 0:
+					rounded.append("%s's backing: %d" % [str(c.name), r2])
+	check(rounded.is_empty(), "every menu panel is square: %s" % str(rounded.slice(0, 6)))
+	print("squared %d menu panels" % panels.size())
+
+	# The pages are siblings of the button strip in an HBox, and the strip's BACKING — the thing
+	# carrying the border — hangs 6px further right than the strip itself. On the container's
+	# default separation of 4 every page opened 2px inside that border, drawn over the top of it.
+	#
+	# One at a time, because an HBoxContainer skips hidden children: a page that is not showing
+	# keeps whatever rect it last had, so sweeping them all at once measures the layout of the
+	# previous frame rather than where each one actually opens.
+	var side_right: float = g._side_bar_bg.global_position.x + g._side_bar_bg.size.x
+	var crowding: Array = []
+	for n: Node in pages:
+		var c := n as Control
+		g.sidebar.hide_all()
+		c.show()
+		for _i in range(3): await process_frame
+		if c.global_position.x - side_right < g.PLANET_PANEL_GAP - 0.5:
+			crowding.append("%s at %.1f" % [str(c.name), c.global_position.x])
+	g.sidebar.hide_all()
+	await process_frame
+	check(crowding.is_empty(),
+		"every page opens clear of the sidebar's border at %.1f by %.1f: %s" % [
+			side_right, g.PLANET_PANEL_GAP, str(crowding.slice(0, 6))])
+
 	print("FAILS: %d" % fails)
 	quit()
+
+
+## Corner radii of the panel `ctrl` draws, clockwise from the top left — empty if it draws none.
+func _radii(ctrl: Control, what: String) -> Array:
+	if ctrl == null:
+		return []
+	var f := ctrl.get_theme_stylebox(what) as StyleBoxFlat
+	if f == null:
+		return []
+	return [f.corner_radius_top_left, f.corner_radius_top_right,
+		f.corner_radius_bottom_right, f.corner_radius_bottom_left]

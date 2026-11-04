@@ -1678,8 +1678,23 @@ read as one L of chrome sharing a single edge.
 Three things are measured off each other rather than set twice, because a pair of constants that
 have to agree is a pair that will drift:
 
-- **The corners are square.** A 4px radius on an edge flush with the window reads as a nick out
-  of the frame. The pages that float over the scene keep theirs (`PanelBackground`).
+- **The corners are square** — the bars', and the menu panels' with them. A 4px radius on an
+  edge flush with the window reads as a nick out of the frame, and a rounded page inside a square
+  frame reads as two different UIs. The panels carry a backing three different ways: a plain
+  `Control` with a `PanelBackground` behind it (square where it is built), a `PanelContainer`,
+  and the planet panel's `TabContainer` — the last two take theirs from Godot's default theme,
+  which rounds it by 3px. `Game._sharpen_menu_panels()` overrides that per panel, on a
+  *duplicate* of the stylebox (`PanelBackground.sharpen()`): the one the theme hands back is
+  shared by every `PanelContainer` in the game, down to the row backings inside the pages, and
+  squaring it in place would square all of them from whichever panel asked first. It sweeps the
+  sidebar's own children rather than a list of names, so a page added later is square without
+  anything being remembered.
+- **A page opens clear of the sidebar's border, not on it.** The pages are siblings of the button
+  strip in an HBox, so what separates them is the container's separation — 4px from the theme,
+  while the strip's *backing*, which is the thing carrying the border, hangs `BAR_BG_PAD.x` = 6px
+  further right. Every page therefore opened 2px inside the sidebar's outline and drew over it.
+  The separation is set to the overhang plus `PLANET_PANEL_GAP`, so the page starts clear of the
+  border by the same margin the planet panel keeps from the window edge.
 - **The sidebar's right border meets the clock's right edge.** They were 4px apart — close
   enough to read as a mistake rather than as two widths. The strip is sized from `TimeBox`'s
   measured rect so its *backing* lands on that edge, since the backing carries the border.
@@ -1691,6 +1706,10 @@ have to agree is a pair that will drift:
   re-measured each layout, and the panel's **height** is carried across the move — setting the
   top without the bottom silently shortens it once, permanently, which is the kind of loss a
   test comparing the height against itself can never see.
+- **The launch panel rides the same line.** It carried the same stale 52 and is placed from the
+  same measurement now (`_layout_menu_panels`). It opens against the same edge of the screen as
+  the planet panel, and two panels sharing an edge six pixels out of step read as one of them
+  having slipped. Only its top is written: its bottom is anchored to the window.
 
 **The four resource readouts were panels that moved.** Each was a `PanelContainer`, so a bar that
 is already a panel carried four more sunken boxes bolted onto it. They were added straight to the

@@ -1572,6 +1572,7 @@ func _ready() -> void:
 	_setup_realtime_clock()
 	_setup_body_picker()
 	_setup_planet_tabs()
+	_sharpen_menu_panels()
 
 	if GameSession.should_load_on_start and GameSession.current_save_path != "":
 		load_game(GameSession.current_save_path)
@@ -2035,7 +2036,8 @@ func _setup_bar_backgrounds() -> void:
 	style.bg_color = Color(0.05, 0.06, 0.10, 1.0)
 	# Square. These two run into the window's own corners and into each other, and a 4px radius
 	# on an edge that is flush with the screen reads as a nick out of the frame rather than as a
-	# rounded panel. The pages that float over the scene keep theirs (see PanelBackground).
+	# rounded panel. The menu panels are square too now, so the whole UI is one shape
+	# (_sharpen_menu_panels, PanelBackground.attach).
 	style.set_corner_radius_all(0)
 	style.set_border_width_all(1)
 	style.border_color = Color(0.35, 0.45, 0.65, 1.0)   # opaque border
@@ -2064,6 +2066,18 @@ func _setup_bar_backgrounds() -> void:
 	if frame:
 		frame.offset_left = BAR_BG_PAD.x
 		frame.offset_top = BAR_BG_PAD.y
+
+	# Stand the full-area pages clear of the sidebar's border instead of ON it. They are
+	# siblings of the button strip in an HBox, so what separates them is the container's own
+	# separation — 4px from the default theme, while the strip's BACKING, which is the thing
+	# carrying the border, hangs 6px further right than the strip itself. Every page therefore
+	# opened 2px inside the sidebar's outline, over the top of it. Spaced by the backing's
+	# overhang plus the margin the rest of the chrome keeps, so the page starts clear of the
+	# border by the same gap the planet panel keeps from the window edge.
+	var pages := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2") as Control
+	if pages:
+		pages.add_theme_constant_override("separation",
+			int(BAR_BG_PAD.x + PLANET_PANEL_GAP))
 
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
 	var side_strip := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2/sidebar") as Control
@@ -2104,7 +2118,7 @@ func _layout_bar_backgrounds() -> void:
 		_match_sidebar_to_clock(side_strip)
 	if _side_bar_bg and side_strip:
 		_fit_bar_bg(_side_bar_bg, Rect2(side_strip.global_position, side_strip.size), view)
-	_layout_planet_tabs()
+	_layout_menu_panels()
 
 ## Line the sidebar's right border up with the right edge of the clock panel above it.
 ##
@@ -2126,27 +2140,64 @@ func _match_sidebar_to_clock(side_strip: Control) -> void:
 	if want > 0.0 and absf(side_strip.custom_minimum_size.x - want) > 0.5:
 		side_strip.custom_minimum_size.x = want
 
-## Gap between the planet panel and the chrome it sits inside.  One number for both sides: the
-## panel hangs 8px off the right edge of the window, so it hangs 8px below the top bar too.
+## Gap between a floating panel and the chrome it sits inside.  One number for every side: the
+## planet panel hangs 8px off the right edge of the window, so it hangs 8px below the top bar
+## too, and the full-area pages stand 8px clear of the sidebar's border.
 const PLANET_PANEL_GAP: float = 8.0
 
-## Sit the planet tabs below the top bar by the same margin they keep from the right edge.
+## Sit the panels that float at the right of the screen below the top bar, by the same margin
+## they keep from the right edge.
 ##
-## Its top was a hard-coded offset of 52, from when the bar ended there. The bar's backing now
-## reaches 58 — so the panel started four pixels INSIDE the chrome, tight against a border it
-## was supposed to be clear of. Measured from the backing rather than from the bar, since the
-## backing is what the player sees, and re-measured on every layout so a taller bar still pushes
-## the panel down.
-func _layout_planet_tabs() -> void:
-	if _planet_tabs == null or _top_bar_bg == null:
+## The planet panel's top was a hard-coded offset of 52, from when the bar ended there. The
+## bar's backing now reaches 58 — so the panel started four pixels INSIDE the chrome, tight
+## against a border it was supposed to be clear of. Measured from the backing rather than from
+## the bar, since the backing is what the player sees, and re-measured on every layout so a
+## taller bar still pushes the panel down.
+##
+## The launch panel carried the same stale 52 and is positioned from the same line now. It opens
+## beside the planet panel and the two were six pixels out of step, which on two panels that
+## share an edge of the screen reads as one of them having slipped.
+func _layout_menu_panels() -> void:
+	if _top_bar_bg == null:
 		return
 	var top: float = _top_bar_bg.global_position.y + _top_bar_bg.size.y + PLANET_PANEL_GAP
-	# Height held, not the bottom edge: moving the top down must not shorten the panel.
-	var height: float = _planet_tabs.offset_bottom - _planet_tabs.offset_top
-	if absf(_planet_tabs.offset_top - top) > 0.5:
-		_planet_tabs.offset_top = top
-		_planet_tabs.offset_bottom = top + height
-	_planet_tabs.offset_right = -PLANET_PANEL_GAP
+	if _planet_tabs != null:
+		# Height held, not the bottom edge: moving the top down must not shorten the panel.
+		var height: float = _planet_tabs.offset_bottom - _planet_tabs.offset_top
+		if absf(_planet_tabs.offset_top - top) > 0.5:
+			_planet_tabs.offset_top = top
+			_planet_tabs.offset_bottom = top + height
+		_planet_tabs.offset_right = -PLANET_PANEL_GAP
+	# The launch panel's bottom is anchored to the window, so only its top is placed: it grows
+	# and shrinks with the window on its own.
+	if launch_panel != null and absf(launch_panel.offset_top - top) > 0.5:
+		launch_panel.offset_top = top
+
+## Square corners on every menu panel, to match the chrome they open inside.
+##
+## They are a mix of three things: a plain Control with a PanelBackground behind it (square by
+## construction), a PanelContainer, and the planet panel's TabContainer. The last two take their
+## backing from Godot's default theme, which rounds it by 3px — a radius on panels that butt up
+## against a square frame, and against each other inside the tabs.
+##
+## Swept off the sidebar's own children rather than listed, so a page added later is square
+## without anything being remembered here; the tab pages are swept the same way, since each is
+## its own panel inside the wrapper.
+func _sharpen_menu_panels() -> void:
+	var panels: Array[Control] = []
+	if sidebar:
+		for n: Node in sidebar.get_children():
+			# Everything in the HBox except the button strip itself is a page.
+			if n is Control and str(n.name) != "sidebar":
+				panels.append(n as Control)
+	if _planet_tabs != null:
+		panels.append(_planet_tabs)
+		for n: Node in _planet_tabs.get_children():
+			if n is Control:
+				panels.append(n as Control)
+	panels.append(launch_panel)
+	for p: Control in panels:
+		PanelBackground.sharpen(p)
 
 ## Place `bg` around `bar` with BAR_BG_PAD of margin, trimmed to whatever of that fits in `view`.
 func _fit_bar_bg(bg: Panel, bar: Rect2, view: Rect2) -> void:
