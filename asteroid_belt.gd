@@ -246,13 +246,7 @@ func _update_infra(delta: float) -> void:
 				int(game._count_building(BODY_NAME, str(lane["type"]))), INFRA_MAX_PER_LANE)
 		var count: int = mm.visible_instance_count
 		for i in range(count):
-			var pos: Vector3 = infra_position(lane, i, count)
-			# Each structure's up-axis points away from the Sun, like a satellite bus.
-			var radial: Vector3 = pos.normalized()
-			var ref: Vector3 = Vector3.UP if absf(radial.y) < 0.95 else Vector3.RIGHT
-			var t1: Vector3 = radial.cross(ref).normalized()
-			var t2: Vector3 = radial.cross(t1)
-			mm.set_instance_transform(i, Transform3D(Basis(t1, radial, t2), pos))
+			mm.set_instance_transform(i, infra_transform(lane, i, count))
 
 
 ## Where structure `i` of `count` on `lane` is right now, in the orbit centre's frame: evenly
@@ -263,6 +257,42 @@ static func infra_position(lane: Dictionary, i: int, count: int) -> Vector3:
 	var th: float = float(lane["phase"]) + TAU * float(i) / float(maxi(count, 1))
 	return Vector3(r * sin(th), r * sin(th - float(lane["node"])) * sin(float(lane["incl"])),
 		r * cos(th))
+
+
+## The whole transform structure `i` of `count` is drawn with: where it sits, and which way it
+## is turned. Both halves together, and as a static, because this is the ONLY part of the draw
+## that can be checked. A headless run has no renderer, so MultiMesh.set_instance_transform
+## keeps nothing and get_instance_transform hands back the identity — an assertion made by
+## reading the lanes back passes whatever the maths does. planet.gd records the same of its own.
+static func infra_transform(lane: Dictionary, i: int, count: int) -> Transform3D:
+	var pos: Vector3 = infra_position(lane, i, count)
+	return Transform3D(Planet.infra_orientation(pos, infra_plane_normal(lane)), pos)
+
+
+## The normal of the plane one structure lane orbits in — the axis Planet.infra_orientation
+## takes each structure's along-track direction from.
+##
+## Read off infra_position's own parameterisation rather than assumed.  That looks like a bob
+## about the ecliptic rather than a tilted orbit, but it is one: y = r·sin(th − node)·sin(incl)
+## expands to sin(incl)·(x·cos(node) − z·sin(node)), which is linear in x and z, so every lane
+## is a planar closed curve after all and has a constant normal.  Its direction is the lane's
+## angular momentum pos × dpos/dth, which comes out as (−sin(incl)·cos(node), 1,
+## sin(incl)·sin(node)) with no dependence on where round the lane the structure sits — and that
+## sign, rather than its opposite, is the one that leaves a structure facing the way it travels.
+##
+## This replaces four lines that built each instance's basis here by hand, and they carried both
+## of the faults planet.gd records against the version it grew out of.  Basis(t1, radial, t2)
+## with t2 = radial × t1 is LEFT-handed — a mirror — and a mirrored instance transform reverses
+## the effective winding, so the renderer culls the near faces and keeps the far ones and the
+## structure is shaded from the inside: the belt's hulls were lit inside-out, bright on the face
+## away from the Sun.  The sideways axis also came from a fixed world reference, which snapped
+## the whole frame about the radial when a structure passed near the vertical.  The planets'
+## lanes were fixed; the belt's draw the same hardware from the same models and kept the old
+## maths.
+static func infra_plane_normal(lane: Dictionary) -> Vector3:
+	var s: float = sin(float(lane["incl"]))
+	var n: float = float(lane["node"])
+	return Vector3(-s * cos(n), 1.0, s * sin(n)).normalized()
 
 
 # ── Construction ───────────────────────────────────────────────────────────────

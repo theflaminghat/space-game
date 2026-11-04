@@ -213,6 +213,82 @@ func _run() -> void:
 	print("continuity: worst turn %.2f deg per %.2f deg of orbit (%s)" % [
 		worst_jump, step_deg, worst_lane])
 
+
+	# ── The BELT's structures were the ones still drawn mirrored ──
+	#
+	# Same hardware from the same models, but orbiting the SUN among the rocks rather than a
+	# planet, which makes asteroid_belt.gd a second copy of the per-instance maths — and it kept
+	# both of the faults above after the planets' copy was fixed. Basis(t1, radial, radial × t1)
+	# is left-handed, so every structure in the belt was shaded from the inside: bright on the
+	# face turned away from the Sun. The sideways axis came from a fixed world reference too.
+	#
+	# Asserted through AsteroidBelt.infra_transform, which is the whole of what the draw loop
+	# calls, for the same reason as above: the MultiMesh cannot be read back headless.
+	var AB = load("res://asteroid_belt.gd")
+	var belt: Node3D = g.get_node_or_null("WorldRoot/Planets/asteroid_belt") as Node3D
+	check(belt != null, "the belt is in the system")
+	var lanes: Array = belt._infra if belt != null else []
+	check(lanes.size() >= 8, "and it draws orbital structure lanes: %d" % lanes.size())
+	var b_bad: Array = []
+	var b_det: float = INF
+	var b_perp: float = 0.0          # worst |lane normal · a direction in the lane's plane|
+	var b_track: float = 1.0         # worst alignment of the sideways axis with the motion
+	var b_jump: float = 0.0
+	var b_lane: String = ""
+	var bsteps: int = 360
+	var bstep_deg: float = 360.0 / float(bsteps)
+	for lane: Dictionary in lanes:
+		# Swept on a copy: the live lane's phase belongs to the running game.
+		var ln: Dictionary = lane.duplicate()
+		var onormal: Vector3 = AB.infra_plane_normal(ln)
+		var prev := Basis()
+		for st in range(bsteps + 1):
+			var th: float = TAU * float(st) / float(bsteps)
+			ln["phase"] = th
+			var xf: Transform3D = AB.infra_transform(ln, 0, 1)
+			# Where it is a moment later, which is the direction it is travelling.
+			ln["phase"] = th + 1.0e-3
+			var vel: Vector3 = (AB.infra_position(ln, 0, 1) - xf.origin).normalized()
+			var radial: Vector3 = xf.origin.normalized()
+			b_det = minf(b_det, xf.basis.determinant())
+			# Both of these lie in the lane's plane, so its normal is perpendicular to both.
+			b_perp = maxf(b_perp, absf(onormal.dot(radial)))
+			b_perp = maxf(b_perp, absf(onormal.dot(vel)))
+			b_track = minf(b_track, xf.basis.x.dot(vel))
+			if xf.basis.y.dot(radial) < 0.999:
+				b_bad.append("%s: +Y off the radial" % str(lane["type"]))
+			# The frame's third axis is the lane's own plane normal, which is how the normal the
+			# draw loop PASSES is checked rather than only the one this test computes.
+			# Tightly: the lanes are inclined by at most 4 degrees, so a normal that ignores
+			# the node is still within 0.01 of the right one, and a loose bound would let it
+			# through. The noise floor here is 1e-6.
+			if absf(absf(xf.basis.z.dot(onormal)) - 1.0) > 1.0e-3:
+				b_bad.append("%s: not flat in its lane's plane" % str(lane["type"]))
+			if absf(xf.basis.x.length() - 1.0) > 1.0e-4 \
+					or absf(xf.basis.x.dot(xf.basis.y)) > 1.0e-4:
+				b_bad.append("%s: not a rotation" % str(lane["type"]))
+			if st > 0:
+				var rel: Basis = xf.basis * prev.inverse()
+				var tr: float = clampf((rel.x.x + rel.y.y + rel.z.z - 1.0) * 0.5, -1.0, 1.0)
+				var jump: float = rad_to_deg(acos(tr))
+				if jump > b_jump:
+					b_jump = jump
+					b_lane = str(lane["type"])
+			prev = xf.basis
+	check(b_det > 0.0,
+		"nothing in the belt is drawn mirrored: worst determinant %+.4f" % b_det)
+	check(b_bad.is_empty(),
+		"+Y points away from the Sun and the frame is a rotation: %s" % str(b_bad.slice(0, 4)))
+	check(b_perp < 0.01,
+		"the lane normal is its own plane's: worst |n . dir| %.6f" % b_perp)
+	check(b_track > 0.9,
+		"and the sideways axis runs WITH the motion: worst %+.3f" % b_track)
+	check(b_jump < bstep_deg * 3.0,
+		"no structure jumps as it goes round: worst %.1f deg on %s, against a %.2f deg step" % [
+			b_jump, b_lane, bstep_deg])
+	print("belt: %d lanes, det %+.4f, |n . dir| %.6f, along-track %+.3f, worst turn %.2f deg" % [
+		lanes.size(), b_det, b_perp, b_track, b_jump])
+
 	print("FAILS: %d" % fails)
 	quit()
 

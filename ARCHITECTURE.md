@@ -1210,6 +1210,20 @@ parallel to the radial, so their cross product never vanishes. (The Dyson swarm 
 its lane basis is computed once per lane and the per-panel axes are continuous in the orbit
 angle.)
 
+**The belt's lanes were a second copy of this, and kept both faults.** A planet's structures
+circle the planet; the belt's circle the **Sun**, out among the rocks on their own heliocentric
+lanes, so `asteroid_belt.gd` builds its own per-instance transforms — and when the two faults
+above were fixed in `planet.gd` the belt went on drawing every structure mirrored and
+world-referenced. The whole belt was shaded from the inside: sun-facing hulls came out black
+(measured at 11/255 against 136/255 after the fix, same frame, same light).
+
+The belt now goes through `Planet.infra_orientation()` like everything else, with the plane
+normal from `AsteroidBelt.infra_plane_normal()`. Its lanes *look* like a vertical bob about the
+ecliptic rather than a tilted orbit — `y = r·sin(th − node)·sin(incl)` — but that expands to
+`sin(incl)·(x·cos(node) − z·sin(node))`, linear in x and z, so each lane is a planar curve with a
+constant normal after all: its angular momentum, `(−sin(incl)·cos(node), 1, sin(incl)·sin(node))`.
+That sign, and not its opposite, is the one that leaves a structure facing the way it travels.
+
 **The bug is not reachable through the MultiMesh it feeds.** A headless run has no renderer:
 `MultiMesh.set_instance_transform()` keeps nothing and `get_instance_transform()` hands back the
 identity, so an assertion that stands structures up and reads their transforms back passes
@@ -1219,6 +1233,13 @@ directions for determinant, radial +Y and orthonormality, and around every lane'
 0.5° resolution for continuity. Both checks were confirmed to fail with their respective bugs put
 back — the first version of the handedness check read the transforms back off the lanes and
 passed either way.
+
+The belt is checked through `AsteroidBelt.infra_transform()`, which is the whole of what its draw
+loop calls, for the same reason: all 21 lanes swept at 1° resolution for determinant, radial +Y,
+orthonormality, continuity, that the frame lies flat in its lane's plane, and that the sideways
+axis runs *with* the motion rather than against it. Put the old four lines back and the first and
+last of those fail (determinant −1, along-track −1); hand it a plausible normal that ignores the
+lane's node and the along-track and flatness checks fail.
 
 ### Founding stock
 
