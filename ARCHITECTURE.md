@@ -1740,6 +1740,76 @@ that is not there.)
   it has. Both are needed. It matters most for the cargo dropdown, whose entries are whatever
   the origin world is holding — a width this panel cannot know in advance.
 
+### One palette, and it is the statistics and politics pages'
+
+There was no theme resource and no palette. Every page picked its colours at the point of use, so
+the same thing was spelled a different way on every page. A dim explanatory line was written
+eleven ways — `0.62,0.62,0.70` · `0.62,0.68,0.80` · `0.65,0.65,0.72` · `0.68,0.72,0.78` ·
+`0.70,0.72,0.78` · `0.70,0.75,0.85` · `0.72,0.76,0.84` · `0.74,0.78,0.88` · `0.75,0.75,0.75` ·
+`0.60,0.66,0.76` · `0.6,0.6,0.66` — a good reading six ways, a bad one seven, and several of
+those differences are below what anyone could see anyway. None of them meant anything: no page
+chose its grey to say something another page's grey did not.
+
+`UIPalette` is the whole set, and the values are not new. They are the ones the **statistics and
+politics pages** were already using, which is where the look everything else is being brought to
+came from; the roles are named after what those two pages use them *for*, so a page that needs
+"the colour of an explanatory line" asks for `DIM` instead of inventing a grey. Three surfaces
+(`SURFACE`, `RAISED`, `BORDER`), six weights of text (`TITLE`, `VALUE`, `TEXT`, `HEADER`, `DIM`,
+`DISABLED`), four readings (`GOOD`, `WARN`, `BAD`, `NEUTRAL`), and the statistics page's seven
+series colours, so that a resource is the same colour wherever it is named — science was green on
+the graph, one blue in the research tree, another in the build panel and a third on the timeline.
+
+The amber is the one role the reference pages had no reading for, so it is taken from the
+statistics page's compute series: `WARN` and `COMPUTE` are deliberately the same colour, and
+`verify_menu_palette` allows that one pair and no other.
+
+**Colour that carries meaning is not in it.** A star's spectral class, a world's crust and mantle,
+a compound, a polity's banner, the category hues in `BuildingData`, `PoliticsData` and
+`GameEvents` — those are data about the thing being drawn, not the colour of the window it is
+drawn in. The test's `DATA` list names the scripts that hold them; everything else in the project
+is swept for spelled-out colours, and a greyscale literal is allowed through as what it is, an
+opacity rather than a hue.
+
+Three things had to happen, and the third is the one that looked like success while doing nothing.
+
+- **The pages.** `Game._restyle_menu_panels()` paints every menu panel `SURFACE` with a `BORDER`
+  outline. Only the colours and the corners are written: `UIPalette.repaint()` reads the content
+  margins off the theme's stylebox and writes them back, because those margins are what space a
+  panel's children and a fresh `StyleBoxFlat` has none. The planet panel's six tab pages are
+  given a **clear** fill instead — each covers the wrapper's content area exactly, so painted
+  they hid the wrapper's outline behind themselves and bordered they would have drawn that
+  outline six times, once per tab. The wrapper's frame is split across two styleboxes so it goes
+  round the whole thing: the tab strip carries the top, left and right, the page below it carries
+  the left, right and bottom, and the seam where they meet is the one edge neither draws, so the
+  open tab joins to its page across it.
+- **The controls.** Everything nobody had styled by hand — every button, dropdown, text field,
+  list, slider, scrollbar, popup and dialog — was drawn in Godot's **default** theme: translucent
+  neutral greys. On a navy UI those read as grey-brown boxes you could see the solar system
+  through, and there are far more of them than there are hand-styled labels. `UIPalette.theme()`
+  builds one `Theme` from the palette, and every box in it is a **recoloured duplicate** of the
+  default theme's, so the margins, border widths and sizes that lay the controls out are exactly
+  what they were. Two surfaces do nearly all of it: `RAISED` for a thing you press, `SURFACE` for
+  a thing you type in or read a list out of, with a faint edge so it is visible on a page of the
+  same colour.
+- **Getting the theme to them.** A theme flows down the **Control** tree. The whole game UI hangs
+  off `CanvasLayer`s, and a `CanvasLayer` is not a Control, so it cuts that chain: a theme set on
+  the root `Window` reaches a Control parented straight to the window and nothing else — measured,
+  not assumed. `GameSession` sets it on the root *and* hooks `node_added`, giving the theme to
+  each Control whose parent is not a Control; everything inside such an island inherits as usual.
+  Hooking the signal rather than sweeping once means a dialog built later — the save dialog, the
+  encyclopedia, a trade offer — is dressed on the way in instead of having to remember to ask.
+  Godot has no runtime setter for the project theme, which is the only thing that would have made
+  this unnecessary.
+
+Four views still paint their own background in `_draw` rather than carrying a panel: the star map,
+the galaxy map, the galaxy debug grid and the evolution tree. Their fills come from `UIPalette`
+too, except the star map's, which is deliberately **black** — it is a view of the sky. The test
+pins that list, so a page that paints nothing at all shows up as a new name rather than as a hole.
+
+Two colours in the game are not the palette's, both on the extinction screen: the header red and
+the cause orange. `UIPalette.BAD` is the colour of a reading going the wrong way, which is not
+what that is — it is the end of the run, and the one moment the UI is allowed to raise its voice.
+
 ### The chrome: the frame, and the four readouts
 
 **The light-blue border only ever showed two of its eight edges.** The top bar and the sidebar
@@ -1777,18 +1847,21 @@ have to agree is a pair that will drift:
   frame reads as two different UIs. The panels carry a backing three different ways: a plain
   `Control` with a `PanelBackground` behind it (square where it is built), a `PanelContainer`,
   and the planet panel's `TabContainer` — the last two take theirs from Godot's default theme,
-  which rounds it by 3px. `Game._sharpen_menu_panels()` overrides that per panel, on a
-  *duplicate* of the stylebox (`PanelBackground.sharpen()`): the one the theme hands back is
-  shared by every `PanelContainer` in the game, down to the row backings inside the pages, and
-  squaring it in place would square all of them from whichever panel asked first. It sweeps the
-  sidebar's own children rather than a list of names, so a page added later is square without
-  anything being remembered.
-- **A page opens clear of the sidebar's border, not on it.** The pages are siblings of the button
+  which rounds it by 3px. `Game._restyle_menu_panels()` overrides that per panel, on a
+  *duplicate* of the stylebox (`UIPalette.repaint()`): the one the theme hands back is shared by
+  every `PanelContainer` in the game, down to the row backings inside the pages, and squaring it
+  in place would square all of them from whichever panel asked first. It sweeps the sidebar's
+  own children rather than a list of names, so a page added later is square without anything
+  being remembered. The same sweep is what paints them (see the palette, above).
+- **A page MEETS the sidebar's border, on the same line.** The pages are siblings of the button
   strip in an HBox, so what separates them is the container's separation — 4px from the theme,
   while the strip's *backing*, which is the thing carrying the border, hangs `BAR_BG_PAD.x` = 6px
-  further right. Every page therefore opened 2px inside the sidebar's outline and drew over it.
-  The separation is set to the overhang plus `PLANET_PANEL_GAP`, so the page starts clear of the
-  border by the same margin the planet panel keeps from the window edge.
+  further right. At 4 every page opened 2px inside the sidebar's outline and drew over the middle
+  of it. At the overhang exactly it would start one pixel *past* that outline, which now that
+  every page draws an outline of its own is two parallel lines a pixel apart. The separation is
+  one less than the overhang, so a page's own left border lands on the sidebar's right border,
+  and since the backings sit at index 0 the page is drawn over it: one line, in one colour. The
+  menus touch the chrome rather than floating beside it.
 - **The sidebar's right border meets the clock's right edge.** They were 4px apart — close
   enough to read as a mistake rather than as two widths. The strip is sized from `TimeBox`'s
   measured rect so its *backing* lands on that edge, since the backing carries the border.
@@ -2348,6 +2421,11 @@ Six traps, all of which have cost time:
   `SolarSystem.paused`, `ui_paused` and `get_tree().paused` every iteration. And a craft is moved
   by the satellite node's own `_process`, so the tree has to really process frames — calling
   `Game._process()` by hand advances the simulation but never the craft.
+- **A stylebox can be right on a control that never draws it.** `get_theme_stylebox("panel")` on
+  a plain `Control` returns an error-pink fallback rather than null, so an assertion about a
+  page's background passes on a box nobody renders. `verify_menu_palette` reads the backing
+  `Panel` where there is one, the control's own box where the control is a `PanelContainer`,
+  `TabContainer` or `Panel`, and otherwise records the page as drawing itself.
 
 Godot's string formatting has no `%e` or `%g`. Use `%f`, `str()` or `Units.format_si`.
 

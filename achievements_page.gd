@@ -17,11 +17,11 @@ extends Control
 ## asteroid, a pandemic and a war on you, and naming them in advance turns each one from an event
 ## into a countdown.
 
-const EARNED_COLOR:   Color = Color(0.62, 0.86, 0.68)
-const PENDING_COLOR:  Color = Color(0.74, 0.78, 0.88)
-const LOCKED_COLOR:   Color = Color(0.46, 0.48, 0.56)
-const NOTE_COLOR:     Color = Color(0.58, 0.64, 0.78)
-const HEADING_COLOR:  Color = Color(0.70, 0.82, 1.0)
+const EARNED_COLOR:   Color = UIPalette.GOOD
+const PENDING_COLOR:  Color = UIPalette.TEXT
+const LOCKED_COLOR:   Color = UIPalette.DISABLED
+const NOTE_COLOR:     Color = UIPalette.DIM
+const HEADING_COLOR:  Color = UIPalette.HEADER
 
 var _list: VBoxContainer = null
 var _summary: Label = null
@@ -51,6 +51,7 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Achievements"
 	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	col.add_child(title)
 
 	_summary = Label.new()

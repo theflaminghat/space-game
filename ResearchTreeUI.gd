@@ -12,6 +12,14 @@ const NODE_GAP_Y: float = 90.0
 ## Multiplier applied to every node's stored y so rows sit further apart vertically.
 const V_SPACING_MULT: float = 1.15
 
+## The three live states of a research node — open to take, being taken, taken — in the
+## palette's accents. The node's fill is the same colour darkened, so a tree reads as four
+## brightnesses of three hues rather than twelve unrelated colours. A locked node has no accent
+## at all: it is DISABLED, like everything else you cannot use yet.
+const STATE_AVAILABLE:   Color = UIPalette.POPULATION
+const STATE_RESEARCHING: Color = UIPalette.WARN
+const STATE_KNOWN:       Color = UIPalette.GOOD
+
 const TREE_LEFT_PAD: float = 40.0
 const TREE_TOP_PAD: float = 90.0
 const TREE_RIGHT_PAD: float = 360.0   # extra right scroll room so the last column
@@ -210,7 +218,7 @@ func _build_scene() -> void:
 	_info_desc = _make_label("", false, true)
 	_info_cost = _make_label("")
 	_info_boosts = _make_label("")
-	_info_boosts.add_theme_color_override("font_color", Color(1.0, 0.82, 0.22))
+	_info_boosts.add_theme_color_override("font_color", UIPalette.GOOD)
 
 	_progress_bar = ProgressBar.new()
 	_progress_bar.min_value = 0
@@ -228,13 +236,13 @@ func _build_scene() -> void:
 	_pause_btn.hide()
 
 	_info_unlocks = _make_label("", false, true)
-	_info_unlocks.add_theme_color_override("font_color", Color(0.70, 0.85, 1.00))
+	_info_unlocks.add_theme_color_override("font_color", UIPalette.HEADER)
 	_info_unlocks.add_theme_font_size_override("font_size", 12)
 
 	# What this node needs first — each prerequisite ticked or crossed by its own state, so a
 	# locked node shows at a glance exactly what is still standing in the way.
 	_info_prereqs = _make_label("", false, true)
-	_info_prereqs.add_theme_color_override("font_color", Color(0.95, 0.80, 0.55))
+	_info_prereqs.add_theme_color_override("font_color", UIPalette.WARN)
 	_info_prereqs.add_theme_font_size_override("font_size", 12)
 
 	text_box.add_child(_info_title)
@@ -277,7 +285,7 @@ func _build_scene() -> void:
 	sci_margin.add_theme_constant_override("margin_bottom", 4)
 	sci_panel.add_child(sci_margin)
 	_science_label = _make_label("Science: 0 FLOP", true)
-	_science_label.add_theme_color_override("font_color", Color(0.55, 0.85, 0.95))
+	_science_label.add_theme_color_override("font_color", UIPalette.SCIENCE)
 	sci_margin.add_child(_science_label)
 
 
@@ -416,7 +424,7 @@ func _create_node_button(node: ResearchNode, pos: Vector2) -> void:
 	queue_label.z_index = 10
 	queue_label.visible = false
 	var badge_bg := StyleBoxFlat.new()
-	badge_bg.bg_color = Color(0.0, 0.0, 0.0, 0.78)
+	badge_bg.bg_color = Color(UIPalette.SURFACE, 0.85)
 	badge_bg.set_corner_radius_all(4)
 	queue_label.add_theme_stylebox_override("normal", badge_bg)
 	btn.add_child(queue_label)
@@ -442,28 +450,28 @@ func _style_button(btn: Button, node: ResearchNode) -> void:
 
 	match node.state:
 		ResearchNode.State.LOCKED:
-			s.bg_color = Color(0.14, 0.14, 0.14)
-			s.border_color = Color(0.28, 0.28, 0.28)
-			btn.modulate = Color(0.62, 0.62, 0.62)
+			s.bg_color = UIPalette.RAISED
+			s.border_color = UIPalette.DISABLED
+			btn.modulate = UIPalette.DISABLED
 
 		ResearchNode.State.AVAILABLE:
-			s.bg_color = Color(0.12, 0.38, 0.70)
-			s.border_color = Color(0.55, 0.82, 1.0)
+			s.bg_color = STATE_AVAILABLE.darkened(0.55)
+			s.border_color = STATE_AVAILABLE
 			btn.modulate = Color.WHITE
 
 		ResearchNode.State.RESEARCHING:
-			s.bg_color = Color(0.45, 0.30, 0.02)
-			s.border_color = Color(1.0, 0.82, 0.18)
+			s.bg_color = STATE_RESEARCHING.darkened(0.65)
+			s.border_color = STATE_RESEARCHING
 			btn.modulate = Color.WHITE
 
 		ResearchNode.State.UNLOCKED:
-			s.bg_color = Color(0.06, 0.34, 0.14)
-			s.border_color = Color(0.25, 0.90, 0.45)
+			s.bg_color = STATE_KNOWN.darkened(0.70)
+			s.border_color = STATE_KNOWN
 			btn.modulate = Color.WHITE
 			# Known but with passes left: still green, because it IS known and everything it
 			# gates is open, but outlined in the available-blue to say there is more to take.
 			if node.has_next_level():
-				s.border_color = Color(0.55, 0.82, 1.0)
+				s.border_color = STATE_AVAILABLE
 
 	btn.add_theme_stylebox_override("normal", s)
 	btn.add_theme_stylebox_override("focus", s)
@@ -492,20 +500,20 @@ func _draw_connections() -> void:
 			var end: Vector2 = to_rect.position + Vector2(0.0, to_rect.size.y * 0.5)
 
 			var child_node: ResearchNode = ResearchTree.get_research_node(child_id)
-			var col: Color = Color(0.33, 0.33, 0.33)
+			var col: Color = UIPalette.DISABLED
 
 			if child_node.is_known():
 				# Both ends done — full green
-				col = Color(0.35, 0.92, 0.50, 0.90)
+				col = Color(STATE_KNOWN, 0.90)
 			elif child_node.state == ResearchNode.State.RESEARCHING:
-				col = Color(1.0, 0.78, 0.20, 0.95)
+				col = Color(STATE_RESEARCHING, 0.95)
 			elif child_node.state == ResearchNode.State.AVAILABLE:
-				col = Color(0.45, 0.78, 1.0, 0.95)
+				col = Color(STATE_AVAILABLE, 0.95)
 			elif node.is_known():
 				# Parent is done but child still needs other prerequisites —
 				# dim green so the line lights up along the numerical_methods
 				# path even when the child is waiting on a second prerequisite.
-				col = Color(0.25, 0.65, 0.35, 0.65)
+				col = Color(STATE_KNOWN.darkened(0.35), 0.65)
 
 			_draw_elbow_connection(start, end, col, LINE_WIDTH)
 
@@ -690,7 +698,7 @@ func _update_progress_bar() -> void:
 	if _selected_id == ResearchTree.active_research.id:
 		_progress_bar.value = ResearchTree.active_research.progress * 100.0
 		# Grey the bar out while the job is held so a frozen progress reads as paused, not stalled.
-		_progress_bar.modulate = Color(0.6, 0.6, 0.68) if ResearchTree.research_paused else Color.WHITE
+		_progress_bar.modulate = UIPalette.DISABLED if ResearchTree.research_paused else Color.WHITE
 
 	if _conn_layer != null and is_instance_valid(_conn_layer):
 		_conn_layer.queue_redraw()

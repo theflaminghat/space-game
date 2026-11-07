@@ -6,17 +6,21 @@ signal node_selected(node_id: String)
 const NODE_SIZE: Vector2 = Vector2(170, 72)
 const LINE_WIDTH: float = 3.0
 
-const COLOR_BG: Color = Color(0.08, 0.09, 0.11)
-const COLOR_GRID: Color = Color(1, 1, 1, 0.04)
-const COLOR_LINE: Color = Color(0.75, 0.8, 0.9, 0.35)
-const COLOR_LINE_HIGHLIGHT: Color = Color(0.9, 0.95, 1.0, 0.85)
+const COLOR_BG: Color = UIPalette.SURFACE
+const COLOR_GRID: Color = UIPalette.GRID
+const COLOR_LINE: Color = Color(UIPalette.TEXT, 0.35)
+const COLOR_LINE_HIGHLIGHT: Color = Color(UIPalette.TITLE, 0.85)
 
-const COLOR_LOCKED: Color = Color(0.20, 0.22, 0.26)
-const COLOR_AVAILABLE: Color = Color(0.20, 0.34, 0.52)
-const COLOR_UNLOCKED: Color = Color(0.18, 0.48, 0.26)
-const COLOR_SELECTED: Color = Color(0.78, 0.68, 0.22)
-const COLOR_TEXT: Color = Color(0.95, 0.97, 1.0)
-const COLOR_SUBTEXT: Color = Color(0.82, 0.86, 0.92)
+## The node states, in the same three accents the research tree uses for the same three things —
+## a trait you cannot take, one you can, one you have — plus the amber a selection is tinted
+## towards. The fills are the accents darkened, so the two trees read as one family. Darkening
+## is a method call, which a const initialiser cannot make, so these are static vars.
+static var COLOR_LOCKED: Color = UIPalette.RAISED
+static var COLOR_AVAILABLE: Color = UIPalette.POPULATION.darkened(0.55)
+static var COLOR_UNLOCKED: Color = UIPalette.GOOD.darkened(0.55)
+static var COLOR_SELECTED: Color = UIPalette.WARN
+const COLOR_TEXT: Color = UIPalette.TITLE
+const COLOR_SUBTEXT: Color = UIPalette.TEXT
 
 var tree_data: Dictionary = {}
 var unlocked: Dictionary = {}
@@ -190,7 +194,7 @@ func _draw_nodes() -> void:
 
 func _draw_node_box(rect: Rect2, color: Color) -> void:
 	draw_rect(rect, color, true)
-	draw_rect(rect, Color(1, 1, 1, 0.12), false, 2.0)
+	draw_rect(rect, Color(UIPalette.TITLE, 0.25), false, 2.0)
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:

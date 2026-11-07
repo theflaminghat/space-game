@@ -11,6 +11,11 @@ extends PanelContainer
 
 signal production_changed(jobs: Array)
 
+## The two directions of a manufacturing line, in the palette's own: what it eats, and what it
+## makes. The build panel draws a structure's intake and its output in the same two.
+const COL_IN:  Color = UIPalette.MATTER
+const COL_OUT: Color = UIPalette.GOOD
+
 const PLANETS: Array = [
 	"Earth", "Mercury", "Venus", "Mars",
 	"Jupiter", "Saturn", "Uranus", "Neptune",
@@ -144,14 +149,14 @@ func set_job_status(job_id: int, running: bool, missing_input: String = "") -> v
 		return
 	if running:
 		lbl.text    = "● running"
-		lbl.modulate = Color(0.35, 0.80, 0.45)
+		lbl.modulate = UIPalette.GOOD
 	elif missing_input == "capacity":
 		# Throttled by the world's Manufacturing Capacity, not an input shortage.
 		lbl.text    = "⚙ capacity limited"
-		lbl.modulate = Color(0.70, 0.80, 0.95)
+		lbl.modulate = UIPalette.HEADER
 	else:
 		lbl.text    = "⚠ missing: %s" % missing_input if missing_input != "" else "⚠ stalled"
-		lbl.modulate = Color(0.90, 0.55, 0.20)
+		lbl.modulate = UIPalette.BAD
 
 ## Point the panel at a body (planet OR moon).  New jobs target it and the list shows only its
 ## jobs; called by Game when the active planet tab changes.
@@ -199,7 +204,7 @@ func _update_mc_label() -> void:
 			Units.format_si(used, ""), Units.format_si(cap, "")])
 	_mc_label.text = ("  ·  ".join(parts) + "  work/day") if not parts.is_empty() else "No capacity here"
 	# Tint amber when any pool's demand outstrips it (jobs drawing on it are throttled).
-	_mc_label.modulate = Color(0.95, 0.65, 0.30) if over else Color(0.70, 0.80, 0.95)
+	_mc_label.modulate = UIPalette.WARN if over else UIPalette.HEADER
 
 ## "Draws 3.4 G work/day from Arable" — the line's own demand and the pool it competes in.
 func _fmt_work(recipe: Dictionary, rate: float) -> String:
@@ -288,7 +293,7 @@ func _build_ui() -> void:
 	_inputs_label = Label.new()
 	_inputs_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_inputs_label.add_theme_font_size_override("font_size", 11)
-	_inputs_label.modulate = Color(0.80, 0.65, 0.55)
+	_inputs_label.modulate = COL_IN
 	_inputs_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	form.add_child(_inputs_label)
 
@@ -296,7 +301,7 @@ func _build_ui() -> void:
 	_outputs_label = Label.new()
 	_outputs_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_outputs_label.add_theme_font_size_override("font_size", 11)
-	_outputs_label.modulate = Color(0.55, 0.85, 0.60)
+	_outputs_label.modulate = COL_OUT
 	_outputs_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	form.add_child(_outputs_label)
 
@@ -324,7 +329,7 @@ func _build_ui() -> void:
 	_mc_label = Label.new()
 	_mc_label.add_theme_font_size_override("font_size", 11)
 	_mc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_mc_label.modulate = Color(0.70, 0.80, 0.95)
+	_mc_label.modulate = UIPalette.HEADER
 	jobs_header.add_child(_mc_label)
 
 	var scroll := ScrollContainer.new()
@@ -348,7 +353,7 @@ func _form_label(parent: Control, text: String) -> void:
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 12)
-	lbl.modulate = Color(0.75, 0.75, 0.75)
+	lbl.modulate = UIPalette.TEXT
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	parent.add_child(lbl)
 
@@ -538,9 +543,7 @@ func _add_job_row(job: Dictionary) -> void:
 	var handle := PanelContainer.new()
 	handle.mouse_default_cursor_shape = Control.CURSOR_MOVE
 	handle.tooltip_text = "Drag to reorder — lines higher up are served first"
-	var hstyle := StyleBoxFlat.new()
-	hstyle.bg_color = Color(0.16, 0.19, 0.26, 1.0)
-	hstyle.set_corner_radius_all(3)
+	var hstyle := UIPalette.inset()
 	hstyle.content_margin_left = 6
 	hstyle.content_margin_right = 4
 	hstyle.content_margin_top = 2
@@ -555,7 +558,7 @@ func _add_job_row(job: Dictionary) -> void:
 	var grip := Label.new()
 	grip.text = "⣿"
 	grip.add_theme_font_size_override("font_size", 11)
-	grip.modulate = Color(0.45, 0.50, 0.60)
+	grip.modulate = UIPalette.DISABLED
 	grip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header_row.add_child(grip)
 
@@ -564,7 +567,7 @@ func _add_job_row(job: Dictionary) -> void:
 	var rank_lbl := Label.new()
 	rank_lbl.text = "%d." % (_priority_of(job_id) + 1)
 	rank_lbl.add_theme_font_size_override("font_size", 11)
-	rank_lbl.modulate = Color(0.55, 0.60, 0.70)
+	rank_lbl.modulate = UIPalette.DIM
 	rank_lbl.custom_minimum_size = Vector2(22, 0)
 	rank_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	header_row.add_child(rank_lbl)
@@ -579,7 +582,7 @@ func _add_job_row(job: Dictionary) -> void:
 	var status_lbl := Label.new()
 	status_lbl.text = "…"
 	status_lbl.add_theme_font_size_override("font_size", 10)
-	status_lbl.modulate = Color(0.55, 0.55, 0.55)
+	status_lbl.modulate = UIPalette.DISABLED
 	status_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header_row.add_child(status_lbl)
 	_job_status_labels[job_id] = status_lbl
@@ -603,7 +606,7 @@ func _add_job_row(job: Dictionary) -> void:
 	var slider_lbl := Label.new()
 	slider_lbl.text = "Rate:"
 	slider_lbl.add_theme_font_size_override("font_size", 11)
-	slider_lbl.modulate = Color(0.70, 0.70, 0.70)
+	slider_lbl.modulate = UIPalette.TEXT
 	slider_row.add_child(slider_lbl)
 
 	var slider := HSlider.new()
@@ -638,7 +641,7 @@ func _add_job_row(job: Dictionary) -> void:
 		var out_lbl := Label.new()
 		out_lbl.text = "→ " + _fmt_flow(recipe.get("outputs", {}), rate * norm)
 		out_lbl.add_theme_font_size_override("font_size", 10)
-		out_lbl.modulate = Color(0.55, 0.85, 0.60)
+		out_lbl.modulate = COL_OUT
 		card.add_child(out_lbl)
 		_job_out_labels[job_id] = out_lbl
 
@@ -647,14 +650,14 @@ func _add_job_row(job: Dictionary) -> void:
 		var work_lbl := Label.new()
 		work_lbl.text = _fmt_work(recipe, rate)
 		work_lbl.add_theme_font_size_override("font_size", 10)
-		work_lbl.modulate = Color(0.62, 0.72, 0.88)
+		work_lbl.modulate = UIPalette.HEADER
 		card.add_child(work_lbl)
 		_job_work_labels[job_id] = work_lbl
 
 		var in_lbl := Label.new()
 		in_lbl.text = "← " + _fmt_flow(recipe.get("inputs", {}), rate * norm)
 		in_lbl.add_theme_font_size_override("font_size", 10)
-		in_lbl.modulate = Color(0.80, 0.65, 0.55)
+		in_lbl.modulate = COL_IN
 		card.add_child(in_lbl)
 		_job_in_labels[job_id] = in_lbl
 

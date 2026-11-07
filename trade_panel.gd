@@ -19,10 +19,10 @@ class_name TradePanel
 ## Game.trade_holdings, and Game.propose_trade re-validates before anything is spent.
 
 const PANEL_SIZE: Vector2 = Vector2(1060, 700)
-const COL_DIM: Color = Color(0.62, 0.68, 0.80)
-const COL_GOOD: Color = Color(0.45, 0.88, 0.55)
-const COL_WARN: Color = Color(1.0, 0.82, 0.35)
-const COL_BAD: Color = Color(0.95, 0.45, 0.40)
+const COL_DIM: Color = UIPalette.DIM
+const COL_GOOD: Color = UIPalette.GOOD
+const COL_WARN: Color = UIPalette.WARN
+const COL_BAD: Color = UIPalette.BAD
 
 var _game: Node = null
 var _star: String = ""
@@ -308,7 +308,7 @@ func _build_ui() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.0, 0.0, 0.0, 0.55)
+	backdrop.color = UIPalette.SHADE
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP     # modal: the map behind takes no input
 	root.add_child(backdrop)
@@ -319,11 +319,7 @@ func _build_ui() -> void:
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = PANEL_SIZE
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.05, 0.06, 0.10, 0.98)
-	sb.border_color = Color(0.35, 0.45, 0.65)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(4)
+	var sb := UIPalette.panel()
 	sb.set_content_margin_all(16)
 	panel.add_theme_stylebox_override("panel", sb)
 	centre.add_child(panel)

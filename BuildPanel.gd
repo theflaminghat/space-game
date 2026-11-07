@@ -30,9 +30,18 @@ var _families: Dictionary = {}
 ## so infrastructure is raised by the hundred and one-at-a-time clicking is not a real option.
 const BATCH_SIZES: Array = [1, 10, 100]
 
-# Cost-label colours: normal grey when affordable, darker when the player is short.
-const COST_OK:    Color = Color(0.75, 0.75, 0.75)
-const COST_SHORT: Color = Color(0.42, 0.42, 0.42)
+# Cost-label colours: ordinary text when affordable, dimmed when the player is short.
+const COST_OK:    Color = UIPalette.TEXT
+const COST_SHORT: Color = UIPalette.DISABLED
+
+## What each line under a structure is ABOUT, so the card can be read down a column instead of
+## sentence by sentence. The hues are the palette's and are shared with everywhere else they
+## appear; what they mean here is this panel's business.
+const LINE_MAKES: Color = UIPalette.POPULATION   ## what it produces
+const LINE_BURNS: Color = UIPalette.MATTER       ## what it consumes to run
+const LINE_DOES:  Color = UIPalette.COLONIES     ## what else it changes
+const LINE_HOLDS: Color = UIPalette.GOOD         ## what it adds to this world's storage
+const LINE_DRAWS: Color = UIPalette.LIFE         ## the power it draws just to stand
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -165,11 +174,11 @@ class SupplyBar extends Control:
 		var w: float = size.x
 		var y: float = (size.y - TRACK_H) * 0.5
 		# Unlit remainder: standing buildings the player has deliberately switched off.
-		draw_rect(Rect2(0.0, y, w, TRACK_H), Color(0.18, 0.20, 0.26))
+		draw_rect(Rect2(0.0, y, w, TRACK_H), UIPalette.RAISED)
 		if running > 0.0:
-			draw_rect(Rect2(0.0, y, w * running, TRACK_H), Color(0.35, 0.80, 0.40))
+			draw_rect(Rect2(0.0, y, w * running, TRACK_H), UIPalette.GOOD)
 		if starved > 0.0:
-			draw_rect(Rect2(w * running, y, w * starved, TRACK_H), Color(0.88, 0.30, 0.28))
+			draw_rect(Rect2(w * running, y, w * starved, TRACK_H), UIPalette.BAD)
 
 
 ## Set the green/red split and annotate the count label when some are starved.  `supply` is the
@@ -186,12 +195,12 @@ func _apply_supply(bar: Control, lbl: Label, act: int, count: int, supply: float
 	if act > 0 and running_n < act:
 		# Say what is actually running, and colour the readout to match the bar.
 		lbl.text = "%d of %d / %d" % [running_n, act, count]
-		lbl.modulate = Color(0.88, 0.45, 0.40)
+		lbl.modulate = UIPalette.BAD
 		lbl.tooltip_text = "%d switched on, %d running — the rest are short of inputs" % [
 			act, running_n]
 	else:
 		lbl.text = "%d / %d" % [act, count]
-		lbl.modulate = Color(0.85, 0.90, 0.70)
+		lbl.modulate = UIPalette.VALUE
 		lbl.tooltip_text = ""
 
 func _populate(catalog: Array) -> void:
@@ -239,7 +248,7 @@ func _add_category_header(cat: String, count: int) -> void:
 		str(BuildingData.CATEGORY_LABELS.get(cat, cat.capitalize())), count]
 	header.add_theme_font_size_override("font_size", 12)
 	header.add_theme_color_override("font_color",
-		BuildingData.CATEGORY_COLORS.get(cat, Color(0.70, 0.75, 0.85)))
+		BuildingData.CATEGORY_COLORS.get(cat, UIPalette.TEXT))
 	build_list.add_child(header)
 
 ## One building FAMILY as a single collapsible card: the header carries the base name and the
@@ -269,13 +278,13 @@ func _add_building_card(base_name: String, tiers: Array) -> void:
 	toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toggle.text = "▶  " + base_name
 	if not any_live:
-		toggle.modulate = Color(0.55, 0.55, 0.55)
+		toggle.modulate = UIPalette.DISABLED
 	header.add_child(toggle)
 
 	var badge := Label.new()
 	badge.text = "+%d⚙" % queued
 	badge.add_theme_font_size_override("font_size", 11)
-	badge.modulate = Color(0.95, 0.70, 0.30)
+	badge.modulate = UIPalette.WARN
 	badge.tooltip_text = "Under construction (limited by this world's manufacturing capacity)"
 	badge.visible = queued > 0
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -336,7 +345,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		var lvl := Label.new()
 		lvl.text = "Level %d" % int(building.get("level", 1))
 		lvl.add_theme_font_size_override("font_size", 11)
-		lvl.modulate = Color(0.85, 0.88, 0.95) if not dimmed else Color(0.50, 0.50, 0.55)
+		lvl.modulate = UIPalette.TITLE if not dimmed else UIPalette.DISABLED
 		lvl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		head.add_child(lvl)
 		count_label.text = str(count)
@@ -352,13 +361,13 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	var prod_text := _format_production(building.get("production", {}))
 	if prod_text != "":
 		parent.add_child(_detail_label(prod_text,
-			Color(0.50, 0.72, 0.95) if not dimmed else Color(0.45, 0.45, 0.45)))
+			LINE_MAKES if not dimmed else UIPalette.DISABLED))
 
 	# Fuel draw - this plant only runs while the world can feed it.
 	var fuel_text := _format_consumption(building.get("consumption", {}))
 	if fuel_text != "":
 		var fuel_label := _detail_label(fuel_text,
-			Color(0.95, 0.70, 0.35) if not dimmed else Color(0.50, 0.45, 0.40))
+			LINE_BURNS if not dimmed else UIPalette.DISABLED)
 		fuel_label.tooltip_text = "Burns fuel from this world's inventory; a plant that can't be fed throttles."
 		parent.add_child(fuel_label)
 
@@ -366,19 +375,19 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	var eff_text := _format_effects(building)
 	if eff_text != "":
 		parent.add_child(_detail_label(eff_text,
-			Color(0.45, 0.85, 0.80) if not dimmed else Color(0.40, 0.45, 0.45)))
+			LINE_DOES if not dimmed else UIPalette.DISABLED))
 
 	# A structure there can only be one of says so.  Without this the row is a line of greyed-out
 	# "+" buttons, which reads as "you cannot afford this" when it means "you already have it".
 	var cap_label: Label = null
 	if max_count > 0:
-		cap_label = _detail_label(_cap_text(max_count, room, count), Color(0.72, 0.80, 0.90))
+		cap_label = _detail_label(_cap_text(max_count, room, count), UIPalette.TEXT)
 		parent.add_child(cap_label)
 
 	# Storage contribution (storage buildings only).
 	var stor: Dictionary = building.get("storage", {})
 	if not stor.is_empty():
-		parent.add_child(_detail_label(_format_storage(stor), Color(0.55, 0.90, 0.65)))
+		parent.add_child(_detail_label(_format_storage(stor), LINE_HOLDS))
 
 	# Cost, or the research still standing in the way.
 	if available:
@@ -402,13 +411,13 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	elif count == 0:
 		var req_id: String = building.get("requires", "")
 		parent.add_child(_detail_label(
-			"Requires: " + req_id.replace("_", " ").capitalize(), Color(0.55, 0.55, 0.55)))
+			"Requires: " + req_id.replace("_", " ").capitalize(), UIPalette.DISABLED))
 
 	# Running cost — nothing operates for free, so this is what each switched-on copy draws.
 	var upkeep: float = float(building.get("upkeep", 0.0))
 	if upkeep > 0.0:
 		var up_lbl := _detail_label("Draws %s/day to run" % Units.format_si(upkeep, "J"),
-			Color(0.85, 0.70, 0.95) if not dimmed else Color(0.45, 0.42, 0.50))
+			LINE_DRAWS if not dimmed else UIPalette.DISABLED)
 		up_lbl.tooltip_text = "Maintenance power, drawn while the building is switched on"
 		parent.add_child(up_lbl)
 
@@ -425,7 +434,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		act_name.text = "Active"
 		act_name.add_theme_font_size_override("font_size", 10)
 		act_name.custom_minimum_size = Vector2(52, 0)
-		act_name.modulate = Color(0.70, 0.75, 0.85)
+		act_name.modulate = UIPalette.TEXT
 		act_row.add_child(act_name)
 		active_slider = HSlider.new()
 		active_slider.min_value = 0
@@ -439,7 +448,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		active_lbl.add_theme_font_size_override("font_size", 10)
 		active_lbl.custom_minimum_size = Vector2(72, 0)
 		active_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		active_lbl.modulate = Color(0.85, 0.90, 0.70)
+		active_lbl.modulate = UIPalette.VALUE
 		act_row.add_child(active_lbl)
 		parent.add_child(act_row)
 
@@ -474,7 +483,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	build_lbl.text = "Build"
 	build_lbl.add_theme_font_size_override("font_size", 10)
 	build_lbl.custom_minimum_size = Vector2(52, 0)
-	build_lbl.modulate = Color(0.70, 0.75, 0.85)
+	build_lbl.modulate = UIPalette.TEXT
 	build_row.add_child(build_lbl)
 	for n: int in BATCH_SIZES:
 		var b := Button.new()
@@ -492,7 +501,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 	dem_lbl.text = "Demolish"
 	dem_lbl.add_theme_font_size_override("font_size", 10)
 	dem_lbl.custom_minimum_size = Vector2(52, 0)
-	dem_lbl.modulate = Color(0.70, 0.75, 0.85)
+	dem_lbl.modulate = UIPalette.TEXT
 	dem_row.add_child(dem_lbl)
 	for n: int in BATCH_SIZES:
 		var b := Button.new()
@@ -514,7 +523,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		up_lbl.text = "Upgrade"
 		up_lbl.add_theme_font_size_override("font_size", 10)
 		up_lbl.custom_minimum_size = Vector2(52, 0)
-		up_lbl.modulate = Color(0.70, 0.75, 0.85)
+		up_lbl.modulate = UIPalette.TEXT
 		up_row.add_child(up_lbl)
 		var up_cost: Dictionary = building.get("upgrade_cost", {})
 		var tip: String = "Retrofit into %s. Each costs the difference: %s" % [

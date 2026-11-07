@@ -22,6 +22,10 @@ signal star_focus_requested(star_name: String)
 
 # ── Scale ──────────────────────────────────────────────────────────────────────
 ## The run's first year (the game starts on 1 January 1945): the left edge of the axis.
+## The line marking the present, on the ruler and down the cards. The palette's green; here it
+## says "you are here" rather than "this reading is good".
+const COL_NOW: Color = UIPalette.GOOD
+
 const START_YEAR: int = 1945
 ## The right edge: heat death, ~10^100 years out, when the last black holes have evaporated and
 ## nothing is left to do work.  The figure the run-end screen quotes (see VOICE.md).
@@ -348,15 +352,13 @@ func _make_card(ev: Dictionary, cx: float, cy: float, ch: float) -> void:
 					and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
 				star_focus_requested.emit(star)
 				accept_event())
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.12, 0.12, 0.17)
+	var style := UIPalette.inset()
 	style.border_color = col
 	style.set_border_width_all(int(BORDER))
-	style.set_corner_radius_all(4)
 	# A projection is not a record.  Drawn hollow and dimmed so a glance down the axis separates
 	# what happened from what is merely expected, without having to read the dates.
 	if bool(ev.get("forecast", false)):
-		style.bg_color = Color(0.09, 0.09, 0.13, 0.85)
+		style.bg_color = Color(UIPalette.SURFACE, 0.85)
 		style.border_color = Color(col.r, col.g, col.b, 0.55)
 		panel.modulate = Color(1.0, 1.0, 1.0, 0.82)
 	panel.add_theme_stylebox_override("panel", style)
@@ -370,8 +372,6 @@ func _make_card(ev: Dictionary, cx: float, cy: float, ch: float) -> void:
 	var header_pc := PanelContainer.new()
 	var hstyle := StyleBoxFlat.new()
 	hstyle.bg_color = col.darkened(0.30)
-	hstyle.corner_radius_top_left  = 4
-	hstyle.corner_radius_top_right = 4
 	header_pc.add_theme_stylebox_override("panel", hstyle)
 	var year_lbl := Label.new()
 	year_lbl.text = fmt_year(float(ev["year"]))
@@ -395,7 +395,7 @@ func _make_card(ev: Dictionary, cx: float, cy: float, ch: float) -> void:
 	var title_lbl := Label.new()
 	title_lbl.text = str(ev.get("title", ""))
 	title_lbl.add_theme_font_size_override("font_size", TITLE_FONT)
-	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	title_lbl.add_theme_color_override("font_color", UIPalette.TITLE)
 	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title_lbl.max_lines_visible = TITLE_LINES
 	title_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -406,7 +406,7 @@ func _make_card(ev: Dictionary, cx: float, cy: float, ch: float) -> void:
 		var desc_lbl := Label.new()
 		desc_lbl.text = desc
 		desc_lbl.add_theme_font_size_override("font_size", DESC_FONT)
-		desc_lbl.add_theme_color_override("font_color", Color(0.70, 0.70, 0.78))
+		desc_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 		desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		desc_lbl.max_lines_visible = DESC_LINES
 		desc_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -424,7 +424,7 @@ func _draw() -> void:
 	for t: Dictionary in ticks():
 		if bool(t["label"]):
 			draw_line(Vector2(float(t["x"]), 0.0), Vector2(float(t["x"]), h),
-				Color(0.45, 0.47, 0.60, 0.10), 1.0)
+				UIPalette.GRID, 1.0)
 	# Connectors: straight down from the ruler at the event's own year, to the top of its card.  A
 	# card pushed in from the edge doesn't sit under its date, so the line bends onto its nearest
 	# top corner.  Only cards with a clear path get one: a line to a card stacked under others would
@@ -446,7 +446,7 @@ func _draw() -> void:
 			draw_line(Vector2(yx, cy - 8.0), Vector2(cx, cy), col, 1.5)
 	# The present.
 	var cur_x: float = year_to_x(_current_year)
-	draw_line(Vector2(cur_x, 0.0), Vector2(cur_x, h), Color(0.20, 0.90, 0.35, 0.55), 2.0)
+	draw_line(Vector2(cur_x, 0.0), Vector2(cur_x, h), Color(COL_NOW, 0.55), 2.0)
 
 
 ## The whole axis is on screen, so the mouse wheel scrolls down through the rows of cards.

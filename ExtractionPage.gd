@@ -50,7 +50,7 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Extraction"
 	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(0.9, 0.94, 1.0))
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(title)
 
@@ -64,7 +64,7 @@ func _ready() -> void:
 
 	_header = Label.new()
 	_header.add_theme_font_size_override("font_size", 11)
-	_header.add_theme_color_override("font_color", Color(0.62, 0.70, 0.84))
+	_header.add_theme_color_override("font_color", UIPalette.HEADER)
 	_header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(_header)
 	vbox.add_child(HSeparator.new())
@@ -123,7 +123,7 @@ func _rebuild(rows: Array) -> void:
 		var val := Label.new()
 		val.add_theme_font_size_override("font_size", 11)
 		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		val.add_theme_color_override("font_color", Color(0.85, 0.90, 0.70))
+		val.add_theme_color_override("font_color", UIPalette.VALUE)
 		head.add_child(val)
 		line.add_child(head)
 		_values[compound] = val

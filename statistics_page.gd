@@ -2,14 +2,17 @@
 ## Replaces the old scrollable-sections layout with a StatsGraph and toggle buttons.
 extends Control
 
+## The seven series, and the colour each one is drawn in WHEREVER it is named. These were this
+## page's own until the rest of the UI was brought onto them: science was green here, one blue
+## in the research tree, another in the build panel and a third on the timeline.
 const GRAPH_METRICS: Array = [
-	{"key": "current_population", "label": "Population",  "color": Color(0.3,  0.7,  1.0),  "type": "int"},
-	{"key": "compute_rate",       "label": "Compute",     "color": Color(0.9,  0.8,  0.2),  "type": "float"},
-	{"key": "science",            "label": "Science",     "color": Color(0.4,  0.9,  0.6),  "type": "float"},
-	{"key": "minerals",           "label": "Minerals",    "color": Color(0.9,  0.5,  0.2),  "type": "float"},
-	{"key": "energy",             "label": "Energy",      "color": Color(0.9,  0.9,  0.3),  "type": "float"},
-	{"key": "colony_count",       "label": "Colonies",    "color": Color(0.5,  0.9,  0.8),  "type": "int"},
-	{"key": "life_expectancy",    "label": "Life Expectancy", "color": Color(0.95, 0.6,  0.75), "type": "int"},
+	{"key": "current_population", "label": "Population",  "color": UIPalette.POPULATION, "type": "int"},
+	{"key": "compute_rate",       "label": "Compute",     "color": UIPalette.COMPUTE,    "type": "float"},
+	{"key": "science",            "label": "Science",     "color": UIPalette.SCIENCE,    "type": "float"},
+	{"key": "minerals",           "label": "Minerals",    "color": UIPalette.MATTER,     "type": "float"},
+	{"key": "energy",             "label": "Energy",      "color": UIPalette.ENERGY,     "type": "float"},
+	{"key": "colony_count",       "label": "Colonies",    "color": UIPalette.COLONIES,   "type": "int"},
+	{"key": "life_expectancy",    "label": "Life Expectancy", "color": UIPalette.LIFE,   "type": "int"},
 ]
 
 var _stats: Dictionary = {}
@@ -50,13 +53,14 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "Statistics"
 	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 
 	_year_label = Label.new()
 	_year_label.text = "Year 2026"
 	_year_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_year_label.add_theme_color_override("font_color", Color(0.5, 0.9, 0.5))
+	_year_label.add_theme_color_override("font_color", UIPalette.GOOD)
 	header.add_child(_year_label)
 
 	# ── Series toggle buttons ─────────────────────────────────────────────────

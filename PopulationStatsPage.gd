@@ -54,7 +54,7 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Population"
 	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(0.9, 0.94, 1.0))
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	vbox.add_child(title)
 	vbox.add_child(HSeparator.new())
 
@@ -68,7 +68,7 @@ func _ready() -> void:
 		var k := Label.new()
 		k.text = key
 		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		k.add_theme_color_override("font_color", Color(0.72, 0.78, 0.9))
+		k.add_theme_color_override("font_color", UIPalette.TEXT)
 		grid.add_child(k)
 		var v := Label.new()
 		v.text = "-"
@@ -90,13 +90,13 @@ func _build_bio_ui(parent: Control) -> void:
 	var title := Label.new()
 	title.text = "Applied genomics"
 	title.add_theme_font_size_override("font_size", 13)
-	title.add_theme_color_override("font_color", Color(0.72, 0.90, 0.80))
+	title.add_theme_color_override("font_color", UIPalette.HEADER)
 	title.tooltip_text = "Synthetic Biology writes a sequence from first principles rather than waiting for a colony to work one out. It does not deliver people: the sequence is information, and getting it into a living population is still a couple of generations of germ-line work."
 	_bio_box.add_child(title)
 
 	_bio_status = Label.new()
 	_bio_status.add_theme_font_size_override("font_size", 11)
-	_bio_status.modulate = Color(0.75, 0.82, 0.95)
+	_bio_status.modulate = UIPalette.TEXT
 	_bio_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_bio_box.add_child(_bio_status)
 
@@ -151,17 +151,17 @@ func set_stats(data: Dictionary) -> void:
 	if not inhabited:
 		for k: String in ["Growth rate", "Life expectancy", "Happiness"]:
 			_set_row(k, "—")
-			_tint(k, Color(0.6, 0.6, 0.66))
+			_tint(k, UIPalette.DIM)
 		return
 	var growth: float = float(data.get("growth", 0.0))
 	_set_row("Growth rate", "%+.2f%%/yr" % growth)
-	_tint("Growth rate", Color(0.5, 0.9, 0.6) if growth >= 0.0 else Color(0.95, 0.55, 0.4))
+	_tint("Growth rate", UIPalette.GOOD if growth >= 0.0 else UIPalette.BAD)
 	_set_row("Life expectancy", "%d yr" % int(round(float(data.get("life_expectancy", 0.0)))))
-	_tint("Life expectancy", Color(1, 1, 1))
+	_tint("Life expectancy", UIPalette.VALUE)
 	var happy: float = float(data.get("happiness", 0.0))
 	_set_row("Happiness", "%d%%" % int(round(happy)))
-	_tint("Happiness", Color(0.5, 0.9, 0.6) if happy >= 60.0 \
-		else (Color(0.9, 0.8, 0.4) if happy >= 35.0 else Color(0.95, 0.55, 0.4)))
+	_tint("Happiness", UIPalette.GOOD if happy >= 60.0 \
+		else (UIPalette.WARN if happy >= 35.0 else UIPalette.BAD))
 
 func _tint(key: String, color: Color) -> void:
 	if _value_labels.has(key):

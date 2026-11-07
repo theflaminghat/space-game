@@ -71,13 +71,13 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Inventory"
 	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(0.9, 0.94, 1.0))
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	vbox.add_child(title)
 	vbox.add_child(HSeparator.new())
 
 	_empty = Label.new()
 	_empty.text = "No materials stored on this body yet — build mines to extract ore."
-	_empty.add_theme_color_override("font_color", Color(0.6, 0.66, 0.76))
+	_empty.add_theme_color_override("font_color", UIPalette.DIM)
 	_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(_empty)
 
@@ -180,7 +180,7 @@ func _rebuild(mined: Dictionary, inv: Dictionary) -> void:
 			var dash := Label.new()
 			dash.text = "    —"
 			dash.add_theme_font_size_override("font_size", 11)
-			dash.add_theme_color_override("font_color", Color(0.45, 0.45, 0.50))
+			dash.add_theme_color_override("font_color", UIPalette.DISABLED)
 			content.add_child(dash)
 			continue
 		for pair: Array in items:
@@ -197,11 +197,11 @@ func _refresh_keep_button(compound: String) -> void:
 	var lim: float = float(_keeps.get(compound, -1.0))
 	if lim < 0.0:
 		btn.text = "Keep all"
-		btn.modulate = Color(0.60, 0.65, 0.72)
+		btn.modulate = UIPalette.DIM
 		btn.tooltip_text = "No limit — nothing is discarded automatically"
 	else:
 		btn.text = "Keep %s" % Units.format_si(lim, "g")
-		btn.modulate = Color(0.55, 0.80, 0.95)
+		btn.modulate = UIPalette.HEADER
 		btn.tooltip_text = "Holding at most %s of %s here; the surplus is discarded as it arrives" % [
 			Units.format_si(lim, "g"), compound]
 
@@ -246,7 +246,7 @@ func _ensure_keep_dialog() -> void:
 
 	_keep_amount = Label.new()
 	_keep_amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_keep_amount.add_theme_color_override("font_color", Color(0.60, 0.85, 0.95))
+	_keep_amount.add_theme_color_override("font_color", UIPalette.HEADER)
 	box.add_child(_keep_amount)
 
 	_keep_unlimited = CheckBox.new()
@@ -304,7 +304,7 @@ func _ensure_dump_dialog() -> void:
 	_dump_dialog = ConfirmationDialog.new()
 	_dump_dialog.title = "Discard material"
 	_dump_dialog.ok_button_text = "Dump"
-	_dump_dialog.get_ok_button().modulate = Color(0.95, 0.60, 0.55)
+	_dump_dialog.get_ok_button().modulate = UIPalette.BAD
 	# Keep the window at the size we ask for instead of resizing itself around its contents.
 	_dump_dialog.wrap_controls = false
 	_dump_dialog.min_size = DUMP_DIALOG_SIZE
@@ -335,7 +335,7 @@ func _ensure_dump_dialog() -> void:
 
 	_dump_amount = Label.new()
 	_dump_amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_dump_amount.add_theme_color_override("font_color", Color(0.95, 0.70, 0.55))
+	_dump_amount.add_theme_color_override("font_color", UIPalette.BAD)
 	box.add_child(_dump_amount)
 
 	_dump_dialog.add_child(box)
@@ -381,7 +381,7 @@ func _make_row(compound: String, total: float, rate: float) -> HBoxContainer:
 	var formula_lbl := Label.new()
 	formula_lbl.text = compound
 	formula_lbl.add_theme_font_size_override("font_size", 10)
-	formula_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.80))
+	formula_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 	left.add_child(formula_lbl)
 	row.add_child(left)
 
@@ -389,13 +389,13 @@ func _make_row(compound: String, total: float, rate: float) -> HBoxContainer:
 	var val_lbl := Label.new()
 	val_lbl.text = Units.format_si(total, "g")
 	val_lbl.add_theme_font_size_override("font_size", 12)
-	val_lbl.add_theme_color_override("font_color", Color(0.85, 0.90, 0.70))
+	val_lbl.add_theme_color_override("font_color", UIPalette.VALUE)
 	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(val_lbl)
 	var rate_lbl := Label.new()
 	rate_lbl.text = "+%s/s" % Units.format_si(rate, "g")
 	rate_lbl.add_theme_font_size_override("font_size", 10)
-	rate_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 0.55))
+	rate_lbl.add_theme_color_override("font_color", UIPalette.GOOD)
 	rate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(rate_lbl)
 	row.add_child(right)
@@ -407,7 +407,7 @@ func _make_row(compound: String, total: float, rate: float) -> HBoxContainer:
 	dump_btn.add_theme_font_size_override("font_size", 10)
 	dump_btn.custom_minimum_size = Vector2(44, 0)
 	dump_btn.tooltip_text = "Discard stored %s — choose how much, then confirm" % compound
-	dump_btn.modulate = Color(0.95, 0.60, 0.55)
+	dump_btn.modulate = UIPalette.BAD
 	dump_btn.pressed.connect(func() -> void: _open_dump_dialog(compound))
 
 	# Keep: a standing limit rather than a one-off discard.  Anything arriving above it is

@@ -71,6 +71,7 @@ func _build_ui() -> void:
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(680, 800)
+	panel.add_theme_stylebox_override("panel", UIPalette.panel())
 	center.add_child(panel)
 
 	var vbox := VBoxContainer.new()
@@ -81,6 +82,9 @@ func _build_ui() -> void:
 	var header := Label.new()
 	header.text = "EXTINCTION"
 	header.add_theme_font_size_override("font_size", 54)
+	# The two colours on this screen that are NOT the palette's, and the only two anywhere.
+	# UIPalette.BAD is the colour of a reading going the wrong way, which is not what this is:
+	# this is the end of the run, and the one moment the UI is allowed to raise its voice.
 	header.add_theme_color_override("font_color", Color(0.88, 0.12, 0.12))
 	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(header)
@@ -89,7 +93,7 @@ func _build_ui() -> void:
 	_year_label = Label.new()
 	_year_label.text = "Final Year: 2026"
 	_year_label.add_theme_font_size_override("font_size", 17)
-	_year_label.add_theme_color_override("font_color", Color(0.62, 0.65, 0.78))
+	_year_label.add_theme_color_override("font_color", UIPalette.DIM)
 	_year_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(_year_label)
 
@@ -108,7 +112,7 @@ func _build_ui() -> void:
 	_desc_label = Label.new()
 	_desc_label.text = ""
 	_desc_label.add_theme_font_size_override("font_size", 13)
-	_desc_label.add_theme_color_override("font_color", Color(0.74, 0.77, 0.86))
+	_desc_label.add_theme_color_override("font_color", UIPalette.TEXT)
 	_desc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_desc_label.custom_minimum_size = Vector2(560, 72)
@@ -144,7 +148,7 @@ func _build_ui() -> void:
 	var graph_label := Label.new()
 	graph_label.text = "Run History"
 	graph_label.add_theme_font_size_override("font_size", 13)
-	graph_label.add_theme_color_override("font_color", Color(0.58, 0.62, 0.74))
+	graph_label.add_theme_color_override("font_color", UIPalette.DIM)
 	graph_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(graph_label)
 
@@ -214,7 +218,7 @@ func _build_epilogue() -> void:
 		var lbl := Label.new()
 		lbl.text = line_text
 		lbl.add_theme_font_size_override("font_size", 28)
-		lbl.add_theme_color_override("font_color", Color(0.86, 0.88, 0.95))
+		lbl.add_theme_color_override("font_color", UIPalette.TITLE)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.modulate = Color(1, 1, 1, 0)
 		vbox.add_child(lbl)
@@ -334,12 +338,12 @@ func _fill_record(summary: Array) -> void:
 		var k := Label.new()
 		k.text = str(row[0])
 		k.add_theme_font_size_override("font_size", 12)
-		k.add_theme_color_override("font_color", Color(0.52, 0.56, 0.68))
+		k.add_theme_color_override("font_color", UIPalette.DIM)
 		_record_grid.add_child(k)
 		var v := Label.new()
 		v.text = str(row[1])
 		v.add_theme_font_size_override("font_size", 12)
-		v.add_theme_color_override("font_color", Color(0.80, 0.84, 0.92))
+		v.add_theme_color_override("font_color", UIPalette.TEXT)
 		_record_grid.add_child(v)
 
 

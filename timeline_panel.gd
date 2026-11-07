@@ -32,12 +32,13 @@ func _ready() -> void:
 	var title_lbl := Label.new()
 	title_lbl.text = "Historical Timeline"
 	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.add_theme_color_override("font_color", UIPalette.TITLE)
 	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title_lbl)
 
 	_year_label = Label.new()
 	_year_label.text = "Year: 1945"
-	_year_label.add_theme_color_override("font_color", Color(0.20, 0.90, 0.35))
+	_year_label.add_theme_color_override("font_color", TimelineCanvas.COL_NOW)
 	header.add_child(_year_label)
 
 	# ── Category legend ───────────────────────────────────────────────────────
@@ -64,7 +65,7 @@ func _ready() -> void:
 		var lbl := Label.new()
 		lbl.text = cat_name.capitalize()
 		lbl.add_theme_font_size_override("font_size", 11)
-		lbl.add_theme_color_override("font_color", Color(0.80, 0.80, 0.85))
+		lbl.add_theme_color_override("font_color", UIPalette.TEXT)
 		legend.add_child(lbl)
 
 		var spacer := Control.new()

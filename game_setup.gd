@@ -23,7 +23,7 @@ func _ready() -> void:
 
 func _build() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color(0.03, 0.04, 0.07)
+	bg.color = UIPalette.SURFACE
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
@@ -34,11 +34,8 @@ func _build() -> void:
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(PANEL_W, 0)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.06, 0.08, 0.12, 0.98)
-	sb.border_color = Color(0.35, 0.45, 0.62)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(4)
+	var sb := UIPalette.panel()
+	sb.bg_color = UIPalette.RAISED   # a panel standing on the full-screen SURFACE behind it
 	sb.set_content_margin_all(22)
 	panel.add_theme_stylebox_override("panel", sb)
 	centre.add_child(panel)
@@ -50,12 +47,13 @@ func _build() -> void:
 	var title := Label.new()
 	title.text = "New Run"
 	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	box.add_child(title)
 
 	var blurb := Label.new()
 	blurb.text = "Run parameters. All but the opening doctrine are fixed once the run begins."
 	blurb.add_theme_font_size_override("font_size", 12)
-	blurb.modulate = Color(0.62, 0.70, 0.85)
+	blurb.modulate = UIPalette.DIM
 	box.add_child(blurb)
 	box.add_child(HSeparator.new())
 
@@ -106,7 +104,7 @@ func _add_option(parent: Control, opt: Dictionary) -> void:
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.custom_minimum_size = Vector2(PANEL_W - 60, 0)
 	help.add_theme_font_size_override("font_size", 11)
-	help.modulate = Color(0.60, 0.68, 0.82)
+	help.modulate = UIPalette.DIM
 	parent.add_child(help)
 
 	_opts[id] = dd

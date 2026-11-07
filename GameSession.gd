@@ -1,6 +1,29 @@
 extends Node
 
 var current_save_path: String = ""
+
+## One theme for the whole game. Without it every control nobody had styled by hand was drawn in
+## Godot's default grey — every button, dropdown, field, list, slider and scrollbar (see
+## UIPalette.theme). It lives here only because this is the autoload that is always up before
+## any scene is, so it covers the start menu and the setup screen as much as the game.
+##
+## Set on the root window AND on every Control island as it appears, because a theme flows down
+## the Control tree and a CanvasLayer is not a Control: the whole UI hangs off CanvasLayers, so
+## the window's own theme reaches almost none of it. Hooking node_added rather than sweeping
+## once means a dialog built later — the save dialog, the encyclopedia, a trade offer — is
+## dressed on the way in instead of having to remember to ask.
+var ui_theme: Theme = null
+
+func _ready() -> void:
+	ui_theme = UIPalette.theme()
+	get_tree().root.theme = ui_theme
+	get_tree().node_added.connect(_dress_node)
+	UIPalette.dress(get_tree().root, ui_theme)
+
+func _dress_node(n: Node) -> void:
+	if n is Control and not (n.get_parent() is Control) and (n as Control).theme == null:
+		(n as Control).theme = ui_theme
+
 var should_load_on_start: bool = false
 
 ## Choices made on the setup screen, read once by Game.start_new_game.  Kept as a plain

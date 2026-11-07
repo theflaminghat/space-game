@@ -28,11 +28,11 @@ const KEY_PAN_PER_SEC: float = 0.9
 const HEX_INSET: float = 0.92
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-const COL_BG:        Color = Color(0.03, 0.035, 0.06, 1.0)
+const COL_BG:        Color = UIPalette.SURFACE
 const COL_EMPTY:     Color = Color(0.30, 0.36, 0.50)   # tinted by stellar density
-const COL_SETTLED:   Color = Color(0.30, 0.90, 0.55)   # tinted by colonised fraction
-const COL_EDGE:      Color = Color(0.42, 0.52, 0.72, 0.25)
-const COL_SELECTED:  Color = Color(1.00, 0.88, 0.40)
+const COL_SETTLED:   Color = UIPalette.GOOD            # tinted by colonised fraction
+const COL_EDGE:      Color = Color(UIPalette.BORDER, 0.25)
+const COL_SELECTED:  Color = UIPalette.WARN
 const COL_HOVER:     Color = Color(1.00, 1.00, 1.00)   # white edge under the cursor
 const COL_SOL:       Color = Color(1.00, 1.00, 0.70)
 const COL_CENTRE:    Color = Color(1.00, 0.82, 0.45)
@@ -143,7 +143,7 @@ func _build_info_panel() -> void:
 		var k := Label.new()
 		k.text = key
 		k.add_theme_font_size_override("font_size", 11)
-		k.add_theme_color_override("font_color", Color(0.62, 0.70, 0.84))
+		k.add_theme_color_override("font_color", UIPalette.HEADER)
 		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(k)
 		var v := Label.new()
@@ -156,7 +156,7 @@ func _build_info_panel() -> void:
 	var hint := Label.new()
 	hint.text = "Click another region to inspect it."
 	hint.add_theme_font_size_override("font_size", 10)
-	hint.add_theme_color_override("font_color", Color(0.50, 0.56, 0.68))
+	hint.add_theme_color_override("font_color", UIPalette.DIM)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(hint)
 
@@ -183,7 +183,7 @@ func _draw() -> void:
 	var game := get_tree().current_scene
 	if game == null or not game.has_method("galaxy_region_grid"):
 		draw_string(_font, Vector2(14, 26), "Galaxy map — no data source",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.9, 0.6, 0.6))
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, UIPalette.BAD)
 		return
 
 	var s: float = _scale_px()
@@ -242,11 +242,11 @@ func _draw() -> void:
 
 	_draw_scale_bar(s)
 	draw_string(_font, Vector2(14, 24), "Galaxy", HORIZONTAL_ALIGNMENT_LEFT, -1, 16,
-		Color(0.90, 0.95, 1.0))
+		UIPalette.TITLE)
 	draw_string(_font, Vector2(14, 42),
 		"%s ly across · click a region · WASD or drag to pan · scroll zoom" % Units.format_si(
 			DEFAULT_VIEW_LY * 2.0 / _zoom, ""),
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.55, 0.62, 0.75))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UIPalette.DIM)
 
 
 ## A calibrated bar rounded to a 1/2/5×10ⁿ length, so distances read off the map directly.
@@ -261,7 +261,7 @@ func _draw_scale_bar(s: float) -> void:
 	var bar_px: float = bar_ly * s
 	var y: float = size.y - 22.0
 	var x0: float = 16.0
-	var c := Color(0.9, 0.95, 1.0, 0.85)
+	var c := Color(UIPalette.TITLE, 0.85)
 	draw_line(Vector2(x0, y), Vector2(x0 + bar_px, y), c, 2.0)
 	draw_line(Vector2(x0, y - 4), Vector2(x0, y + 4), c, 2.0)
 	draw_line(Vector2(x0 + bar_px, y - 4), Vector2(x0 + bar_px, y + 4), c, 2.0)

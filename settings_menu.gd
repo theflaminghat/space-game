@@ -33,7 +33,7 @@ func _build_ui() -> void:
 	# Click-blocker overlay so the game isn't interactive while settings are open
 	var overlay := ColorRect.new()
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.color = Color(0.0, 0.0, 0.0, 0.72)
+	overlay.color = UIPalette.SHADE
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(overlay)
 

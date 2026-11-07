@@ -67,7 +67,7 @@ func _ready() -> void:
 	hide()
 
 	var shade := ColorRect.new()
-	shade.color = Color(0.0, 0.0, 0.0, 0.55)
+	shade.color = UIPalette.SHADE
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP   # nothing behind it is clickable
 	add_child(shade)
@@ -77,6 +77,9 @@ func _ready() -> void:
 	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	panel.custom_minimum_size = Vector2(440, 420)
+	# Built in code, so it is not swept by Game._restyle_menu_panels — but it is still a menu,
+	# and without this it opens as the default theme's translucent grey over a navy UI.
+	panel.add_theme_stylebox_override("panel", UIPalette.panel())
 	add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -91,12 +94,13 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Save game"
 	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	vb.add_child(title)
 
 	var hint := Label.new()
 	hint.text = "Name this save, or pick one below to overwrite."
 	hint.add_theme_font_size_override("font_size", 11)
-	hint.modulate = Color(0.72, 0.76, 0.84)
+	hint.modulate = UIPalette.DIM
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vb.add_child(hint)
 
@@ -158,14 +162,14 @@ func _refresh_state() -> void:
 	_save_btn.disabled = clean == ""
 	if clean == "":
 		_status.text = "Enter a name."
-		_status.modulate = Color(0.85, 0.70, 0.45)
+		_status.modulate = UIPalette.WARN
 		return
 	if FileAccess.file_exists(slot_path(clean)):
 		_status.text = "\"%s\" already exists — saving replaces it." % clean
-		_status.modulate = Color(0.92, 0.78, 0.45)
+		_status.modulate = UIPalette.WARN
 	else:
 		_status.text = "Will be saved as \"%s\"." % clean
-		_status.modulate = Color(0.70, 0.80, 0.95)
+		_status.modulate = UIPalette.HEADER
 
 
 func _on_save() -> void:
@@ -180,6 +184,6 @@ func _on_save() -> void:
 ## player can try another name rather than being told nothing and assuming it worked.
 func set_result(ok: bool, message: String) -> void:
 	_status.text = message
-	_status.modulate = Color(0.55, 0.85, 0.60) if ok else Color(0.95, 0.50, 0.40)
+	_status.modulate = UIPalette.GOOD if ok else UIPalette.BAD
 	if ok:
 		close()

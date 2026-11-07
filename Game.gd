@@ -1572,7 +1572,7 @@ func _ready() -> void:
 	_setup_realtime_clock()
 	_setup_body_picker()
 	_setup_planet_tabs()
-	_sharpen_menu_panels()
+	_restyle_menu_panels()
 
 	if GameSession.should_load_on_start and GameSession.current_save_path != "":
 		load_game(GameSession.current_save_path)
@@ -1648,7 +1648,7 @@ func _make_res_box(key: String, title: String) -> Control:
 	var t := Label.new()
 	t.text = title
 	t.add_theme_font_size_override("font_size", 10)
-	t.add_theme_color_override("font_color", Color(0.62, 0.70, 0.84))
+	t.add_theme_color_override("font_color", UIPalette.HEADER)
 	_pin_label_width(t)
 	col.add_child(t)
 	var value := Label.new()
@@ -1659,7 +1659,7 @@ func _make_res_box(key: String, title: String) -> Control:
 	var rate := Label.new()
 	rate.text = ""
 	rate.add_theme_font_size_override("font_size", 10)
-	rate.add_theme_color_override("font_color", Color(0.45, 0.85, 0.55))
+	rate.add_theme_color_override("font_color", UIPalette.GOOD)
 	_pin_label_width(rate)
 	col.add_child(rate)
 	_res_boxes[key] = {"value": value, "rate": rate}
@@ -1705,7 +1705,7 @@ func _setup_realtime_clock() -> void:
 	_realtime_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_realtime_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_realtime_label.custom_minimum_size = Vector2(96, 0)
-	_realtime_label.add_theme_color_override("font_color", Color(0.8, 0.86, 0.95))
+	_realtime_label.add_theme_color_override("font_color", UIPalette.TEXT)
 	top_bar.add_child(_realtime_label)
 	# Small trailing spacer so the clock sits a little left of the top-bar's right edge.
 	var pad := Control.new()
@@ -2032,15 +2032,11 @@ func _happiness(pop: float, k: float) -> float:
 
 func _setup_bar_backgrounds() -> void:
 	var canvas := $main_ui
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.06, 0.10, 1.0)
 	# Square. These two run into the window's own corners and into each other, and a 4px radius
 	# on an edge that is flush with the screen reads as a nick out of the frame rather than as a
 	# rounded panel. The menu panels are square too now, so the whole UI is one shape
-	# (_sharpen_menu_panels, PanelBackground.attach).
-	style.set_corner_radius_all(0)
-	style.set_border_width_all(1)
-	style.border_color = Color(0.35, 0.45, 0.65, 1.0)   # opaque border
+	# (_restyle_menu_panels, PanelBackground.attach), and one colour (UIPalette.panel).
+	var style := UIPalette.panel()
 
 	_top_bar_bg = Panel.new()
 	_top_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2067,17 +2063,21 @@ func _setup_bar_backgrounds() -> void:
 		frame.offset_left = BAR_BG_PAD.x
 		frame.offset_top = BAR_BG_PAD.y
 
-	# Stand the full-area pages clear of the sidebar's border instead of ON it. They are
-	# siblings of the button strip in an HBox, so what separates them is the container's own
-	# separation — 4px from the default theme, while the strip's BACKING, which is the thing
-	# carrying the border, hangs 6px further right than the strip itself. Every page therefore
-	# opened 2px inside the sidebar's outline, over the top of it. Spaced by the backing's
-	# overhang plus the margin the rest of the chrome keeps, so the page starts clear of the
-	# border by the same gap the planet panel keeps from the window edge.
+	# Land every full-area page's left border exactly ON the sidebar's right one, so the two
+	# share a single line and the page reads as part of the same sheet rather than as a card
+	# floating beside it.
+	#
+	# They are siblings of the button strip in an HBox, so what separates them is the
+	# container's own separation — 4px from the default theme, while the strip's BACKING, which
+	# is the thing carrying the border, hangs BAR_BG_PAD.x further right than the strip itself.
+	# At 4 a page opened 2px INSIDE the sidebar's outline, drawn over the middle of it; at the
+	# overhang exactly it would start one pixel past the outline, and now that every page draws
+	# an outline of its own that would be two parallel lines a pixel apart. One less than the
+	# overhang puts the page's own left border on the sidebar's right border, and since the
+	# backings sit at index 0 the page is drawn over it: one line, in one colour.
 	var pages := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2") as Control
 	if pages:
-		pages.add_theme_constant_override("separation",
-			int(BAR_BG_PAD.x + PLANET_PANEL_GAP))
+		pages.add_theme_constant_override("separation", int(BAR_BG_PAD.x) - 1)
 
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
 	var side_strip := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2/sidebar") as Control
@@ -2140,9 +2140,10 @@ func _match_sidebar_to_clock(side_strip: Control) -> void:
 	if want > 0.0 and absf(side_strip.custom_minimum_size.x - want) > 0.5:
 		side_strip.custom_minimum_size.x = want
 
-## Gap between a floating panel and the chrome it sits inside.  One number for every side: the
-## planet panel hangs 8px off the right edge of the window, so it hangs 8px below the top bar
-## too, and the full-area pages stand 8px clear of the sidebar's border.
+## Gap between a FLOATING panel and the chrome it sits inside: the planet panel hangs 8px off
+## the right edge of the window, so it hangs 8px below the top bar too. The full-area pages are
+## not floating — they are the other half of the sidebar and meet its border (see the separation
+## set in _setup_bar_backgrounds).
 const PLANET_PANEL_GAP: float = 8.0
 
 ## Sit the panels that float at the right of the screen below the top bar, by the same margin
@@ -2173,31 +2174,70 @@ func _layout_menu_panels() -> void:
 	if launch_panel != null and absf(launch_panel.offset_top - top) > 0.5:
 		launch_panel.offset_top = top
 
-## Square corners on every menu panel, to match the chrome they open inside.
+## Paint every menu panel in the palette, to match the chrome they open inside.
 ##
-## They are a mix of three things: a plain Control with a PanelBackground behind it (square by
-## construction), a PanelContainer, and the planet panel's TabContainer. The last two take their
-## backing from Godot's default theme, which rounds it by 3px — a radius on panels that butt up
-## against a square frame, and against each other inside the tabs.
+## A menu carries its backing one of three ways: a plain Control with a PanelBackground behind
+## it (the palette's already, since that is where the palette came from), a PanelContainer, or
+## the planet panel's TabContainer. The last two took theirs from Godot's DEFAULT theme — a
+## translucent grey, rounded by 3px, with no border — so the planet panel and the launch panel
+## were grey boxes you could read the asteroid belt through, sitting inside a square navy frame,
+## while the pages one button away were opaque navy with a light outline.
 ##
-## Swept off the sidebar's own children rather than listed, so a page added later is square
+## Only the colours and the corners are written. The margins come back untouched (see
+## UIPalette.repaint), because the theme's stylebox is what spaces each panel's children and a
+## fresh one would collapse the padding on every page at once.
+##
+## Only the pages that actually DRAW a panel are touched, because a plain Control draws nothing
+## of its own: get_theme_stylebox on one hands back an error-pink fallback rather than null, so
+## repainting it would write a box nobody renders and read like success. The four views that
+## paint themselves in _draw — the star map, the galaxy map, the galaxy debug grid and the
+## evolution tree — take their colour from UIPalette directly.
+##
+## A page gets the border; a page INSIDE one does not. The tab pages are given a CLEAR fill
+## rather than the surface, because each one covers the tab container's content area exactly —
+## painted, they hid the wrapper's outline behind themselves, and bordered they would have drawn
+## that outline six times, once per tab. The wrapper behind them is what the player sees.
+##
+## Swept off the sidebar's own children rather than listed, so a page added later is painted
 ## without anything being remembered here; the tab pages are swept the same way, since each is
 ## its own panel inside the wrapper.
-func _sharpen_menu_panels() -> void:
-	var panels: Array[Control] = []
+func _restyle_menu_panels() -> void:
+	var outer: Array[Control] = []
 	if sidebar:
 		for n: Node in sidebar.get_children():
 			# Everything in the HBox except the button strip itself is a page.
 			if n is Control and str(n.name) != "sidebar":
-				panels.append(n as Control)
+				outer.append(n as Control)
 	if _planet_tabs != null:
-		panels.append(_planet_tabs)
-		for n: Node in _planet_tabs.get_children():
-			if n is Control:
-				panels.append(n as Control)
-	panels.append(launch_panel)
-	for p: Control in panels:
-		PanelBackground.sharpen(p)
+		outer.append(_planet_tabs)
+	outer.append(launch_panel)
+	for p: Control in outer:
+		if p is PanelContainer or p is TabContainer or p is Panel:
+			UIPalette.repaint(p, "panel", UIPalette.SURFACE, true)
+
+	if _planet_tabs == null:
+		return
+	for n: Node in _planet_tabs.get_children():
+		if n is Control:
+			UIPalette.repaint(n as Control, "panel", UIPalette.CLEAR, false)
+	# The tab buttons along the top. The open one is the page's own surface, so the two read as
+	# one sheet with a notch in it; the shut ones are a step up, the same RAISED a box inside a
+	# page is drawn in. Godot's default theme makes all three a grey that matches nothing else.
+	UIPalette.repaint(_planet_tabs, "tab_selected", UIPalette.SURFACE, false)
+	UIPalette.repaint(_planet_tabs, "tab_unselected", UIPalette.RAISED, false)
+	UIPalette.repaint(_planet_tabs, "tab_hovered", UIPalette.RAISED, false)
+	# ONE outline around the whole wrapper rather than two boxes stacked. The tab strip and the
+	# page below it are drawn from separate styleboxes, so the strip carries the top, left and
+	# right of the frame and the page carries the left, right and bottom; the seam where the two
+	# meet is the one edge neither draws, and the open tab joins to its page across it. The
+	# strip's stylebox is built rather than repainted: the default theme's is a StyleBoxEmpty,
+	# which has nothing to recolour.
+	var strip := UIPalette.panel()
+	strip.border_width_bottom = 0
+	_planet_tabs.add_theme_stylebox_override("tabbar_background", strip)
+	var body := _planet_tabs.get_theme_stylebox("panel") as StyleBoxFlat
+	if body != null:
+		body.border_width_top = 0
 
 ## Place `bg` around `bar` with BAR_BG_PAD of margin, trimmed to whatever of that fits in `view`.
 func _fit_bar_bg(bg: Panel, bar: Rect2, view: Rect2) -> void:
@@ -11339,8 +11379,8 @@ func _update_hud() -> void:
 		"%s / %s" % [Units.format_si(raw_load, "W"), Units.format_si(_cached_radiator_cap, "W")], "")
 	# Amber the Heat box when the grid is radiating-limited (draw over capacity).
 	if _res_boxes.has("heat"):
-		(_res_boxes["heat"]["value"] as Label).modulate = Color(0.95, 0.65, 0.30) \
-			if _thermal_ratio > 1.02 else Color(1.0, 1.0, 1.0)
+		(_res_boxes["heat"]["value"] as Label).modulate = UIPalette.WARN \
+			if _thermal_ratio > 1.02 else UIPalette.VALUE
 	# Science lives on the research panel now, not the top bar.
 	if research_ui and research_ui.has_method("set_science"):
 		research_ui.set_science(
@@ -12197,15 +12237,10 @@ func _show_event_card(ev: Dictionary) -> void:
 
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(320, 0)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.10, 0.10, 0.14, 0.95)
+	var style := UIPalette.inset()
 	style.border_color = cat_col
 	style.set_border_width_all(2)
 	style.border_width_left = 4
-	style.corner_radius_top_left     = 4
-	style.corner_radius_top_right    = 4
-	style.corner_radius_bottom_left  = 4
-	style.corner_radius_bottom_right = 4
 	card.add_theme_stylebox_override("panel", style)
 
 	var hbox := HBoxContainer.new()
@@ -12241,14 +12276,14 @@ func _show_event_card(ev: Dictionary) -> void:
 	var title_lbl := Label.new()
 	title_lbl.text = ev.get("title", "")
 	title_lbl.add_theme_font_size_override("font_size", 14)
-	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	title_lbl.add_theme_color_override("font_color", UIPalette.TITLE)
 	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	txt_vbox.add_child(title_lbl)
 
 	var desc_lbl := Label.new()
 	desc_lbl.text = ev.get("desc", "")
 	desc_lbl.add_theme_font_size_override("font_size", 11)
-	desc_lbl.add_theme_color_override("font_color", Color(0.68, 0.68, 0.76))
+	desc_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	txt_vbox.add_child(desc_lbl)
 
@@ -12257,7 +12292,7 @@ func _show_event_card(ev: Dictionary) -> void:
 	dismiss.text = "×"
 	dismiss.flat = true
 	dismiss.add_theme_font_size_override("font_size", 16)
-	dismiss.add_theme_color_override("font_color", Color(0.55, 0.55, 0.65))
+	dismiss.add_theme_color_override("font_color", UIPalette.DISABLED)
 	dismiss.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	dismiss.pressed.connect(card.queue_free)
 	hbox.add_child(dismiss)

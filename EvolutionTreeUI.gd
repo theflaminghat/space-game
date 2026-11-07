@@ -91,8 +91,8 @@ func _build_info_panel() -> void:
 	_info.offset_bottom = 0.0
 	_info.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.07, 0.09, 0.13, 0.96)
-	sb.border_color = Color(0.30, 0.40, 0.55)
+	sb.bg_color = UIPalette.SURFACE
+	sb.border_color = UIPalette.BORDER
 	sb.set_border_width_all(1)
 	sb.set_content_margin_all(8)
 	_info.add_theme_stylebox_override("panel", sb)
@@ -104,12 +104,12 @@ func _build_info_panel() -> void:
 
 	_info_title = Label.new()
 	_info_title.add_theme_font_size_override("font_size", 13)
-	_info_title.modulate = Color(0.90, 0.93, 1.00)
+	_info_title.modulate = UIPalette.TITLE
 	box.add_child(_info_title)
 
 	_info_sub = Label.new()
 	_info_sub.add_theme_font_size_override("font_size", 10)
-	_info_sub.modulate = Color(0.62, 0.70, 0.85)
+	_info_sub.modulate = UIPalette.DIM
 	box.add_child(_info_sub)
 
 	_info_body = Label.new()

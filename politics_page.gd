@@ -60,7 +60,7 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "Politics & Policy"
 	title.add_theme_font_size_override("font_size", 18)
-	title.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	vbox.add_child(title)
 
 	# Live effect summary, computed from the current policy state.
@@ -119,13 +119,13 @@ func _build_policy_row(parent: VBoxContainer, policy: Dictionary) -> void:
 	var name_lbl := Label.new()
 	name_lbl.text = policy["name"]
 	name_lbl.add_theme_font_size_override("font_size", 13)
-	name_lbl.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	name_lbl.add_theme_color_override("font_color", UIPalette.TITLE)
 	text_col.add_child(name_lbl)
 
 	var desc_lbl := Label.new()
 	desc_lbl.text = policy["desc"]
 	desc_lbl.add_theme_font_size_override("font_size", 11)
-	desc_lbl.add_theme_color_override("font_color", Color(0.62, 0.62, 0.70))
+	desc_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text_col.add_child(desc_lbl)
 
@@ -153,7 +153,7 @@ func _build_policy_row(parent: VBoxContainer, policy: Dictionary) -> void:
 		val_lbl.text = _fmt_slider_value(float(policy["default"]), unit)
 		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		val_lbl.add_theme_font_size_override("font_size", 12)
-		val_lbl.add_theme_color_override("font_color", Color(0.90, 0.90, 1.0))
+		val_lbl.add_theme_color_override("font_color", UIPalette.VALUE)
 		slider_col.add_child(val_lbl)
 		_slider_labels[pid] = val_lbl
 		_slider_units[pid]  = unit
@@ -210,9 +210,7 @@ func _fmt_slider_value(value: float, unit: String) -> String:
 ## Build the "Current Effects" panel that shows the live policy multipliers.
 func _build_effects_summary(parent: VBoxContainer) -> void:
 	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.10, 0.11, 0.15)
-	style.set_corner_radius_all(4)
+	var style := UIPalette.inset()
 	style.set_content_margin_all(8)
 	panel.add_theme_stylebox_override("panel", style)
 	parent.add_child(panel)
@@ -224,7 +222,7 @@ func _build_effects_summary(parent: VBoxContainer) -> void:
 	var hdr := Label.new()
 	hdr.text = "CURRENT EFFECTS"
 	hdr.add_theme_font_size_override("font_size", 11)
-	hdr.add_theme_color_override("font_color", Color(0.70, 0.80, 0.95))
+	hdr.add_theme_color_override("font_color", UIPalette.HEADER)
 	box.add_child(hdr)
 
 	var rows: Array = [
@@ -247,7 +245,7 @@ func _build_effects_summary(parent: VBoxContainer) -> void:
 		name_lbl.text = r[1]
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_lbl.add_theme_font_size_override("font_size", 12)
-		name_lbl.add_theme_color_override("font_color", Color(0.80, 0.80, 0.88))
+		name_lbl.add_theme_color_override("font_color", UIPalette.TEXT)
 		row.add_child(name_lbl)
 
 		var val_lbl := Label.new()
@@ -282,11 +280,11 @@ func _set_effect(key: String, m: float, lower_is_better: bool) -> void:
 	var pct: int = int(round((m - 1.0) * 100.0))
 	lbl.text = "×%.2f  (%+d%%)" % [m, pct]
 	if pct == 0:
-		lbl.add_theme_color_override("font_color", Color(0.72, 0.72, 0.78))
+		lbl.add_theme_color_override("font_color", UIPalette.NEUTRAL)
 	else:
 		var beneficial: bool = (m < 1.0) if lower_is_better else (m > 1.0)
 		lbl.add_theme_color_override("font_color",
-			Color(0.45, 0.85, 0.55) if beneficial else Color(0.90, 0.55, 0.45))
+			UIPalette.GOOD if beneficial else UIPalette.BAD)
 
 ## Effect shown as a year delta (life expectancy): "+12 yr".  More is better.
 func _set_effect_years(key: String, years: float) -> void:
@@ -295,10 +293,10 @@ func _set_effect_years(key: String, years: float) -> void:
 		return
 	lbl.text = "%+d yr" % int(round(years))
 	if abs(years) < 0.5:
-		lbl.add_theme_color_override("font_color", Color(0.72, 0.72, 0.78))
+		lbl.add_theme_color_override("font_color", UIPalette.NEUTRAL)
 	else:
 		lbl.add_theme_color_override("font_color",
-			Color(0.45, 0.85, 0.55) if years > 0.0 else Color(0.90, 0.55, 0.45))
+			UIPalette.GOOD if years > 0.0 else UIPalette.BAD)
 
 ## Effect shown as a percentage where lower is better (existential risk): "18%".
 func _set_effect_pct(key: String, frac: float) -> void:
@@ -308,4 +306,4 @@ func _set_effect_pct(key: String, frac: float) -> void:
 	lbl.text = "%d%%" % int(round(frac * 100.0))
 	# Green when low, red when high.
 	lbl.add_theme_color_override("font_color",
-		Color(0.45, 0.85, 0.55).lerp(Color(0.90, 0.45, 0.40), clampf(frac / 0.5, 0.0, 1.0)))
+		UIPalette.GOOD.lerp(UIPalette.BAD, clampf(frac / 0.5, 0.0, 1.0)))

@@ -30,6 +30,12 @@ signal alloc_changed(track: String, pool: String, weight: float)
 ## matters is one weight against the others, and 100 against 100 is the same split as 1 against 1.
 const WEIGHT_MAX: float = 100.0
 
+## The two thinkers, in two of the palette's accents: the civilisation's own minds, and its
+## machines. Nothing says green is people — it says only that these are two different pools, and
+## that the colours saying so are the ones the rest of the UI already uses.
+const COL_HUMAN: Color = UIPalette.SCIENCE
+const COL_AI: Color = UIPalette.POPULATION
+
 var _human_lbl: Label = null
 var _ai_lbl: Label = null
 var _locked_lbl: Label = null
@@ -62,21 +68,22 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "Compute"
 	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	vb.add_child(title)
 
 	var pools := HBoxContainer.new()
 	pools.add_theme_constant_override("separation", 18)
 	vb.add_child(pools)
 	_human_lbl = Label.new()
-	_human_lbl.add_theme_color_override("font_color", Color(0.55, 0.85, 0.70))
+	_human_lbl.add_theme_color_override("font_color", COL_HUMAN)
 	pools.add_child(_human_lbl)
 	_ai_lbl = Label.new()
-	_ai_lbl.add_theme_color_override("font_color", Color(0.60, 0.75, 1.00))
+	_ai_lbl.add_theme_color_override("font_color", COL_AI)
 	pools.add_child(_ai_lbl)
 
 	_locked_lbl = Label.new()
 	_locked_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_locked_lbl.add_theme_color_override("font_color", Color(0.80, 0.65, 0.35))
+	_locked_lbl.add_theme_color_override("font_color", UIPalette.WARN)
 	_locked_lbl.text = "Forecasting needs Predictive Modeling. Until it is researched every " \
 		+ "FLOP goes to the tree, whatever these are set to."
 	vb.add_child(_locked_lbl)
@@ -92,7 +99,7 @@ func _build_ui() -> void:
 	_note_lbl = Label.new()
 	_note_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_note_lbl.add_theme_font_size_override("font_size", 11)
-	_note_lbl.add_theme_color_override("font_color", Color(0.65, 0.65, 0.72))
+	_note_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 	_note_lbl.text = "Foresight accumulates: a budget pushes its frontier outward and it stays " \
 		+ "there, while the present walks towards it — so a horizon held steady costs a year's " \
 		+ "worth of compute every year, and closes at a year per year once you stop paying. " \
@@ -122,7 +129,7 @@ func _build_row(track: String, label_text: String, note: String) -> void:
 	note_lbl.text = note
 	note_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	note_lbl.add_theme_font_size_override("font_size", 10)
-	note_lbl.add_theme_color_override("font_color", Color(0.60, 0.60, 0.68))
+	note_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 	box.add_child(note_lbl)
 
 	var sliders := {}
@@ -135,7 +142,7 @@ func _build_row(track: String, label_text: String, note: String) -> void:
 		tag.custom_minimum_size = Vector2(52, 0)
 		tag.add_theme_font_size_override("font_size", 11)
 		tag.add_theme_color_override("font_color",
-			Color(0.55, 0.85, 0.70) if pool == "human" else Color(0.60, 0.75, 1.00))
+			COL_HUMAN if pool == "human" else COL_AI)
 		row.add_child(tag)
 		var sl := HSlider.new()
 		sl.min_value = 0.0
@@ -148,7 +155,7 @@ func _build_row(track: String, label_text: String, note: String) -> void:
 
 	var share := Label.new()
 	share.add_theme_font_size_override("font_size", 11)
-	share.add_theme_color_override("font_color", Color(0.78, 0.80, 0.88))
+	share.add_theme_color_override("font_color", UIPalette.TEXT)
 	box.add_child(share)
 
 	_rows[track] = {"human": sliders["human"], "ai": sliders["ai"],
@@ -205,17 +212,17 @@ func set_state(state: Dictionary) -> void:
 		if not forecast:
 			sight.text = "%s of science" % Units.format_si(
 				float(row.get("science_rate", 0.0)), "FLOP/s")
-			sight.add_theme_color_override("font_color", Color(0.45, 0.75, 1.00))
+			sight.add_theme_color_override("font_color", UIPalette.SCIENCE)
 			continue
 		if not unlocked:
 			sight.text = "locked"
-			sight.add_theme_color_override("font_color", Color(0.60, 0.60, 0.66))
+			sight.add_theme_color_override("font_color", UIPalette.DISABLED)
 			continue
 		var h: float = float(row.get("horizon", 0.0))
 		var settles: float = float(row.get("settles", 0.0))
 		if h <= 0.0 and settles <= 0.0:
 			sight.text = "blind"
-			sight.add_theme_color_override("font_color", Color(0.80, 0.65, 0.35))
+			sight.add_theme_color_override("font_color", UIPalette.WARN)
 			continue
 		# Both numbers, because a stock that is still filling cannot be read from one of them:
 		# where the sight reaches now, and where this budget is taking it.
@@ -229,4 +236,4 @@ func set_state(state: Dictionary) -> void:
 				Units.format_si(h, "yr"), Units.format_si(settles, "yr")]
 		else:
 			sight.text = "sees %s — holding" % Units.format_si(h, "yr")
-		sight.add_theme_color_override("font_color", Color(0.95, 0.80, 0.45))
+		sight.add_theme_color_override("font_color", UIPalette.GOOD)

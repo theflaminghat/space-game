@@ -35,9 +35,9 @@ var _day_btns:     Array = []   # 42 Button nodes (6 weeks × 7 days)
 var _quality_fn: Callable = Callable()
 
 ## Worst-window and best-window tints the day colouring interpolates between.
-const COL_WORST: Color = Color(0.95, 0.35, 0.30)
-const COL_MID:   Color = Color(0.95, 0.80, 0.35)
-const COL_BEST:  Color = Color(0.40, 0.92, 0.50)
+const COL_WORST: Color = UIPalette.BAD
+const COL_MID:   Color = UIPalette.WARN
+const COL_BEST:  Color = UIPalette.GOOD
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ func _build_ui() -> void:
 		lbl.horizontal_alignment     = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.custom_minimum_size      = Vector2(32, 18)
 		lbl.add_theme_font_size_override("font_size", 10)
-		lbl.modulate                 = Color(0.65, 0.65, 0.65)
+		lbl.modulate                 = UIPalette.DIM
 		grid.add_child(lbl)
 
 	# 6 weeks × 7 days = 42 buttons
@@ -139,10 +139,10 @@ func _refresh_grid() -> void:
 		btn.text     = str(day)
 		btn.disabled = before_min
 		if is_sel:
-			btn.modulate = Color(0.35, 0.70, 1.00)
+			btn.modulate = UIPalette.POPULATION
 			btn.tooltip_text = ""
 		elif before_min:
-			btn.modulate = Color(0.40, 0.40, 0.40)
+			btn.modulate = UIPalette.DISABLED
 			btn.tooltip_text = ""
 		elif _quality_fn.is_valid():
 			# Offset is measured from the minimum (i.e. the current game date), which is exactly
@@ -153,7 +153,7 @@ func _refresh_grid() -> void:
 			btn.modulate = _quality_color(q)
 			btn.tooltip_text = "Launch window %d%%" % int(round(q * 100.0))
 		else:
-			btn.modulate = Color(1.00, 1.00, 1.00)
+			btn.modulate = UIPalette.VALUE
 			btn.tooltip_text = ""
 
 ## Red → amber → green across the window-quality range.  Two segments rather than one so the

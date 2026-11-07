@@ -111,7 +111,7 @@ func _open() -> void:
 func _mark_validity(item: TreeItem, id: String) -> void:
 	if _valid_ids.is_empty() or _valid_ids.has(id):
 		return
-	item.set_custom_color(0, Color(0.50, 0.52, 0.58))
+	item.set_custom_color(0, UIPalette.DISABLED)
 	item.set_selectable(0, false)
 	item.set_tooltip_text(0, "This mission cannot fly here")
 

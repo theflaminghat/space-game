@@ -29,12 +29,12 @@ func _draw() -> void:
 		return
 	var font := ThemeDB.fallback_font
 	var w: float = size.x
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.07, 0.08, 0.12, 0.95))
+	draw_rect(Rect2(Vector2.ZERO, size), UIPalette.SURFACE)
 
 	# The axis, from the start of the run to heat death.
 	var x0: float = canvas.year_to_x(TimelineCanvas.START_YEAR)
 	var x1: float = canvas.axis_end_x()
-	draw_line(Vector2(x0, BAR_Y), Vector2(x1, BAR_Y), Color(0.50, 0.50, 0.62, 0.9), 2.0)
+	draw_line(Vector2(x0, BAR_Y), Vector2(x1, BAR_Y), UIPalette.BORDER, 2.0)
 
 	# One tick per power of ten, evenly spaced; labels on the regular subset TimelineCanvas picks.
 	# Each label is centred on its tick, except the first and last, which are held inside the panel.
@@ -43,13 +43,13 @@ func _draw() -> void:
 		var lab: bool = bool(t["label"])
 		var th: float = 7.0 if lab else 3.0
 		draw_line(Vector2(x, BAR_Y - th), Vector2(x, BAR_Y + th),
-			Color(0.60, 0.60, 0.72, 0.9 if lab else 0.45), 1.5 if lab else 1.0)
+			Color(UIPalette.BORDER, 0.9 if lab else 0.45), 1.5 if lab else 1.0)
 		if lab:
 			var txt: String = str(t["text"])
 			var tw: float = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 			var lx: float = clampf(x - tw * 0.5, 2.0, w - tw - 2.0)
 			draw_string(font, Vector2(lx, LABEL_Y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
-				Color(0.66, 0.68, 0.80))
+				UIPalette.DIM)
 
 	# Each event: a dot on the axis and a stub down into the card area beneath.
 	var lay: Array = canvas.layout()
@@ -62,11 +62,11 @@ func _draw() -> void:
 
 	# The present, labelled on its own row.
 	var cx: float = canvas.year_to_x(canvas.current_year())
-	draw_line(Vector2(cx, NOW_Y + 4.0), Vector2(cx, HEIGHT), Color(0.20, 0.90, 0.35, 0.65), 2.0)
+	draw_line(Vector2(cx, NOW_Y + 4.0), Vector2(cx, HEIGHT), Color(TimelineCanvas.COL_NOW, 0.65), 2.0)
 	var now: String = TimelineCanvas.fmt_year(float(canvas.current_year()))
 	var nw: float = font.get_string_size(now, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 	draw_string(font, Vector2(clampf(cx - nw * 0.5, 2.0, w - nw - 2.0), NOW_Y), now,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.20, 0.90, 0.35))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TimelineCanvas.COL_NOW)
 
 
 ## The wheel over the axis scrolls the cards beneath it.

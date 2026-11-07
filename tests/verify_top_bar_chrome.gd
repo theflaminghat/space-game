@@ -258,7 +258,7 @@ func _run() -> void:
 	# square around the outside and rounded everywhere inside it.
 	#
 	# Swept over whatever the sidebar holds rather than over a list of names, because that is how
-	# Game._sharpen_menu_panels works: a page added later has to come out square without this
+	# Game._restyle_menu_panels works: a page added later has to come out square without this
 	# test being told it exists.
 	var pages: Array = []
 	for n: Node in g.sidebar.get_children():
@@ -285,27 +285,32 @@ func _run() -> void:
 	check(rounded.is_empty(), "every menu panel is square: %s" % str(rounded.slice(0, 6)))
 	print("squared %d menu panels" % panels.size())
 
+	# Every page MEETS the sidebar: its own left border lands on the sidebar's right one, so the
+	# two share a single line.
+	#
 	# The pages are siblings of the button strip in an HBox, and the strip's BACKING — the thing
-	# carrying the border — hangs 6px further right than the strip itself. On the container's
-	# default separation of 4 every page opened 2px inside that border, drawn over the top of it.
+	# carrying the border — hangs BAR_BG_PAD.x further right than the strip itself. On the
+	# container's default separation of 4 every page opened 2px inside that border, drawn over
+	# the middle of it; at the overhang exactly it would start one pixel PAST the border, which
+	# now that every page draws a border of its own is two parallel lines a pixel apart.
 	#
 	# One at a time, because an HBoxContainer skips hidden children: a page that is not showing
 	# keeps whatever rect it last had, so sweeping them all at once measures the layout of the
 	# previous frame rather than where each one actually opens.
 	var side_right: float = g._side_bar_bg.global_position.x + g._side_bar_bg.size.x
-	var crowding: Array = []
+	var adrift: Array = []
 	for n: Node in pages:
 		var c := n as Control
 		g.sidebar.hide_all()
 		c.show()
 		for _i in range(3): await process_frame
-		if c.global_position.x - side_right < g.PLANET_PANEL_GAP - 0.5:
-			crowding.append("%s at %.1f" % [str(c.name), c.global_position.x])
+		if absf(c.global_position.x - (side_right - 1.0)) > 0.5:
+			adrift.append("%s at %.1f" % [str(c.name), c.global_position.x])
 	g.sidebar.hide_all()
 	await process_frame
-	check(crowding.is_empty(),
-		"every page opens clear of the sidebar's border at %.1f by %.1f: %s" % [
-			side_right, g.PLANET_PANEL_GAP, str(crowding.slice(0, 6))])
+	check(adrift.is_empty(),
+		"every page's border lands on the sidebar's, at %.1f: %s" % [
+			side_right - 1.0, str(adrift.slice(0, 6))])
 
 	print("FAILS: %d" % fails)
 	quit()

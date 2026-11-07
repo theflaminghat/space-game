@@ -2395,7 +2395,7 @@ func _build_launch_ui() -> void:
 
 	_launch_title = Label.new()
 	_launch_title.add_theme_font_size_override("font_size", 13)
-	_launch_title.modulate = Color(0.9, 0.95, 1.0)
+	_launch_title.modulate = UIPalette.TITLE
 	vb.add_child(_launch_title)
 
 	# Known infrastructure of a detected alien system (multi-line list; hidden otherwise).
@@ -2403,13 +2403,13 @@ func _build_launch_ui() -> void:
 	_intel_label.add_theme_font_size_override("font_size", 11)
 	_intel_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_intel_label.custom_minimum_size = Vector2(360, 0)
-	_intel_label.modulate = Color(0.85, 0.80, 0.62)
+	_intel_label.modulate = UIPalette.WARN
 	_intel_label.hide()
 	vb.add_child(_intel_label)
 
 	_launch_info = Label.new()
 	_launch_info.add_theme_font_size_override("font_size", 11)
-	_launch_info.modulate = Color(0.75, 0.82, 0.95)
+	_launch_info.modulate = UIPalette.TEXT
 	# Wrap within a fixed width so long flight/intel text can't stretch the panel horizontally.
 	_launch_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_launch_info.custom_minimum_size = Vector2(360, 0)
@@ -2422,7 +2422,7 @@ func _build_launch_ui() -> void:
 	# offer belongs on the system itself, next to the distance that prices it.
 	_lineage_label = Label.new()
 	_lineage_label.add_theme_font_size_override("font_size", 11)
-	_lineage_label.modulate = Color(0.70, 0.90, 0.78)
+	_lineage_label.modulate = UIPalette.GOOD
 	_lineage_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_lineage_label.custom_minimum_size = Vector2(360, 0)
 	_lineage_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2462,7 +2462,7 @@ func _build_launch_ui() -> void:
 	_probe_btn = Button.new()
 	_probe_btn.text = "Send recon probe…"
 	_probe_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_probe_btn.add_theme_color_override("font_color", Color(0.7, 0.9, 0.85))
+	_probe_btn.add_theme_color_override("font_color", UIPalette.COLONIES)
 	_probe_btn.pressed.connect(func(): _open_action_dialog("probe"))
 
 	vb.add_child(_probe_btn)
@@ -2470,7 +2470,7 @@ func _build_launch_ui() -> void:
 	_vn_btn = Button.new()
 	_vn_btn.text = "Seed von Neumann probe…"
 	_vn_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_vn_btn.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	_vn_btn.add_theme_color_override("font_color", UIPalette.HEADER)
 	_vn_btn.tooltip_text = "Send a crafted von Neumann Probe. It colonises the star and builds fresh probes there, which leave for the next systems on their own — one launch eventually reaches everything."
 	_vn_btn.pressed.connect(func(): _open_action_dialog("vnprobe"))
 	vb.add_child(_vn_btn)
@@ -2478,21 +2478,21 @@ func _build_launch_ui() -> void:
 	_berserker_btn = Button.new()
 	_berserker_btn.text = "Send berserkers…"
 	_berserker_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_berserker_btn.add_theme_color_override("font_color", Color(1.0, 0.7, 0.6))
+	_berserker_btn.add_theme_color_override("font_color", UIPalette.BAD)
 	_berserker_btn.pressed.connect(func(): _open_action_dialog("berserker"))
 	vb.add_child(_berserker_btn)
 
 	_missile_btn = Button.new()
 	_missile_btn.text = "Fire missile…"
 	_missile_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_missile_btn.add_theme_color_override("font_color", Color(1.0, 0.8, 0.55))
+	_missile_btn.add_theme_color_override("font_color", UIPalette.WARN)
 	_missile_btn.pressed.connect(func(): _open_action_dialog("missile"))
 	vb.add_child(_missile_btn)
 
 	_laser_btn = Button.new()
 	_laser_btn.text = "Fire laser…"
 	_laser_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_laser_btn.add_theme_color_override("font_color", Color(1.0, 0.9, 0.9))
+	_laser_btn.add_theme_color_override("font_color", UIPalette.TITLE)
 	_laser_btn.pressed.connect(func(): _open_action_dialog("laser"))
 	vb.add_child(_laser_btn)
 
@@ -2540,7 +2540,7 @@ func _emit_message(kind: String) -> void:
 ## editable control; rows are shown/hidden per action in _open_action_dialog.
 func _build_action_dialog() -> void:
 	_dialog_backdrop = ColorRect.new()
-	_dialog_backdrop.color = Color(0.0, 0.0, 0.0, 0.5)   # dims the map behind the dialog
+	_dialog_backdrop.color = UIPalette.SHADE   # dims the map behind the dialog
 	_dialog_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_dialog_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP   # modal — eats clicks behind it
 	_dialog_backdrop.hide()
@@ -2563,7 +2563,7 @@ func _build_action_dialog() -> void:
 
 	_dlg_title = Label.new()
 	_dlg_title.add_theme_font_size_override("font_size", 15)
-	_dlg_title.modulate = Color(0.95, 0.97, 1.0)
+	_dlg_title.modulate = UIPalette.TITLE
 	vb.add_child(_dlg_title)
 
 	# Max speed (γ) — log slider, identical range to the old inline control.
@@ -2608,7 +2608,7 @@ func _build_action_dialog() -> void:
 
 	_dlg_info = Label.new()
 	_dlg_info.add_theme_font_size_override("font_size", 11)
-	_dlg_info.modulate = Color(0.78, 0.85, 0.97)
+	_dlg_info.modulate = UIPalette.TEXT
 	_dlg_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_dlg_info.custom_minimum_size = Vector2(340, 0)
 	vb.add_child(_dlg_info)

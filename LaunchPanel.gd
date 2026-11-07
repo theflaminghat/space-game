@@ -191,7 +191,7 @@ func _ready() -> void:
 	var date_lbl := Label.new()
 	date_lbl.text = "Start date:"
 	date_lbl.add_theme_font_size_override("font_size", 11)
-	date_lbl.modulate = Color(0.75, 0.75, 0.75)
+	date_lbl.modulate = UIPalette.TEXT
 	date_section.add_child(date_lbl)
 
 	_calendar = CalendarPicker.new()
@@ -219,7 +219,7 @@ func _ready() -> void:
 	var fuel_lbl := Label.new()
 	fuel_lbl.text = "Fuel:"
 	fuel_lbl.add_theme_font_size_override("font_size", 11)
-	fuel_lbl.modulate = Color(0.75, 0.75, 0.75)
+	fuel_lbl.modulate = UIPalette.TEXT
 	fuel_section.add_child(fuel_lbl)
 	_fuel_option = OptionButton.new()
 	_fuel_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -420,7 +420,7 @@ func _build_stock_ui(parent: Control) -> void:
 	var title := Label.new()
 	title.text = "Founding population (von Neumann probes carry it too):"
 	title.add_theme_font_size_override("font_size", 11)
-	title.modulate = Color(0.75, 0.75, 0.75)
+	title.modulate = UIPalette.TEXT
 	# A Label's minimum width is its whole line, so an unwrapped one longer than the column does
 	# not merely overflow — it pushes the column open from the inside and carries every other
 	# row with it.  This one fits the 400px panel today; wrapping is what stops a narrower
@@ -470,7 +470,7 @@ func _build_stock_ui(parent: Control) -> void:
 	# population decides how much of it is realised.  Pushed back by Game.
 	_stock_effects = Label.new()
 	_stock_effects.add_theme_font_size_override("font_size", 10)
-	_stock_effects.modulate = Color(0.68, 0.72, 0.78)
+	_stock_effects.modulate = UIPalette.DIM
 	_stock_effects.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_stock_box.add_child(_stock_effects)
 
@@ -602,7 +602,7 @@ func _build_cargo_ui(parent: Control) -> void:
 
 	_cargo_total = Label.new()
 	_cargo_total.add_theme_font_size_override("font_size", 10)
-	_cargo_total.modulate = Color(0.70, 0.80, 0.95)
+	_cargo_total.modulate = UIPalette.HEADER
 	_cargo_box.add_child(_cargo_total)
 	_refresh_cargo()
 

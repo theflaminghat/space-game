@@ -136,7 +136,7 @@ func _ready() -> void:
 	# What is being taken off this world, above the list of what is left of it.
 	_disasm_label = Label.new()
 	_disasm_label.add_theme_font_size_override("font_size", 11)
-	_disasm_label.modulate = Color(0.95, 0.80, 0.55)
+	_disasm_label.modulate = UIPalette.WARN
 	_disasm_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_disasm_label.hide()
 	vbox.add_child(_disasm_label)
@@ -191,7 +191,7 @@ func _set_star_rows(star: Dictionary) -> void:
 	_star_rows["mass"]["value"].text = "%.4f M☉" % mass
 	# An untouched Sun is the baseline; a lifted one says how much is gone, which is the number
 	# every other figure here follows from.
-	_star_rows["mass"]["value"].modulate = Color(0.55, 0.85, 1.0) if engineered else Color(1, 1, 1)
+	_star_rows["mass"]["value"].modulate = UIPalette.HEADER if engineered else UIPalette.VALUE
 	if engineered:
 		_star_rows["mass"]["value"].text += "  (−%.2f%%)" % ((1.0 - mass) * 100.0)
 	_star_rows["luminosity"]["value"].text = "%s L☉" % _fmt_solar(float(star.get("luminosity", 1.0)))
@@ -200,14 +200,14 @@ func _set_star_rows(star: Dictionary) -> void:
 	# mass: below 1.00× the Sun is ageing slower than the years are passing.
 	var ageing: float = float(star.get("ageing", 1.0))
 	_star_rows["ageing"]["value"].text = "%.3f× calendar" % ageing
-	_star_rows["ageing"]["value"].modulate = Color(0.55, 0.85, 1.0) if engineered else Color(1, 1, 1)
+	_star_rows["ageing"]["value"].modulate = UIPalette.HEADER if engineered else UIPalette.VALUE
 	# Shading and rejuvenation are the other two levers; both read "none" until something stands.
 	var shade: float = float(star.get("shade", 0.0))
 	_star_rows["shade"]["value"].text = "none" if shade <= 0.0 else "%.3f%% of the light" % (shade * 100.0)
-	_star_rows["shade"]["value"].modulate = Color(0.55, 0.85, 1.0) if shade > 0.0 else Color(1, 1, 1)
+	_star_rows["shade"]["value"].modulate = UIPalette.HEADER if shade > 0.0 else UIPalette.VALUE
 	var rejuv: float = float(star.get("rejuvenated", 0.0))
 	_star_rows["rejuvenated"]["value"].text = "none" if rejuv <= 0.0 else Units.format_si(rejuv, "yr")
-	_star_rows["rejuvenated"]["value"].modulate = Color(0.55, 0.85, 1.0) if rejuv > 0.0 else Color(1, 1, 1)
+	_star_rows["rejuvenated"]["value"].modulate = UIPalette.HEADER if rejuv > 0.0 else UIPalette.VALUE
 	# The sail: how much of the star's sky it covers and what that is pushing with.  Both move
 	# together — thrust is the share of the sky times L/c — so this is the line that shows a
 	# retrofit did something.  The journey below cannot: it is 0.000 ly and a ten-thousandth of
@@ -215,29 +215,29 @@ func _set_star_rows(star: Dictionary) -> void:
 	var mirrors: float = float(star.get("mirrors", 0.0))
 	if mirrors <= 0.0:
 		_star_rows["mirror"]["value"].text = "none"
-		_star_rows["mirror"]["value"].modulate = Color(1, 1, 1)
+		_star_rows["mirror"]["value"].modulate = UIPalette.VALUE
 	else:
 		_star_rows["mirror"]["value"].text = "%.2f%% of the sky, %s" % [
 			mirrors * 100.0, Units.format_si(float(star.get("mirror_thrust", 0.0)), "N")]
-		_star_rows["mirror"]["value"].modulate = Color(0.55, 0.85, 1.0)
+		_star_rows["mirror"]["value"].modulate = UIPalette.HEADER
 	# Where the star has got to, once the mirror is pushing it.
 	var drift: float = float(star.get("drift", 0.0))
 	if mirrors <= 0.0 and drift <= 0.0:
 		_star_rows["thrust"]["value"].text = "none"
-		_star_rows["thrust"]["value"].modulate = Color(1, 1, 1)
+		_star_rows["thrust"]["value"].modulate = UIPalette.VALUE
 	else:
 		var aim: String = str(star.get("thrust_aim", ""))
 		_star_rows["thrust"]["value"].text = "%s ly at %s%s" % [
 			("%.3f" % drift).rstrip("0").rstrip("."),
 			Units.format_si(float(star.get("drift_speed", 0.0)), "m/s"),
 			"" if aim == "" else " → %s" % aim]
-		_star_rows["thrust"]["value"].modulate = Color(0.55, 0.85, 1.0)
+		_star_rows["thrust"]["value"].modulate = UIPalette.HEADER
 
 	# What the star is bound to become — and, when lifting has taken it below helium ignition,
 	# there is no giant branch left to date, so the two dates read "never" rather than a number.
 	var dated: bool = bool(star.get("dated_fate", true))
 	_star_rows["fate"]["value"].text = str(star.get("fate", ""))
-	_star_rows["fate"]["value"].modulate = Color(1, 1, 1) if dated else Color(0.55, 0.85, 1.0)
+	_star_rows["fate"]["value"].modulate = UIPalette.VALUE if dated else UIPalette.HEADER
 	_star_rows["red_giant"]["value"].text = Units.format_si(float(star.get("red_giant", 0.0)), "yr") \
 		if dated else "never"
 	_star_rows["nebula"]["value"].text = Units.format_si(float(star.get("nebula", 0.0)), "yr") \
@@ -260,12 +260,12 @@ func _sub_row(key: String) -> Label:
 	var k := Label.new()
 	k.text = key
 	k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	k.modulate = Color(0.65, 0.70, 0.80)
+	k.modulate = UIPalette.DIM
 	stats_grid.add_child(k)
 	var v := Label.new()
 	v.text = "-"
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	v.modulate = Color(0.65, 0.70, 0.80)
+	v.modulate = UIPalette.DIM
 	stats_grid.add_child(v)
 	return v
 
@@ -309,9 +309,9 @@ func set_planet_info(data: Dictionary) -> void:
 	var l_del: float = float(data.get("link_delivered", 0.0))
 	if l_off > l_del + 1.0:
 		energy_label.text += "  · link full, %s stranded" % Units.format_si(l_off - l_del, "W")
-		energy_label.modulate = Color(0.95, 0.65, 0.30)
+		energy_label.modulate = UIPalette.WARN
 	else:
-		energy_label.modulate = Color(1, 1, 1)
+		energy_label.modulate = UIPalette.VALUE
 	population_label.text = _fmt_population(int(data.get("population", 0)))
 	# Carrying capacity, and where it comes from.
 	if _capacity_label:
@@ -324,21 +324,21 @@ func set_planet_info(data: Dictionary) -> void:
 		# Amber once the world is close to full: the ceiling is about to become the constraint.
 		var pop_now: float = float(data.get("population", 0))
 		var near_full: bool = cap > 0.0 and pop_now > cap * 0.9
-		_capacity_label.modulate = Color(0.95, 0.65, 0.30) if near_full else Color(0.85, 0.90, 0.70)
+		_capacity_label.modulate = UIPalette.WARN if near_full else UIPalette.VALUE
 	# Food: how long the larder lasts at the current rate, and who is going hungry.  A world
 	# eating into its stores reads as a countdown; one that has run out reads as a death rate.
 	var fam: float = float(data.get("famine", 0.0))
 	var fdays: float = float(data.get("food_days", -1.0))
 	if fam > 0.0:
 		population_label.text += "  ·  FAMINE — %d%% unfed" % int(round(fam * 100.0))
-		population_label.modulate = Color(0.95, 0.35, 0.30)
+		population_label.modulate = UIPalette.BAD
 	elif fdays >= 0.0:
 		population_label.text += "  ·  %s food, %s left" % [
 			Units.format_si(float(data.get("food_stored", 0.0)), "g"),
 			("%.0f days" % fdays) if fdays < 720.0 else ("%.1f years" % (fdays / 365.25))]
-		population_label.modulate = Color(0.95, 0.65, 0.30) if fdays < 60.0 else Color(1, 1, 1)
+		population_label.modulate = UIPalette.WARN if fdays < 60.0 else UIPalette.VALUE
 	else:
-		population_label.modulate = Color(1, 1, 1)
+		population_label.modulate = UIPalette.VALUE
 	compute_label.text    = Units.format_si_verbose(float(data.get("compute", 0.0)), "FLOP/s")
 
 	if _mc_label:
@@ -352,11 +352,11 @@ func set_planet_info(data: Dictionary) -> void:
 			if staffing < 0.99:
 				_mc_label.text += "  · labour %d%%" % int(round(staffing * 100.0))
 			# Amber when demand outstrips capacity (jobs on this world are throttled).
-			_mc_label.modulate = Color(0.95, 0.65, 0.30) if mc_used > mc_cap + 0.5 \
-				else Color(0.85, 0.85, 0.85)
+			_mc_label.modulate = UIPalette.WARN if mc_used > mc_cap + 0.5 \
+				else UIPalette.VALUE
 		else:
 			_mc_label.text = "-"
-			_mc_label.modulate = Color(0.85, 0.85, 0.85)
+			_mc_label.modulate = UIPalette.VALUE
 
 	# Construction status — what this world's manufacturing capacity is currently raising.
 	if _construction_label:
@@ -380,7 +380,7 @@ func set_planet_info(data: Dictionary) -> void:
 			if con.size() > 1:
 				txt += "  +%d queued" % (con.size() - 1)
 			_construction_label.text = txt
-			_construction_label.modulate = Color(0.95, 0.70, 0.30)
+			_construction_label.modulate = UIPalette.WARN
 			_construction_label.show()
 
 	# What a body is made of USED to be static, so this rebuilt only when the planet changed.
@@ -434,7 +434,7 @@ func clear_planet_info() -> void:
 	compute_label.text     = "-"
 	if _mc_label:
 		_mc_label.text = "-"
-		_mc_label.modulate = Color(0.85, 0.85, 0.85)
+		_mc_label.modulate = UIPalette.VALUE
 	if _storage_minerals_label:
 		_storage_minerals_label.text = "-"
 		_storage_energy_label.text   = "-"
@@ -513,7 +513,7 @@ func _compound_row(formula: String, right_top: String, right_bottom: String, rig
 	var formula_lbl := Label.new()
 	formula_lbl.text = formula
 	formula_lbl.add_theme_font_size_override("font_size", 10)
-	formula_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.80))
+	formula_lbl.add_theme_color_override("font_color", UIPalette.DIM)
 	left.add_child(formula_lbl)
 	row.add_child(left)
 
@@ -528,7 +528,7 @@ func _compound_row(formula: String, right_top: String, right_bottom: String, rig
 		var bot_lbl := Label.new()
 		bot_lbl.text = right_bottom
 		bot_lbl.add_theme_font_size_override("font_size", 10)
-		bot_lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.80))
+		bot_lbl.add_theme_color_override("font_color", UIPalette.TEXT)
 		bot_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		right.add_child(bot_lbl)
 	row.add_child(right)

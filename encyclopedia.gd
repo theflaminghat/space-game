@@ -162,7 +162,7 @@ func _populate(filter: String) -> void:
 		var cat_item: TreeItem = _tree.create_item(root)
 		cat_item.set_text(0, "%s (%d)" % [cat, matches.size()])
 		cat_item.set_metadata(0, "")
-		cat_item.set_custom_color(0, Color(0.62, 0.76, 1.0))
+		cat_item.set_custom_color(0, UIPalette.HEADER)
 		cat_item.collapsed = words.is_empty() and cat != current_cat
 		var groups: Dictionary = {}
 		for e: Dictionary in matches:
@@ -173,7 +173,7 @@ func _populate(filter: String) -> void:
 					var gi: TreeItem = _tree.create_item(cat_item)
 					gi.set_text(0, g)
 					gi.set_metadata(0, "")
-					gi.set_custom_color(0, Color(0.70, 0.74, 0.82))
+					gi.set_custom_color(0, UIPalette.TEXT)
 					gi.collapsed = false
 					groups[g] = gi
 				parent = groups[g]
@@ -212,7 +212,7 @@ func _build_ui() -> void:
 
 	# Dim everything behind, swallow its clicks and scrolls, and close on a click outside.
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.0, 0.0, 0.0, 0.55)
+	backdrop.color = UIPalette.SHADE
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	backdrop.gui_input.connect(func(e: InputEvent) -> void:
@@ -226,11 +226,7 @@ func _build_ui() -> void:
 	panel.anchor_right = 0.93
 	panel.anchor_top = 0.06
 	panel.anchor_bottom = 0.94
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.05, 0.06, 0.10, 0.98)
-	sb.border_color = Color(0.35, 0.45, 0.65)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(4)
+	var sb := UIPalette.panel()
 	sb.set_content_margin_all(14)
 	panel.add_theme_stylebox_override("panel", sb)
 	root.add_child(panel)
@@ -293,5 +289,5 @@ func _build_ui() -> void:
 	var hint := Label.new()
 	hint.text = "O or Esc to close  ·  underlined names are links  ·  the simulation keeps running while this is open"
 	hint.add_theme_font_size_override("font_size", 11)
-	hint.modulate = Color(0.60, 0.66, 0.78)
+	hint.modulate = UIPalette.DIM
 	col.add_child(hint)

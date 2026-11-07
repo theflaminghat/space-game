@@ -13,12 +13,12 @@ const LINE_W:    float = 2.0
 const DOT_R:     float = 4.0
 const HOVER_DOT: float = 5.0
 
-const COL_BG:   Color = Color(0.07, 0.08, 0.10)
-const COL_GRID: Color = Color(1.0,  1.0,  1.0,  0.06)
-const COL_AXIS: Color = Color(0.40, 0.42, 0.50, 0.80)
-const COL_CURS: Color = Color(1.0,  1.0,  1.0,  0.25)
-const COL_LABL: Color = Color(0.45, 0.47, 0.58)
-const COL_EMPTY:Color = Color(0.35, 0.37, 0.45)
+const COL_BG:   Color = UIPalette.RAISED
+const COL_GRID: Color = UIPalette.GRID
+const COL_AXIS: Color = UIPalette.BORDER
+const COL_CURS: Color = Color(UIPalette.VALUE, 0.30)
+const COL_LABL: Color = UIPalette.DIM
+const COL_EMPTY:Color = UIPalette.DISABLED
 
 ## Cap on stored points.  When exceeded, history is halved (every other point kept),
 ## which bounds memory and per-frame draw cost over very long sessions while keeping

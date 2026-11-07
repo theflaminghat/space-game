@@ -217,8 +217,8 @@ func _project(p: Vector3, b: Basis, center: Vector2, s: float) -> Vector2:
 # ── Drawing ─────────────────────────────────────────────────────────────────────
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.02, 0.05, 1.0))
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.4, 0.5, 0.7, 0.25), false, 1.0)
+	draw_rect(Rect2(Vector2.ZERO, size), UIPalette.SURFACE)
+	draw_rect(Rect2(Vector2.ZERO, size), UIPalette.BORDER, false, 1.0)
 	var center: Vector2 = size * 0.5
 	if source == null:
 		draw_string(_font, Vector2(14, 26), "Galaxy debug — no data source",

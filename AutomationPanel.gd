@@ -140,12 +140,13 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "Automation"
 	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", UIPalette.TITLE)
 	vbox.add_child(title)
 
 	var hint := Label.new()
 	hint.text = "Standing orders the game carries out on its own as time runs forward."
 	hint.add_theme_font_size_override("font_size", 11)
-	hint.modulate = Color(0.70, 0.72, 0.78)
+	hint.modulate = UIPalette.DIM
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(hint)
 
@@ -213,7 +214,7 @@ func _rules_column(parent: Control, title: String) -> VBoxContainer:
 	var lbl := Label.new()
 	lbl.text = title
 	lbl.add_theme_font_size_override("font_size", 11)
-	lbl.modulate = Color(0.70, 0.72, 0.78)
+	lbl.modulate = UIPalette.HEADER
 	parent.add_child(lbl)
 
 	var scroll := ScrollContainer.new()
@@ -232,7 +233,7 @@ func _section_label(parent: Control, text: String) -> void:
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 13)
-	lbl.modulate = Color(0.85, 0.88, 0.95)
+	lbl.modulate = UIPalette.TITLE
 	parent.add_child(lbl)
 
 ## Tell the panel what kind each body is (see Game.body_kinds).
@@ -281,7 +282,7 @@ func _form_label(grid: Control, text: String) -> void:
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 11)
-	lbl.modulate = Color(0.75, 0.75, 0.75)
+	lbl.modulate = UIPalette.TEXT
 	grid.add_child(lbl)
 
 func _count_spin() -> SpinBox:
@@ -316,7 +317,7 @@ func _build_doctrine_form(parent: Control) -> void:
 	_doctrine_desc = Label.new()
 	_doctrine_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_doctrine_desc.add_theme_font_size_override("font_size", 10)
-	_doctrine_desc.modulate = Color(0.72, 0.78, 0.88)
+	_doctrine_desc.modulate = UIPalette.DIM
 	parent.add_child(_doctrine_desc)
 	_refresh_doctrine_desc(0)
 
@@ -461,7 +462,7 @@ func _build_cargo_ui(parent: Control) -> void:
 	var lbl := Label.new()
 	lbl.text = "Hold:"
 	lbl.add_theme_font_size_override("font_size", 11)
-	lbl.modulate = Color(0.75, 0.75, 0.75)
+	lbl.modulate = UIPalette.TEXT
 	_l_cargo_box.add_child(lbl)
 
 	var row := HBoxContainer.new()
@@ -560,7 +561,7 @@ func _build_defend_form(vbox: VBoxContainer) -> void:
 	var hint := Label.new()
 	hint.text = "Fires the orbital array without stopping to ask. Needs a built array and the energy for the shot; without either, the warning still comes up."
 	hint.add_theme_font_size_override("font_size", 11)
-	hint.modulate = Color(0.70, 0.72, 0.78)
+	hint.modulate = UIPalette.DIM
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(hint)
 
@@ -720,7 +721,7 @@ func _empty_note(text: String) -> Label:
 	var empty := Label.new()
 	empty.text = text
 	empty.add_theme_font_size_override("font_size", 11)
-	empty.modulate = Color(0.6, 0.6, 0.6)
+	empty.modulate = UIPalette.DIM
 	return empty
 
 func _make_rule_row(rule: Dictionary) -> HBoxContainer:
@@ -744,7 +745,7 @@ func _make_rule_row(rule: Dictionary) -> HBoxContainer:
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.custom_minimum_size = Vector2(60, 0)
 	if not bool(rule.get("enabled", true)):
-		info.modulate = Color(0.55, 0.55, 0.55)
+		info.modulate = UIPalette.DISABLED
 	row.add_child(info)
 
 	var rm := Button.new()
