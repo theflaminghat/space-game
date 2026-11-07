@@ -896,6 +896,12 @@ func _infra_mesh(kind: String) -> Mesh:
 ## is "a spun cylinder", which is the one shape a ring is not; the ring store is "a loop of
 ## orbital diameter", which wants an empty middle the primitive had no way to leave out; and
 ## the core mixer "reaches into the core", which points it the opposite way from everything.
+##
+## "shkadov" is gone from here, and is the only model to have been retired rather than adopted.
+## It was a stepped dish on a boom with a statite bus behind it, authored at lane scale, and the
+## mirror is now ONE sail a hundred times that across: a piece of satellite hardware the width
+## of a star.  It is built as a plain spherical cap instead — see "The Shkadov mirror" below.
+## res://models/orbital_shkadov.glb and its two maps are no longer loaded by anything.
 const LANE_MODELS := {
 	"battery": "res://models/orbital_battery.glb",
 	"core_mixer": "res://models/orbital_core_mixer.glb",
@@ -911,7 +917,6 @@ const LANE_MODELS := {
 	"relay":   "res://models/orbital_relay_sat.glb",
 	"ring_store": "res://models/orbital_ring_store.glb",
 	"sc_ring": "res://models/orbital_storage_ring.glb",
-	"shkadov": "res://models/orbital_shkadov.glb",
 	"station": "res://models/orbital_construction_station.glb",
 	"sunshade": "res://models/orbital_sunshade.glb",
 	"swarm_relay": "res://models/orbital_swarm_relay.glb",
@@ -1171,32 +1176,44 @@ func infra_slot_world_pos(type_name: String, index: int, total: int) -> Vector3:
 	return global_position
 
 
-# ── The Shkadov mirror (star only) ────────────────────────────────────────────
+# ── The Shkadov mirror (star only) ────────────────────────────────────────
 ## The one orbital structure with no lane, because it is not in orbit and there is not a fleet
 ## of it.
 ##
 ## A statite does not orbit: it hovers, held off the star by the pressure of the light it is
 ## reflecting, so it stands still over one spot on the photosphere while everything in the band
 ## circles past it.  And buildings.gd caps it at one ("max_count"), so what levelling it up buys
-## is a WIDER mirror and not a second one — which is why this is a single MeshInstance3D sized
+## is a WIDER mirror and not a second one — which is why this is a single MeshInstance3D built
 ## from a number instead of a MultiMesh lane filled from a count.
 ##
 ## That number is SolarSystem.star_mirror_coverage, the same one StarModel.shkadov_thrust_n
-## turns into newtons, so the picture cannot drift from the physics: the mirror is drawn at
-## exactly the width its thrust claims, and a mirror with no coverage — none built, or the one
-## built switched off — is a mirror furled, and not drawn.
+## turns into newtons, so the picture cannot drift from the physics — and with the sail drawn as
+## a SPHERICAL CAP on a shell concentric with the star, it is not merely proportional to it: the
+## cap's own area over the sphere's is exactly (1 − cos th)/2, which is the coverage the thrust
+## was computed from.  What is on screen is the number, not a stand-in for it.
 ##
-## It is also NOT hidden with the lanes past 100x.  They are hidden because a few hundred
-## structures smeared round the Sun at a thousand times real time is a bright knot that says
-## nothing about where anything is; the mirror does not move, so it cannot smear, and at that
-## speed it is the one piece of stellar engineering still worth looking at.
+## A mirror with no coverage — none built, or the one built switched off — is a mirror furled,
+## and not drawn.
+##
+## It is NOT hidden with the lanes past 100x.  They are hidden because a few hundred structures
+## smeared round the Sun at a thousand times real time is a bright knot that says nothing about
+## where anything is; the mirror does not move, so it cannot smear, and at that speed it is the
+## one piece of stellar engineering still worth looking at.
+##
+## There is no model.  It was drawn with the lane mesh the fleet used — a stepped dish on a boom
+## with a statite bus behind it — which at a hundred times its authored size was a piece of
+## satellite hardware the width of a star, and whose boom reaching back towards the photosphere
+## had to be solved around so it did not end up inside it.  A sail is a surface.  This one is
+## built here, at the size it needs to be, which is also the only way it can be a cap rather
+## than a disc.
 
-## How far the sail's DEEPEST POINT flies above the photosphere, in the star's own local units —
-## where the surface is at 0.5, because the body mesh is a unit-diameter sphere and the node
-## carries the scale.  The deepest point is the statite bus on its boom, not the disc: the model
-## reaches 0.062 back towards the star from the plane of its plating, and at full size that is
-## 0.17 local units of boom.  Holding the BUS at a fixed height is what "it sits at the surface"
-## means at every level — see mirror_standoff, which solves for where the disc has to be.
+## How far the sail flies above the photosphere, in the star's own local units — where the
+## surface is at 0.5, because the body mesh is a unit-diameter sphere and the node carries the
+## scale.
+##
+## A cap is at this distance at EVERY point of itself, rim included, which is what lets it be
+## any size at all: a flat disc standing on the star has its rim further out than its centre, so
+## a wide one reached up into the Dyson swarm's inner lane, and a curved sheet does not.
 const MIRROR_GAP: float = 0.02
 ## Which side of the star it stands on.  "One side" is the only constraint the physics puts on
 ## it, so this is a visual choice: 35 degrees out of the ecliptic, high enough that the default
@@ -1204,44 +1221,13 @@ const MIRROR_GAP: float = 0.02
 ## the star, and far enough off the pole that it still reads as standing to one side rather than
 ## as a cap on top.
 const MIRROR_SIDE := Vector3(0.671, 0.574, 0.469)
-## The widest the sail is drawn, as a half-angle of sky.
-##
-## This is a BOUND ON THE PICTURE, not on the physics.  The standoff below divides by
-## 1 - (back/radius)*tan(half-angle), which runs to zero as the half-angle approaches the angle
-## whose tangent is radius/back — so a mirror asked to cover most of the sky would be solved to
-## a disc the size of the inner solar system.  45 degrees is 14.6 % of the sky, more than twice
-## what the catalogue's biggest mirror reaches (6.125 %, 28.9 degrees), so nothing the player
-## can build comes near it; what reaches it is the dev console and the tests, which set coverage
-## directly and go to 1.0.
-const MIRROR_MAX_HALF_ANGLE: float = 0.7853981634   # 45 degrees
-## Its mesh kind in LANE_MODELS and its baked map — the same model the lane used to draw, just
-## not from a lane any more.  Named as constants because tests/verify_lane_models.gd holds every
-## model in the game to one contract and has no lane entry to read these off for this one.
-const MIRROR_MESH: String = "shkadov"
-const MIRROR_TEXTURE: String = "res://models/orbital_shkadov_albedo.png"
-## The one piece of self-light in the game, and it is a TEMPERATURE rather than a stand-in for
-## lighting.
-##
-## Everything else is lit by the sun and nothing else, so a structure on the night side is black
-## — which is what it would be.  Not this one.  The sail stands at 1.37 solar radii, where the
-## flux is 3.4e7 W/m²; reflecting 99 % of that still leaves 3.4e5 W/m² to shed, and a thin sheet
-## radiating from both faces settles at about 1300 K.  That is a heating element — a dull orange
-## glow, far dimmer than the star it stands on, and the only thing there is to see from behind
-## it.
-##
-## Without it the back of the sail is BLACK, not dark: the six lights of the sun's shell all sit
-## on the photosphere at 0.5, inside the sail's standoff, so (L − P)·n is negative for every one
-## of them and not a single light can reach its outward face.  A full-size mirror viewed down
-## its own axis measured 0,0,0 across the whole disc, which reads as a hole in the frame rather
-## than as a megastructure.
-##
-## This is deliberately not the faint emission that used to live on every lane material and was
-## removed for being a substitute for light.  It is on one structure, it is derived, and it is
-## the colour of the temperature it is derived from.
-const MIRROR_GLOW_COLOR := Color(1.0, 0.45, 0.10)
-const MIRROR_GLOW_ENERGY: float = 0.30
+## How finely the cap is built: rings from its pole down to its rim, and sectors around it.  It
+## is rebuilt only when the coverage moves, which is when the mirror is built, retrofitted,
+## idled or demolished, so this costs nothing per frame.
+const MIRROR_RINGS: int = 16
+const MIRROR_SECTORS: int = 64
 var _mirror: MeshInstance3D = null
-## The coverage the mirror is currently drawn at, so the transform is rebuilt only when it moves.
+## The coverage the mirror is currently built at, so the mesh is rebuilt only when it moves.
 ## Starts negative because zero is a real value and means "furled".
 var _mirror_coverage: float = -1.0
 
@@ -1249,86 +1235,119 @@ var _mirror_coverage: float = -1.0
 ##
 ## A spherical cap of half-angle th covers (1 − cos th)/2 of the sky, so the half-angle a given
 ## coverage implies is that inverted.  This is where the two halves of the mirror meet: coverage
-## is what the thrust is computed from, and this is what that coverage looks like.
+## is what the thrust is computed from, and this is the cap that is built from it.
+##
+## It needs no bound.  Coverage runs to 1.0 — the dev console and the tests drive it there — and
+## a half-angle of pi is a cap that has closed into a complete shell around the star, which is
+## what covering the whole sky means.  The flat disc this replaced had no such limit: its rim
+## ran away to infinity as the half-angle approached a right angle, and had to be clamped.
 static func mirror_half_angle(coverage: float) -> float:
-	return minf(acos(clampf(1.0 - 2.0 * clampf(coverage, 0.0, 1.0), -1.0, 1.0)),
-		MIRROR_MAX_HALF_ANGLE)
+	return acos(clampf(1.0 - 2.0 * clampf(coverage, 0.0, 1.0), -1.0, 1.0))
 
-## How far the PLANE OF THE SAIL stands from the star's centre, in local units.  `bounds` is the
-## model's own mesh AABB, so tools/shkadov.py stays the one place that decides how wide the sail
-## is and how far its boom and bus reach back towards the star.
-##
-## Not simply 0.5 + MIRROR_GAP, because the model is not a bare disc: scaled up to a mirror this
-## wide, the boom and bus behind it reach back towards the star by the same factor, and at full
-## size that is 0.17 local units — a mirror hung at 0.52 would have its bus a third of the way
-## inside the photosphere.  So the gap is held at the DEEPEST point and the plane solved for:
-##
-##     d = 0.5 + gap + back*s   and   s = d*tan(th)/radius
-##     => d = (0.5 + gap) / (1 - (back/radius)*tan(th))
-##
-## which keeps d*tan(th) as the rim — so the coverage is still exactly the coverage — while the
-## sail rises a little as it widens and its bus flies at a constant height whatever its size.
-static func mirror_standoff(coverage: float, bounds: AABB) -> float:
-	var radius: float = maxf(bounds.size.x * 0.5, 1.0e-6)
-	var back: float = maxf(-bounds.position.y, 0.0)
-	var shrink: float = 1.0 - (back / radius) * tan(mirror_half_angle(coverage))
-	# MIRROR_MAX_HALF_ANGLE holds this near 0.56 at the worst; the floor is only here so that a
-	# model reshaped to reach further back than it is wide cannot divide by zero.
-	return (0.5 + MIRROR_GAP) / maxf(shrink, 0.05)
+## The distance every point of the sail stands from the star's centre, in local units.
+static func mirror_standoff() -> float:
+	return 0.5 + MIRROR_GAP
 
-## How wide the sail is drawn, in the star's local units, for `coverage` of its sky: its plane's
-## distance from the star times the tangent of the half-angle that coverage subtends.
-##
-## Flat rather than dished, which is what makes a disc this wide possible at all: a flat sheet
-## laid against a sphere never enters it however wide it grows, because the sphere curves away
-## underneath, while a curved cap made bigger by scaling a mesh would scale its radius of
-## curvature with it and lift off the surface as it widened.
-static func mirror_radius(coverage: float, bounds: AABB) -> float:
-	return mirror_standoff(coverage, bounds) * tan(mirror_half_angle(coverage))
+## How wide the sail is, in local units: the radius of its rim about its own axis.  Not what it
+## is drawn from — the cap carries its own size — but what "it got bigger" means as a number.
+static func mirror_radius(coverage: float) -> float:
+	return mirror_standoff() * sin(mirror_half_angle(coverage))
 
-## Where the mirror sits and how big it is drawn, in the star's local frame.
+## The sail: a spherical cap of half-angle `half_angle`, on the shell at mirror_standoff(),
+## centred on +Y.  Direction is left to the transform, so the mesh depends on the size alone.
 ##
-## Scaled WITH the star, which is the opposite of what _update_infra does: a lane cancels the
-## body's scale so its structures come out a constant world size on any planet, while coverage
-## is an ANGLE — a mirror holding a share of the star's sky has to grow with the star it stands
-## on.  So everything here is in local units and inherits the Sun's scale as it swells up the
-## giant branch, which is also what keeps the coverage the thrust is computed from honest.
-##
-## +Y points away from the star, the contract every lane model is built to (see
-## infra_orientation).  On this one that means the dish opens towards the photosphere and the
-## statite bus on its boom hangs in front of it, which is what a reflector is.
-static func mirror_transform(coverage: float, bounds: AABB) -> Transform3D:
-	var pos: Vector3 = MIRROR_SIDE.normalized() * mirror_standoff(coverage, bounds)
-	var s: float = mirror_radius(coverage, bounds) / maxf(bounds.size.x * 0.5, 1.0e-6)
-	# Any reference that is not parallel to the radial will do here: the mirror holds one
-	# position for ever, so the continuity infra_orientation exists to give a lane has nothing
-	# to be continuous along.
-	return Transform3D(infra_orientation(pos, Vector3.UP).scaled(Vector3(s, s, s)), pos)
+## Wound a → c → b rather than a → b → c.  Godot's front faces are the other way round from the
+## order the rings come out in, and a surface built the obvious way is a surface whose front is
+## its inside: the renderer culls the faces pointing at you and keeps the ones facing away.
+## That is the same mirrored-winding fault that had the orbital structures and then the belt
+## shaded from the inside, reached here by index order instead of by a negative determinant.
+## Settled by measurement, not by reasoning: SurfaceTool.generate_normals() uses the engine's own
+## convention, and on this order it agrees with the outward normals set below.
+static func mirror_cap_mesh(half_angle: float) -> ArrayMesh:
+	var r: float = mirror_standoff()
+	var th: float = clampf(half_angle, 0.0, PI)
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	for i in range(MIRROR_RINGS + 1):
+		var t: float = th * float(i) / float(MIRROR_RINGS)
+		for j in range(MIRROR_SECTORS + 1):
+			var phi: float = TAU * float(j) / float(MIRROR_SECTORS)
+			var dir := Vector3(sin(t) * cos(phi), cos(t), sin(t) * sin(phi))
+			verts.append(dir * r)
+			norms.append(dir)
+			uvs.append(Vector2(float(j) / float(MIRROR_SECTORS),
+				float(i) / float(MIRROR_RINGS)))
+	var idx := PackedInt32Array()
+	var row: int = MIRROR_SECTORS + 1
+	# A ring at a pole is one point repeated, so the quad against it is a triangle and the other
+	# half of it is three vertices in a line.  Left in, those are sixty-four zero-area triangles
+	# at the top of every cap and another sixty-four at the bottom of a closed one - degenerate,
+	# so they have no normal of their own and nothing can say which way they face.  The cap is a
+	# fan at each pole instead.
+	var closed: bool = th >= PI - 1.0e-9
+	for i in range(MIRROR_RINGS):
+		for j in range(MIRROR_SECTORS):
+			var a: int = i * row + j
+			var b: int = a + 1
+			var c: int = b + row
+			var d: int = a + row
+			if i > 0:
+				idx.append_array([a, c, b])
+			if not (closed and i == MIRROR_RINGS - 1):
+				idx.append_array([a, d, c])
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
-## The lane material with the sail's own heat added — see MIRROR_GLOW_COLOR for why this one
-## structure glows when nothing else does.  Separated out so the test can hold the two apart:
-## the lanes must carry no emission and the mirror must carry this.
-static func mirror_material(base: StandardMaterial3D) -> StandardMaterial3D:
-	base.emission_enabled = true
-	base.emission = MIRROR_GLOW_COLOR
-	base.emission_energy_multiplier = MIRROR_GLOW_ENERGY
-	return base
+## Where the sail stands, in the star's local frame: a pure rotation taking the cap's +Y axis
+## onto MIRROR_SIDE.  No translation and no scale — the mesh is already built at the right
+## distance and the right size, and the star's own scale is inherited through the parent, which
+## is what keeps a share of the sky a share of the sky as the star swells up the giant branch.
+##
+## Through infra_orientation for the guarantee it carries rather than for the frame it picks:
+## Basis(x, y, z) is right-handed only when x cross y is z, and a mirrored basis reverses the
+## effective winding of everything it draws.  Any reference not parallel to the radial will do
+## here, because the mirror holds one position for ever.
+static func mirror_transform() -> Transform3D:
+	return Transform3D(infra_orientation(MIRROR_SIDE, Vector3.UP), Vector3.ZERO)
+
+## The sail's material.  No map and no self-light: a mirror is a surface, and everything in the
+## system is lit by the sun and nothing else — so the face turned away from the star is black,
+## which is what it would be.  The six lights of the sun's shell all sit on the photosphere,
+## inside the sail's standoff, so from outside that is the only face there is to see and the
+## mirror reads as a silhouette against the star it stands on.
+static func mirror_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.90, 0.92, 0.96)
+	m.metallic = 0.9
+	m.roughness = 0.15
+	# A sail has no back and no front as far as the renderer is concerned: it is one surface and
+	# has to exist from both sides of itself.
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
 
 ## Raise the mirror's node, hidden until there is a mirror to draw.
 func _create_star_mirror() -> void:
 	var mi := MeshInstance3D.new()
 	mi.name = "%s_shkadov_mirror" % name
-	mi.mesh = _infra_mesh(MIRROR_MESH)
-	mi.material_override = mirror_material(_infra_material(MIRROR_TEXTURE))
+	mi.material_override = mirror_material()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.transform = mirror_transform()
 	mi.visible = false
 	add_child(mi)
 	_mirror = mi
 	_update_star_mirror()
 
-## Follow the coverage: draw the mirror at the width that coverage implies, or hide it when
-## there is none.  Called every frame and does nothing on almost all of them — the number only
-## moves when a mirror is built, retrofitted, idled or demolished.
+## Follow the coverage: build the cap that coverage implies, or hide the sail when there is
+## none.  Called every frame and does nothing on almost all of them — the number only moves when
+## the mirror is built, retrofitted, idled or demolished.
 func _update_star_mirror() -> void:
 	if _mirror == null:
 		return
@@ -1339,10 +1358,7 @@ func _update_star_mirror() -> void:
 	if cov <= 0.0:
 		_mirror.visible = false
 		return
-	var mesh: Mesh = _mirror.mesh
-	if mesh == null:
-		return
-	_mirror.transform = mirror_transform(cov, mesh.get_aabb())
+	_mirror.mesh = mirror_cap_mesh(mirror_half_angle(cov))
 	_mirror.visible = true
 
 ## Returns the planet's current visual distance from the orbit centre.

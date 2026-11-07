@@ -5985,6 +5985,12 @@ func get_planet_data(planet_name: String) -> Dictionary:
 			"drift_speed":  SolarSystem.star_velocity_ms,
 			"thrust_aim":   SolarSystem.star_thrust_target,
 			"mirrors":      SolarSystem.star_mirror_coverage,
+			# What the sail is actually pushing with.  The journey is the wrong readout to
+			# judge the mirror by — drift is 0.000 ly and the speed a ten-thousandth of a metre
+			# per second for the whole of a normal run, at every size of mirror — so without
+			# this line retrofitting it to twice the sky changes nothing the player can see.
+			"mirror_thrust": StarModel.shkadov_thrust_n(
+				SolarSystem.star_mirror_coverage, SolarSystem.sun_luminosity_lsun()),
 		}
 
 	# Larder: what this world holds to eat, what it eats per day, and how long that lasts.

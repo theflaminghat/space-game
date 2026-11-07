@@ -959,8 +959,8 @@ const BUILDINGS := [
 	#
 	# ONE OF IT ("max_count": 1).  A Shkadov thruster is a single arc standing over one side of
 	# the photosphere, not a fleet of panels, so levelling it up is the only way to make it push
-	# harder — and what levelling it up buys is literally a bigger mirror (see
-	# Planet.mirror_radius, which draws it at the width this coverage implies).
+	# harder — and what levelling it up buys is literally a bigger mirror: Planet.mirror_cap_mesh
+	# builds the spherical cap that covers exactly this share of the star's sky.
 	#
 	# "mirror_coverage" is the share of the star's sky the sail subtends, which is the whole of
 	# its physics: StarModel.shkadov_thrust_n turns it straight into newtons.  The three tiers

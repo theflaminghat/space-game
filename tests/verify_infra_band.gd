@@ -15,9 +15,13 @@ extends SceneTree
 ## The Shkadov Mirror is the exception and is checked as one: it has no lane, because there is
 ## only ever one of it and it stands on the photosphere rather than orbiting.  That puts it
 ## INSIDE everything above, in the gap between the star and the swarm, so what is asked of it is
-## the other way round — that the sail's deepest point still clears the photosphere, and that
-## its rim at full size stays under the band's innermost lane.  It does reach into the collector
-## shell, which is recorded rather than forbidden; the reason is with the measurement.
+## the other way round — that it clears the photosphere, and that it does not reach out into
+## either band however wide it is opened.
+##
+## It holds at ANY size, which is what being a spherical cap buys: every point of it stands at
+## the same distance from the star, so the sail's widest point is its only point.  Drawn as a
+## flat disc it did not — a disc standing on the star has its rim further out than its centre,
+## and the biggest mirror's rim reached 1.6 solar radii, into the swarm's inner lane at 1.3.
 
 ## The innermost orbital lane, in planet radii — the floor the mirror has to stay under.
 func _innermost_lane(P) -> float:
@@ -97,34 +101,31 @@ func _run() -> void:
 	for spec: Dictionary in P.INFRA_LANES:
 		check(str(spec["type"]) != "Shkadov Mirror",
 			"the mirror is not in the band: it stands on the star")
-	var mirror: MeshInstance3D = sun.get_node_or_null("sun_shkadov_mirror")
-	check(mirror != null and mirror.mesh != null, "the star raised the mirror")
-	if mirror != null and mirror.mesh != null:
-		var mb: AABB = mirror.mesh.get_aabb()
-		var cov: float = BuildingData.max_mirror_coverage()
-		# Local units, where the star's surface is at 0.5; the node is a child of the (scaled)
-		# star, so one local unit is sun.scale.x world units.
-		var stand: float = P.mirror_standoff(cov, mb)
-		var wide: float = P.mirror_radius(cov, mb)
-		var deepest: float = stand - (-mb.position.y) * (wide / (mb.size.x * 0.5))
-		var rim: float = sqrt(stand * stand + wide * wide)
-		print("mirror at %.4f of the sky: bus %.3f, plane %.3f, rim %.3f (surface 0.500, band from %.3f)"
-			% [cov, deepest, stand, rim, _innermost_lane(P)])
-		check(deepest * sun.scale.x > surface,
-			"the sail's deepest point clears the photosphere: %.3f vs %.3f" % [
-				deepest * sun.scale.x, surface])
-		check(rim < _innermost_lane(P),
-			"and its rim stays inside the band: %.3f vs %.3f" % [rim, _innermost_lane(P)])
-		# It does NOT clear the collector shell, and is not asked to.  The swarm's inner lane is
-		# at 1.3 solar radii and the sail is a flat disc standing on the photosphere, so its rim
-		# is further from the star than its centre and reaches 1.6 at full size: a mirror this
-		# close cannot avoid sharing that shell.  Unlike two lanes, which would be embedded in
-		# each other everywhere, this is one object on one side of the star covering 6 % of the
-		# sky — the collectors it reaches past are behind a mirror, which is where a Shkadov
-		# thruster really does put them.  Recorded as a measurement rather than a limit so the
-		# number cannot move without someone reading this.
-		print("  rim %.3f world vs the collector shell at %.3f: it shares it, by design"
-			% [rim * sun.scale.x, swarm_in])
+	check(sun.get_node_or_null("sun_shkadov_mirror") != null, "the star raised the mirror")
+	# Local units, where the star's surface is at 0.5; the sail is a child of the (scaled) star,
+	# so one local unit is sun.scale.x world units.  The standoff is the WHOLE geometry: a cap
+	# has no point further out than any other, so this one number answers for every size of it.
+	var stand: float = P.mirror_standoff()
+	print("mirror: standoff %.3f local = %.3f world (surface %.3f, band from %.3f, swarm from %.3f)"
+		% [stand, stand * sun.scale.x, surface, _innermost_lane(P), swarm_in])
+	check(stand * sun.scale.x > surface,
+		"the sail clears the photosphere: %.3f vs %.3f" % [stand * sun.scale.x, surface])
+	check(stand < _innermost_lane(P),
+		"and stays inside the band: %.3f vs %.3f" % [stand, _innermost_lane(P)])
+	check(stand * sun.scale.x < swarm_in,
+		"and inside the collector shell: %.3f vs %.3f" % [stand * sun.scale.x, swarm_in])
+	# At every coverage, including the full sky, which is the cap closed into a shell.
+	for cov: float in [BuildingData.max_mirror_coverage(), 0.5, 1.0]:
+		var vs: PackedVector3Array = P.mirror_cap_mesh(
+			P.mirror_half_angle(cov)).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		var out: float = 0.0
+		var inn: float = INF
+		for v: Vector3 in vs:
+			out = maxf(out, v.length())
+			inn = minf(inn, v.length())
+		check(out * sun.scale.x < swarm_in and inn * sun.scale.x > surface,
+			"at %s of the sky the whole sail is in the gap: %.3f .. %.3f world" % [
+				str(cov), inn * sun.scale.x, out * sun.scale.x])
 
 	# ── The lane spacing is what the swarm constants say it is ──
 	# Both halvings, and the three added lanes, are geometry the capacity depends on, so a

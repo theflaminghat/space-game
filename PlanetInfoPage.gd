@@ -160,8 +160,8 @@ func _ready() -> void:
 	# for every other body.
 	for spec: Array in [["Mass", "mass"], ["Luminosity", "luminosity"], ["Radius", "radius"],
 			["Ageing", "ageing"], ["Shading", "shade"], ["Rejuvenated", "rejuvenated"],
-			["Thrust", "thrust"], ["Fate", "fate"], ["Red giant", "red_giant"],
-			["Nebula", "nebula"]]:
+			["Mirror", "mirror"], ["Drift", "thrust"], ["Fate", "fate"],
+			["Red giant", "red_giant"], ["Nebula", "nebula"]]:
 		var k := Label.new()
 		k.text = str(spec[0])
 		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -208,8 +208,19 @@ func _set_star_rows(star: Dictionary) -> void:
 	var rejuv: float = float(star.get("rejuvenated", 0.0))
 	_star_rows["rejuvenated"]["value"].text = "none" if rejuv <= 0.0 else Units.format_si(rejuv, "yr")
 	_star_rows["rejuvenated"]["value"].modulate = Color(0.55, 0.85, 1.0) if rejuv > 0.0 else Color(1, 1, 1)
-	# Where the star is going, once the mirror is pushing it.
+	# The sail: how much of the star's sky it covers and what that is pushing with.  Both move
+	# together — thrust is the share of the sky times L/c — so this is the line that shows a
+	# retrofit did something.  The journey below cannot: it is 0.000 ly and a ten-thousandth of
+	# a metre per second for the whole of a normal run, whatever size the mirror is.
 	var mirrors: float = float(star.get("mirrors", 0.0))
+	if mirrors <= 0.0:
+		_star_rows["mirror"]["value"].text = "none"
+		_star_rows["mirror"]["value"].modulate = Color(1, 1, 1)
+	else:
+		_star_rows["mirror"]["value"].text = "%.2f%% of the sky, %s" % [
+			mirrors * 100.0, Units.format_si(float(star.get("mirror_thrust", 0.0)), "N")]
+		_star_rows["mirror"]["value"].modulate = Color(0.55, 0.85, 1.0)
+	# Where the star has got to, once the mirror is pushing it.
 	var drift: float = float(star.get("drift", 0.0))
 	if mirrors <= 0.0 and drift <= 0.0:
 		_star_rows["thrust"]["value"].text = "none"

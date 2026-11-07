@@ -1,4 +1,15 @@
 extends SceneTree
+## Surface area of a built cap, in the star's local units.
+func _cap_area(mesh: Mesh) -> float:
+	var arr: Array = mesh.surface_get_arrays(0)
+	var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var ix: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+	var area: float = 0.0
+	for t in range(0, ix.size(), 3):
+		var a: Vector3 = vs[ix[t]]
+		area += 0.5 * (vs[ix[t + 1]] - a).cross(vs[ix[t + 2]] - a).length()
+	return area
+
 var fails := 0
 func check(ok: bool, msg: String) -> void:
 	if not ok:
@@ -246,6 +257,33 @@ func _run() -> void:
 	check(absf(ss.star_drift_dist_ly - 5.0) < 1.0e-6,
 		"an old save takes it from the vector: %s" % str(ss.star_drift_dist_ly))
 
+	# ── The panel says what the mirror is pushing with ──
+	#
+	# The journey is the wrong readout to judge a retrofit by: drift reads 0.000 ly and the
+	# speed a ten-thousandth of a metre per second for the whole of a normal run, at every size
+	# of mirror.  So the Sun's panel carries the sail's own figures instead, and they have to
+	# move when it is retrofitted or nothing on screen says it did anything.
+	var pushed: Array = []
+	for tier: String in BuildingData.tiers("Shkadov Mirror"):
+		g.planet_buildings["sun"] = [tier]
+		g._mark_prod_dirty(); g._recompute_production_cache()
+		var sd: Dictionary = (g.get_planet_data("sun").get("star", {}) as Dictionary)
+		check(sd.has("mirror_thrust"), "%s: the panel is told the thrust" % tier)
+		check(absf(float(sd.get("mirrors", 0.0))
+				- float(g._find_building_def(tier).get("mirror_coverage", 0.0))) < 1.0e-12,
+			"%s: and the share of the sky it covers" % tier)
+		pushed.append(float(sd.get("mirror_thrust", 0.0)))
+	print("panel thrust by tier: %s" % str(pushed))
+	for i in range(1, pushed.size()):
+		check(float(pushed[i]) > float(pushed[i - 1]) * 3.0,
+			"a bigger mirror pushes harder: %s vs %s" % [str(pushed[i]), str(pushed[i - 1])])
+	# The same number the integrator runs on, not a second one worked out another way.
+	check(absf(float(pushed[pushed.size() - 1]) / sm.shkadov_thrust_n(
+			ss.star_mirror_coverage, ss.sun_luminosity_lsun()) - 1.0) < 1.0e-9,
+		"and it is the thrust, not a figure of its own")
+	g.planet_buildings["sun"] = []
+	g._mark_prod_dirty(); g._recompute_production_cache()
+
 	# ── One mirror, and only one ──
 	#
 	# The cap is enforced in try_build and not only greyed out in the panel, because automation
@@ -349,12 +387,14 @@ func _run() -> void:
 	check(ss.star_mirror_coverage > 0.0,
 		"so the thruster works after the load: %s" % str(ss.star_mirror_coverage))
 
-	# ── Drawn at the width its coverage claims ──
+	# ── Drawn as the share of sky it is pushing with ──
 	#
 	# The mirror is not laid out in a lane: there is one of it, it does not orbit, and it stands
-	# at the photosphere.  Its size comes off SolarSystem.star_mirror_coverage, the same number
-	# StarModel.shkadov_thrust_n turns into newtons, so what follows is what stops the picture
-	# drifting from the physics.
+	# on the photosphere.  It is a spherical cap built from SolarSystem.star_mirror_coverage -
+	# the same number StarModel.shkadov_thrust_n turns into newtons - and because a cap on a
+	# shell concentric with the star covers exactly (1 - cos th)/2 of it, what is on screen is
+	# not proportional to the physics, it IS the physics.  That is what the area assertion below
+	# measures, off the built mesh rather than off the formula that built it.
 	var P = load("res://planet.gd")
 	for spec: Dictionary in P.INFRA_LANES:
 		check(str(spec["type"]) != "Shkadov Mirror", "the mirror has no orbital lane")
@@ -362,100 +402,111 @@ func _run() -> void:
 	var mnode: MeshInstance3D = sun.get_node_or_null("sun_shkadov_mirror")
 	check(mnode != null, "the star raised the mirror's node")
 	if mnode != null:
-		check(mnode.mesh != null and not (mnode.mesh is BoxMesh),
-			"with its model and not the box fallback")
-		var bounds: AABB = mnode.mesh.get_aabb()
-		var model_r: float = bounds.size.x * 0.5
-		var model_back: float = -bounds.position.y
-		check(model_r > 0.0 and model_back > 0.0,
-			"the sail is a disc with a boom behind it: radius %.3f, reach %.3f" % [
-				model_r, model_back])
-		print("sail model: radius %.3f, reaches %.3f back towards the star" % [
-			model_r, model_back])
-		# The angle is the only place the coverage enters, so it has to invert exactly: a cap of
-		# half-angle th covers (1 - cos th)/2 of the sky.  Up to the clamp, which 0.14 is under.
-		for cov: float in [5.0e-3, 1.75e-2, 6.125e-2, 0.14]:
+		# The angle is the only place the coverage enters, so it has to invert exactly.
+		for cov: float in [5.0e-3, 1.75e-2, 6.125e-2, 0.25, 1.0]:
 			var th: float = P.mirror_half_angle(cov)
 			check(absf((1.0 - cos(th)) * 0.5 - cov) < 1.0e-9,
 				"%s of the sky inverts to %.2f deg and back" % [str(cov), rad_to_deg(th)])
-		# Two invariants, at every size the game or the console can ask for.
-		for cov: float in [5.0e-3, 1.75e-2, 6.125e-2, 0.14, 1.0]:
-			var th: float = P.mirror_half_angle(cov)
-			var d: float = P.mirror_standoff(cov, bounds)
-			var r: float = P.mirror_radius(cov, bounds)
-			check(absf(r / d - tan(th)) < 1.0e-9,
-				"at %s its rim subtends the angle it is drawn for: %.6f vs %.6f" % [
-					str(cov), r / d, tan(th)])
-			# The deepest point of the structure - the statite bus on its boom, not the plating -
-			# flies MIRROR_GAP above the photosphere at EVERY size.  That is what "it sits at the
-			# surface of the Sun" means for a model that reaches back towards the star: hung at a
-			# flat 0.5 + gap, its bus would be a third of the way inside the photosphere by the
-			# time the sail was full size.
-			var deepest: float = d - model_back * (r / model_r)
-			check(absf(deepest - (0.5 + P.MIRROR_GAP)) < 1.0e-6,
-				"and its bus flies at the surface: %.6f vs %.6f" % [deepest, 0.5 + P.MIRROR_GAP])
-		var r1: float = P.mirror_radius(5.0e-3, bounds)
-		var r2: float = P.mirror_radius(1.75e-2, bounds)
-		var r3: float = P.mirror_radius(6.125e-2, bounds)
-		print("drawn radius by tier: %.4f, %.4f, %.4f; standoff %.4f, %.4f, %.4f (surface 0.500)"
-			% [r1, r2, r3, P.mirror_standoff(5.0e-3, bounds),
-				P.mirror_standoff(1.75e-2, bounds), P.mirror_standoff(6.125e-2, bounds)])
-		check(r2 > r1 and r3 > r2,
-			"levelling it up makes it wider: %.4f < %.4f < %.4f" % [r1, r2, r3])
-		# The whole sail has to stay clear of the band, or the biggest mirror would be drawn
-		# through the innermost lane of orbital infrastructure (the Core Mixing Array at 1.020).
-		var rim: float = sqrt(pow(P.mirror_standoff(6.125e-2, bounds), 2.0) + r3 * r3)
-		var innermost: float = INF
-		for spec: Dictionary in P.INFRA_LANES:
-			innermost = minf(innermost, float(spec["radius"]))
-		check(rim < innermost,
-			"and at full size its rim is still inside the band: %.4f vs %.4f" % [rim, innermost])
-		# Driven to 1.0 by the dev console and by the tests above, where the standoff's own
-		# denominator would otherwise run to zero and solve the sail to the size of the system.
-		check(P.mirror_half_angle(1.0) <= P.MIRROR_MAX_HALF_ANGLE + 1.0e-9,
-			"a full sky is held at the widest the picture can carry: %.2f deg" % rad_to_deg(
-				P.mirror_half_angle(1.0)))
-		check(is_finite(P.mirror_radius(1.0, bounds)) and P.mirror_radius(1.0, bounds) > r3,
-			"and is still a number: %s" % str(P.mirror_radius(1.0, bounds)))
+		# A full sky is a cap that has closed into a shell, not a runaway: the flat disc this
+		# replaced sent its rim to infinity at a right angle and had to be clamped.
+		check(absf(P.mirror_half_angle(1.0) - PI) < 1.0e-9,
+			"the whole sky is a closed shell: %.2f deg" % rad_to_deg(P.mirror_half_angle(1.0)))
+		check(P.mirror_half_angle(1.75e-2) > P.mirror_half_angle(5.0e-3)
+			and P.mirror_half_angle(6.125e-2) > P.mirror_half_angle(1.75e-2),
+			"and levelling it up opens the cap wider every time")
 
-		var xf: Transform3D = P.mirror_transform(6.125e-2, bounds)
+		var stand: float = P.mirror_standoff()
+		check(stand > 0.5, "the sail flies clear of the photosphere at 0.5: %.3f" % stand)
+		print("sail: standoff %.3f, half-angle by tier %.2f / %.2f / %.2f deg, rim %.4f at full"
+			% [stand, rad_to_deg(P.mirror_half_angle(5.0e-3)),
+				rad_to_deg(P.mirror_half_angle(1.75e-2)),
+				rad_to_deg(P.mirror_half_angle(6.125e-2)), P.mirror_radius(6.125e-2)])
+
+		# The mesh itself, at every size the game or the console can ask for.
+		for cov: float in [5.0e-3, 1.75e-2, 6.125e-2, 0.25, 1.0]:
+			var mesh: ArrayMesh = P.mirror_cap_mesh(P.mirror_half_angle(cov))
+			check(mesh.get_surface_count() == 1,
+				"the cap is one surface: %d" % mesh.get_surface_count())
+			var arr: Array = mesh.surface_get_arrays(0)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var ns: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+			var ix: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+			check(vs.size() > 0 and ns.size() == vs.size()
+				and (arr[Mesh.ARRAY_TEX_UV] as PackedVector2Array).size() == vs.size(),
+				"every vertex has a normal and a UV")
+			# EVERY point of it stands at the same height, rim included.  This is the whole
+			# reason it is a cap and not a disc: a flat sheet standing on the star has its rim
+			# further out than its centre, so a wide one reached into the Dyson swarm's inner
+			# lane, and the standoff had to be solved around a boom that would otherwise end up
+			# inside the photosphere.  "It sits at the surface of the Sun" is exact here.
+			var worst: float = 0.0
+			for v: Vector3 in vs:
+				worst = maxf(worst, absf(v.length() - stand))
+			check(worst < 1.0e-6,
+				"at %s every point of the sail is at the standoff: worst %s" % [
+					str(cov), str(worst)])
+			# Not mirrored.  A surface wound the other way has its front where its back should
+			# be: the renderer culls the faces pointing at you and keeps the ones facing away,
+			# which is the fault the orbital structures and then the belt were both shaded by.
+			var back: int = 0
+			for t in range(0, ix.size(), 3):
+				var a: Vector3 = vs[ix[t]]
+				var face: Vector3 = (vs[ix[t + 2]] - a).cross(vs[ix[t + 1]] - a)
+				if face.dot(ns[ix[t]]) <= 0.0:
+					back += 1
+			check(back == 0, "at %s no triangle is wound against its normal: %d of %d"
+				% [str(cov), back, ix.size() / 3])
+			# And the payoff: the cap's own area over the sphere's is the coverage the thrust
+			# was computed from.  Measured off the triangles, so it answers for the mesh that is
+			# actually drawn rather than for the formula that built it.  A sixteen-ring cap
+			# under-measures a fraction of a percent, being chords across arcs.
+			var area: float = 0.0
+			for t in range(0, ix.size(), 3):
+				var a2: Vector3 = vs[ix[t]]
+				area += 0.5 * (vs[ix[t + 1]] - a2).cross(vs[ix[t + 2]] - a2).length()
+			var drawn_cov: float = area / (4.0 * PI * stand * stand)
+			check(absf(drawn_cov / cov - 1.0) < 0.01,
+				"at %s the sail covers the sky it claims: %.6f drawn" % [str(cov), drawn_cov])
+
+		# Where it stands: a pure rotation onto MIRROR_SIDE, nothing scaled and nothing moved.
+		# The star's own scale is inherited through the parent, which is what keeps a share of
+		# the sky a share of the sky as the star swells up the giant branch.
+		var xf: Transform3D = P.mirror_transform()
+		check(xf.origin.is_equal_approx(Vector3.ZERO),
+			"the sail's node sits at the star's centre; the mesh carries the standoff")
 		check(xf.basis.determinant() > 0.0,
-			"it is not drawn mirrored: determinant %+.4f" % xf.basis.determinant())
-		check(xf.basis.y.normalized().dot(xf.origin.normalized()) > 0.9999,
-			"+Y points away from the star, which is what the model is built to")
-		check(P.mirror_transform(1.75e-2, bounds).basis.get_scale().x
-			> P.mirror_transform(5.0e-3, bounds).basis.get_scale().x,
-			"and the transform carries the width as scale")
+			"and is not drawn mirrored: determinant %+.4f" % xf.basis.determinant())
+		check(xf.basis.get_scale().is_equal_approx(Vector3.ONE),
+			"nothing is scaled: %s" % str(xf.basis.get_scale()))
+		check(xf.basis.y.normalized().dot((P.MIRROR_SIDE as Vector3).normalized()) > 0.9999,
+			"and it faces the side of the star it was put on")
 
-		# The node itself: hidden with no mirror, shown at the coverage standing.
-		ss.set_star_mirror_coverage(0.0)
-		sun._update_star_mirror()
-		check(not mnode.visible, "no coverage, no mirror drawn")
-		ss.set_star_mirror_coverage(6.125e-2)
-		sun._update_star_mirror()
-		check(mnode.visible, "the mirror standing is drawn")
-		check(absf(mnode.transform.origin.length() - P.mirror_standoff(6.125e-2, bounds))
-			< 1.0e-6, "where the geometry puts it: %.4f" % mnode.transform.origin.length())
-		# Scaled WITH the star, unlike every lane, because coverage is an angle: the drawn rim
-		# has to hold the same share of the sky however big the star has grown.
-		var drawn: float = mnode.transform.basis.get_scale().x * model_r
-		check(absf(drawn - r3) < 1.0e-5,
-			"and as wide as its coverage says: %.4f vs %.4f" % [drawn, r3])
-
-		# The sail's back RADIATES, and it is the only thing in the game that does.  The sun's
-		# six lights all sit on the photosphere, inside the sail's standoff, so not one of them
-		# can reach its outward face: without this a full-size mirror viewed down its own axis
-		# measures 0,0,0 across the whole disc - a hole in the frame rather than a
-		# megastructure.  It is a temperature (about 1300 K at the flux it stands in), not the
-		# faint stand-in emission that was removed from every lane, which is why the lane
-		# materials have to stay dark for this assertion to mean anything.
+		# No map and NO SELF-LIGHT.  Everything in the system is lit by the sun and nothing
+		# else, so the face turned away from the star is black - which is what it would be, and
+		# from outside it is the only face there is.  The sail briefly carried a 1300 K glow for
+		# the back it would really radiate; it does not any more, and a lane material is checked
+		# beside it so "no emission" is the same rule for both rather than two coincidences.
 		var mat := mnode.material_override as StandardMaterial3D
-		check(mat != null and mat.emission_enabled, "the sail's back radiates")
-		check(mat != null and mat.albedo_texture != null, "and still carries its baked map")
+		check(mat != null and not mat.emission_enabled, "the sail does not light itself")
+		check(mat != null and mat.albedo_texture == null, "and is a bare surface, with no map")
 		var lane_mat := sun._infra_material(
 			"res://models/orbital_habitat_albedo.png") as StandardMaterial3D
 		check(lane_mat != null and not lane_mat.emission_enabled,
-			"while a lane material carries no self-light at all")
+			"nor does a lane material")
+
+		# The node follows the roster: hidden with no mirror, built at the coverage standing.
+		ss.set_star_mirror_coverage(0.0)
+		sun._update_star_mirror()
+		check(not mnode.visible, "no coverage, no mirror drawn")
+		ss.set_star_mirror_coverage(5.0e-3)
+		sun._update_star_mirror()
+		check(mnode.visible and mnode.mesh != null, "the mirror standing is drawn")
+		var small: float = _cap_area(mnode.mesh)
+		ss.set_star_mirror_coverage(6.125e-2)
+		sun._update_star_mirror()
+		check(_cap_area(mnode.mesh) > small * 5.0,
+			"and retrofitting it rebuilds a bigger one: %.4f -> %.4f" % [
+				small, _cap_area(mnode.mesh)])
 
 	ss.reset_star()
 	print("FAILS: ", fails)

@@ -1,11 +1,13 @@
 extends SceneTree
 
-## The orbital structures that draw a MODELLED mesh instead of a placeholder primitive, and the
-## contract those models have to meet.  Twenty-one: the twenty lanes in INFRA_LANES, with no
-## primitive stand-ins left anywhere in the band, plus the Shkadov Mirror, drawn without a lane
-## ("lane": false below) because there is one of it and it stands at the photosphere rather than
-## orbiting.  Every other clause here applies to it unchanged, which is why it stays in the
-## table instead of going unchecked.
+## The lanes that draw a MODELLED mesh instead of a placeholder primitive, and the contract
+## those models have to meet.  Twenty: every lane in INFRA_LANES, with no primitive stand-ins
+## left anywhere in the band.
+##
+## It was twenty-one.  The Shkadov Mirror had the innermost lane and a model of its own, and has
+## neither now: there is one of it, it stands on the photosphere, and it is built as a plain
+## spherical cap in planet.gd rather than loaded.  Its clearances are in verify_infra_band and
+## its geometry in verify_shkadov.
 ##
 ## None of these constraints is visible from looking at the model, which is why they are
 ## pinned here rather than left to whoever next opens Blender:
@@ -23,11 +25,7 @@ extends SceneTree
 ##       emission, and because emission without a texture floods every texel equally it was
 ##       the only colour left - a laser dish came out uniformly pink whatever its map said.
 ##       Routing that emission through the map fixed the colour and left the real problem,
-##       which was that nothing on screen was ever actually dark.  The Shkadov Mirror is the
-##       one exception, and a derived one: the sail stands in 3.4e7 W/m² and radiates what it
-##       cannot reflect at about 1300 K, while every light the sun has sits inside its standoff
-##       and cannot reach its back at all.  That glow is added to its material in planet.gd
-##       (Planet.mirror_material) and asserted in verify_shkadov, not here.
+##       which was that nothing on screen was ever actually dark.
 ##   SIZE - the lanes sit 0.04 apart in radius around a body.  Much over ~0.3 units and a
 ##       hull reaches into its neighbours; the box these replaced was 0.18.
 ##   RADIAL AXIS IS +Y - _update_infra() builds Basis(t1, radial, t2), so each model's +Y
@@ -162,14 +160,6 @@ const MODELS := [
 		"y_is": "flat",
 	},
 	{
-		"type": "Shkadov Mirror", "kind": "shkadov",
-		"model": "res://models/orbital_shkadov.glb",
-		"texture": "res://models/orbital_shkadov_albedo.png",
-		# Drawn from planet.gd's MIRROR_MESH / MIRROR_TEXTURE rather than from a lane entry.
-		"lane": false,
-		"y_is": "flat",
-	},
-	{
 		"type": "Stellar Rectenna Grid", "kind": "rect_grid",
 		"model": "res://models/orbital_rectenna_grid.glb",
 		"texture": "res://models/orbital_rectenna_grid_albedo.png",
@@ -219,15 +209,22 @@ func _run() -> void:
 		check(P.LANE_MODELS.has(kind) or PRIMITIVES.has(kind),
 			"%s asks for a mesh kind something implements: \"%s\"" % [str(spec["type"]), kind])
 
-	# The two primitives whose last users were given models, and which were then deleted.
-	for gone: String in ["cyl", "dish", "flat", "ring", "rod"]:
+	# The primitives whose last users were given models and which were then deleted - and
+	# "shkadov", which went the other way: the mirror gave its model up for a surface built in
+	# planet.gd, so a lane asking for it again would be drawing satellite hardware the width of
+	# a star.
+	for gone: String in ["cyl", "dish", "flat", "ring", "rod", "shkadov"]:
 		var users: Array[String] = []
 		for spec: Dictionary in P.INFRA_LANES:
 			if str(spec["mesh"]) == gone:
 				users.append(str(spec["type"]))
 		check(users.is_empty(),
-			"the retired \"%s\" primitive has no lanes left asking for it: %s"
+			"the retired \"%s\" mesh kind has no lanes left asking for it: %s"
 				% [gone, str(users)])
+	# And "shkadov" is gone from LANE_MODELS itself, not merely unused by a lane: the model is
+	# still on disk and would load, so leaving the entry would let a lane take it back silently.
+	check(not P.LANE_MODELS.has("shkadov"),
+		"the mirror's model is retired from LANE_MODELS, not just unused")
 
 	var meshes := {}
 	var textures := {}
@@ -236,28 +233,17 @@ func _run() -> void:
 		var what: String = str(entry["type"])
 		var kind: String = str(entry["kind"])
 
-		var in_lane: bool = bool(entry.get("lane", true))
 		var spec: Dictionary = {}
 		for s: Dictionary in P.INFRA_LANES:
 			if str(s["type"]) == what:
 				spec = s
-		if in_lane:
-			check(not spec.is_empty(), "%s has a lane at all" % what)
-			if spec.is_empty():
-				continue
-			check(str(spec["mesh"]) == kind,
-				"%s asks for its model, not a primitive: got %s" % [what, str(spec["mesh"])])
-			check(str(spec.get("texture", "")) == str(entry["texture"]),
-				"%s names its baked map: got %s" % [what, str(spec.get("texture", "(none)"))])
-		else:
-			# The one structure drawn outside the band. It must NOT have a lane as well, or it
-			# would be drawn twice - once at the photosphere and once orbiting - and it still
-			# has to name the same model and map, which planet.gd keeps as constants for this.
-			check(spec.is_empty(), "%s is drawn without a lane, so it has none" % what)
-			check(str(P.MIRROR_MESH) == kind,
-				"%s asks for its model: got %s" % [what, str(P.MIRROR_MESH)])
-			check(str(P.MIRROR_TEXTURE) == str(entry["texture"]),
-				"%s names its baked map: got %s" % [what, str(P.MIRROR_TEXTURE)])
+		check(not spec.is_empty(), "%s has a lane at all" % what)
+		if spec.is_empty():
+			continue
+		check(str(spec["mesh"]) == kind,
+			"%s asks for its model, not a primitive: got %s" % [what, str(spec["mesh"])])
+		check(str(spec.get("texture", "")) == str(entry["texture"]),
+			"%s names its baked map: got %s" % [what, str(spec.get("texture", "(none)"))])
 		check(ResourceLoader.exists(str(entry["model"])),
 			"%s is imported (run Godot once on a fresh checkout)" % str(entry["model"]))
 
@@ -416,27 +402,6 @@ func _run() -> void:
 	for entry: Dictionary in MODELS:
 		var what: String = str(entry["type"])
 		var kind: String = str(entry["kind"])
-		# The one structure with no lane hangs its model on a single mesh instance of its own
-		# instead, so the same two things are asked of it: the cached mesh and the baked map.
-		# Its material is the lane material plus the sail's own heat, which is why the emission
-		# clause below is not applied to it - see MIRROR_GLOW_COLOR in planet.gd.
-		if not bool(entry.get("lane", true)):
-			var mi := sun.get_node_or_null("sun_shkadov_mirror") as MeshInstance3D
-			check(mi != null, "the sun raised the %s itself, with no lane" % what)
-			if mi == null:
-				continue
-			check(mi.mesh == meshes.get(kind),
-				"%s: it carries the modelled mesh — the same cached resource the lanes share"
-					% what)
-			var own := mi.material_override as StandardMaterial3D
-			check(own != null, "%s: it has a StandardMaterial3D override" % what)
-			if own != null:
-				check(own.albedo_texture == textures.get(kind),
-					"%s: which samples the baked map" % what)
-				check(own.albedo_color == Color.WHITE, "%s: with nothing tinting it" % what)
-				check(own.emission_enabled and own.emission_energy_multiplier > 0.0,
-					"%s: and carries the sail's heat, which nothing else here does" % what)
-			continue
 		var lane: Dictionary = {}
 		for l: Dictionary in sun._infra:
 			if str(l["type"]) == what:
