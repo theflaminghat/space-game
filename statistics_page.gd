@@ -79,9 +79,14 @@ func _build_ui() -> void:
 		btn.button_pressed = true
 		btn.custom_minimum_size = Vector2(108, 44)
 		btn.add_theme_font_size_override("font_size", 11)
-		btn.add_theme_color_override("font_color",         col)
-		btn.add_theme_color_override("font_pressed_color", Color.WHITE)
-		btn.add_theme_color_override("font_hover_color",   col.lightened(0.25))
+		# The colour belongs to the series that is BEING DRAWN. These were the other way
+		# round — pressed (on the graph) was white and unpressed (off it) was the series
+		# colour — so every toggle started white, the legend was blank until you switched
+		# something off, and a line's colour appeared exactly when the line did not.
+		btn.add_theme_color_override("font_pressed_color",       col)
+		btn.add_theme_color_override("font_hover_pressed_color", col.lightened(0.25))
+		btn.add_theme_color_override("font_color",               UIPalette.DISABLED)
+		btn.add_theme_color_override("font_hover_color",         UIPalette.TEXT)
 		btn.toggled.connect(_on_series_toggled.bind(key))
 		toggle_flow.add_child(btn)
 		_toggle_buttons[key] = btn

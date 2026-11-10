@@ -102,7 +102,11 @@ func _ready() -> void:
 	# Wide enough for two columns.  560 was sized for one, and splitting it put the forms and
 	# the rules in half that each — a launch rule's description then wrapped to three lines in
 	# a column too narrow to read it in.
+	# And a floor rather than a width: the page fills the area right of the sidebar buttons
+	# like every other one, instead of stopping two fifths of the way across.
 	custom_minimum_size = Vector2(820, 520)
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_build_ui()
 
 # ── Public API ────────────────────────────────────────────────────────────────

@@ -226,6 +226,24 @@ func _check_panels() -> void:
 	check(series.has(str(pal.SCIENCE)) and series.has(str(pal.ENERGY)),
 		"the statistics page's series are the palette's: %s" % str(series.slice(0, 3)))
 
+	# And the legend shows a series' colour while that series is ON the graph. The two
+	# overrides were the wrong way round: every toggle starts pressed, pressed was white and
+	# unpressed was the series colour, so the legend was blank until you switched a line OFF
+	# — the one moment its colour meant nothing, because the line was no longer drawn.
+	var stats: Control = g.sidebar.statistics
+	var backwards: Array = []
+	for m: Dictionary in metrics:
+		var b: Button = stats._toggle_buttons.get(str(m["key"])) as Button
+		if b == null:
+			backwards.append("%s has no toggle" % str(m["key"]))
+		elif not b.get_theme_color("font_pressed_color").is_equal_approx(m["color"]):
+			backwards.append("%s drawn in %s, not %s" % [str(m["key"]),
+				str(b.get_theme_color("font_pressed_color")), str(m["color"])])
+		elif not b.get_theme_color("font_color").is_equal_approx(pal.DISABLED):
+			backwards.append("%s switched off reads %s" % [
+				str(m["key"]), str(b.get_theme_color("font_color"))])
+	check(backwards.is_empty(), "a series wears its own colour while it is drawn: %s" % str(backwards))
+
 
 ## The first descendant of `node` whose class is `cls`, depth first.
 func _first_of(node: Node, cls: String) -> Control:

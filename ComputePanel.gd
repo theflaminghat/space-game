@@ -50,7 +50,12 @@ var _quiet: bool = false
 
 
 func _ready() -> void:
+	# A floor, not a width. Every other sidebar page fills the area right of the buttons, and
+	# an opaque page that stops in the middle of the screen reads as a panel that failed to
+	# load — which it did not, before the pages were opaque enough for anyone to notice.
 	custom_minimum_size = Vector2(620, 520)
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	PanelBackground.attach(self)
 	_build_ui()
 

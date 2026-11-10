@@ -297,8 +297,14 @@ func _run() -> void:
 	# One at a time, because an HBoxContainer skips hidden children: a page that is not showing
 	# keeps whatever rect it last had, so sweeping them all at once measures the layout of the
 	# previous frame rather than where each one actually opens.
+	#
+	# And every page FILLS what is left of the window. The compute and automation pages set a
+	# minimum size and no expand flag, so the HBox gave them their minimum — 620 and 820 of a
+	# 1920 window — and they stopped two fifths of the way across. That was invisible while the
+	# pages were translucent and read as a panel that had failed to load once they were not.
 	var side_right: float = g._side_bar_bg.global_position.x + g._side_bar_bg.size.x
 	var adrift: Array = []
+	var short_pages: Array = []
 	for n: Node in pages:
 		var c := n as Control
 		g.sidebar.hide_all()
@@ -306,11 +312,17 @@ func _run() -> void:
 		for _i in range(3): await process_frame
 		if absf(c.global_position.x - (side_right - 1.0)) > 0.5:
 			adrift.append("%s at %.1f" % [str(c.name), c.global_position.x])
+		if view.end.x - (c.global_position.x + c.size.x) > 0.5:
+			short_pages.append("%s ends at %.0f" % [
+				str(c.name), c.global_position.x + c.size.x])
 	g.sidebar.hide_all()
 	await process_frame
 	check(adrift.is_empty(),
 		"every page's border lands on the sidebar's, at %.1f: %s" % [
 			side_right - 1.0, str(adrift.slice(0, 6))])
+	check(short_pages.is_empty(),
+		"and every page reaches the far edge at %.0f: %s" % [
+			view.end.x, str(short_pages.slice(0, 6))])
 
 	print("FAILS: %d" % fails)
 	quit()

@@ -1810,6 +1810,12 @@ Two colours in the game are not the palette's, both on the extinction screen: th
 the cause orange. `UIPalette.BAD` is the colour of a reading going the wrong way, which is not
 what that is — it is the end of the run, and the one moment the UI is allowed to raise its voice.
 
+**The statistics page's own legend was inverted**, which only showed up once everything else had
+been brought onto it. The seven toggles start pressed, and `font_pressed_color` was white while
+`font_color` was the series colour — so every button started white, the legend was blank, and a
+line's colour appeared exactly when that line was switched *off* the graph and no longer drawn.
+The two are the other way round now, with a series that is off reading `DISABLED`.
+
 ### The chrome: the frame, and the four readouts
 
 **The light-blue border only ever showed two of its eight edges.** The top bar and the sidebar
@@ -1862,6 +1868,11 @@ have to agree is a pair that will drift:
   one less than the overhang, so a page's own left border lands on the sidebar's right border,
   and since the backings sit at index 0 the page is drawn over it: one line, in one colour. The
   menus touch the chrome rather than floating beside it.
+- **Every page fills what is left of the window.** The compute and automation pages set a
+  `custom_minimum_size` and no expand flag, so the HBox handed them their minimum — 620 and 820
+  of a 1920 window — and they stopped two fifths of the way across. Invisible while the pages
+  were translucent; once they were opaque navy it read as a panel that had failed to load. The
+  minimum is a floor now and both expand, like every other page.
 - **The sidebar's right border meets the clock's right edge.** They were 4px apart — close
   enough to read as a mistake rather than as two widths. The strip is sized from `TimeBox`'s
   measured rect so its *backing* lands on that edge, since the backing carries the border.
