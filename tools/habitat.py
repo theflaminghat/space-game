@@ -34,23 +34,24 @@ S.setup()
 V_HULL   = (0.58, 0.62, 0.66)   # drum hull
 V_CAP    = (0.52, 0.56, 0.60)   # end caps - pressure structure, so steel and not gold
 V_CABLE  = (0.76, 0.48, 0.27)   # copper trunk feeding the mirror drives
-V_PORT   = (0.24, 0.26, 0.30)   # airlock hatches
+V_PORT   = S.BLACK   # airlock hatches
 V_DOCK   = (0.56, 0.58, 0.62)   # docking ports
-V_MIRROR = (0.90, 0.92, 0.95)   # sunlight mirrors
+V_MIRROR = (0.88, 0.63, 0.16)   # gold sunlight mirrors - the panels on this model, so
+                                # they take the gold the same way the radiator fins do
 
 parts = []
 
 # The drum itself.  12 sides: it has to read as round, where the depot's tanks are
 # happy being faceted at 8.
 parts.append(S.cyl(0.068, 0.180, (0, 0, 0), V_HULL, segments=12,
-                   windings=12, amp=0.60))
+                   windings=12, amp=0.60, duty=0.45))
 
 # End caps, and a docking port on each.
 for sz in (-1, 1):
     parts.append(S.cyl(0.074, 0.012, (0, 0, sz * 0.092), V_CAP, segments=12,
-                       bands=[('Z', 500.0)], amp=0.14))
+                       bands=[('Z', 166.7)], amp=0.14))
     parts.append(S.cyl(0.026, 0.030, (0, 0, sz * 0.113), V_DOCK,
-                       bands=[('Z', 600.0)], amp=0.12))
+                       bands=[('Z', 200.0)], amp=0.12))
 
 # Sunlight mirrors, hung outboard along the full length and offset from the window
 # stripes they feed rather than shadowing them.
@@ -75,9 +76,12 @@ for i in range(3):
     a = math.radians(60 + 120 * i)
     c, s_ = math.cos(a), math.sin(a)
     parts.append(S.pipe((c * 0.070, s_ * 0.070, -0.088), (c * 0.070, s_ * 0.070, 0.088),
-                        0.0035, V_CABLE, bands=[('Z', 600.0)], amp=0.30))
+                        0.0035, V_CABLE))
 for sz in (-1, 1):
-    parts.append(S.hatch((0.044, 0.0, sz * 0.100), 0.013, V_PORT, depth=0.006,
-                         bands=[('Z', 900.0)], amp=0.25))
+    parts.append(S.hatch((0.044, 0.0, sz * 0.100), 0.013, V_PORT, depth=0.006))
+
+# Alignment band around each docking port: a ring a pilot lines up on.
+for sz in (-1, 1):
+    parts.append(S.cyl(0.029, 0.005, (0, 0, sz * 0.122), S.RED))
 
 S.finish(parts, "OrbitalHabitat", out, tex_out, tag="HABITAT")

@@ -42,10 +42,10 @@ for i in range(6):
     a = math.radians(15 + 60 * i)
     parts.append(S.box((0.034, 0.040, 0.056),
                        (math.cos(a) * R_COIL, math.sin(a) * R_COIL, 0),
-                       V_CRYO, rot=(0, 0, a), bands=[('Z', 380.0)], amp=0.18))
+                       V_CRYO, rot=(0, 0, a), bands=[('Z', 126.7)], amp=0.18))
 
 # Central plant, braced to the coil by four spokes.
-parts.append(S.cyl(0.030, 0.026, (0, 0, 0), V_HUB, bands=[('Z', 450.0)], amp=0.16))
+parts.append(S.cyl(0.030, 0.026, (0, 0, 0), V_HUB, bands=[('Z', 150.0)], amp=0.16))
 for i in range(4):
     a = math.radians(90 * i)
     parts.append(S.box((0.085, 0.010, 0.007),
@@ -58,8 +58,8 @@ for i in range(6):
     a = math.radians(15 + 60 * i)
     c, s_ = math.cos(a), math.sin(a)
     parts.append(S.pipe((c * 0.028, s_ * 0.028, 0.010), (c * (R_COIL - 0.012), s_ * (R_COIL - 0.012), 0.016),
-                        0.0032, (0.52, 0.54, 0.58), bands=[('Z', 600.0)], amp=0.25))
-    parts.append(S.hatch((c * R_COIL, s_ * R_COIL, 0.030), 0.008, (0.24, 0.26, 0.30),
-                         depth=0.006, bands=[('Z', 900.0)], amp=0.25))
+                        0.0032, (0.52, 0.54, 0.58)))
+    parts.append(S.hatch((c * R_COIL, s_ * R_COIL, 0.030), 0.008, S.RED,
+                         depth=0.006))
 
 S.finish(parts, "StorageRing", out, tex_out, tag="RING")

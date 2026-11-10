@@ -32,10 +32,20 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_BELL   = (0.52, 0.50, 0.48)   # nozzle bell
-V_COIL   = (0.76, 0.48, 0.27)   # field coils
-V_THROAT = (0.88, 0.76, 0.50)   # throat, running hot
-V_TANK   = (0.87, 0.87, 0.85)   # collection tanks
+# The bell stares into a photosphere, so it is refractory black: a surface meant to take
+# starlight and not reflect it, the same reasoning as the core mixer's lances.  Black also
+# buys this model its silhouette back - a pale bell washed out against the star behind it,
+# and the flare in outline is the only thing the shape has to say.
+#
+# Gold is the thermal hardware, as everywhere else in the set: the coil windings' jackets
+# and the throat, which is the one section with heat to shed rather than soak.  Two blacks
+# a step apart, because one value welded bell and throat housing into a single lump.
+V_BELL   = (0.09, 0.09, 0.10)   # refractory black bell, facing the star
+V_HOUSE  = (0.15, 0.15, 0.17)   # black throat housing, a step up from the bell
+V_COIL   = (0.88, 0.63, 0.16)   # gold-jacketed field coils
+V_THROAT = (0.90, 0.66, 0.18)   # gold throat, the hot section
+V_TANK   = (0.42, 0.46, 0.53)   # steel collection tanks
+V_LINE   = (0.34, 0.36, 0.40)   # transfer plumbing
 
 parts = []
 
@@ -44,11 +54,15 @@ parts = []
 parts.append(S.cone(0.085, 0.022, 0.140, (0, 0, -0.012), V_BELL, segments=16,
                     windings=16, amp=0.22))
 
-# Throat head on the outward end, where the lifted mass leaves for the tanks.
-parts.append(S.cyl(0.020, 0.024, (0, 0, 0.070), V_THROAT, bands=[('Z', 420.0)], amp=0.16))
+# Throat head on the outward end, where the lifted mass leaves for the tanks: a black
+# housing with the gold throat collar standing proud of it, so the hot section is a band
+# and not the whole head.
+parts.append(S.cyl(0.021, 0.024, (0, 0, 0.068), V_HOUSE, bands=[('Z', 140.0)], amp=0.16))
+parts.append(S.torus(0.0215, 0.0045, (0, 0, 0.074), V_THROAT, major_seg=14, minor_seg=3))
 
-# Field coils, widening with the bell they ring.  Brightest value on the model: these are
-# the part that is energised.  minor_seg 3 on purpose - three of them at six would cost
+# Field coils, widening with the bell they ring.  The brightest thing on the model, and
+# now the only bright thing: against a black bell they are what the eye lands on, which is
+# right, because they are the part that is energised.  minor_seg 3 on purpose - three of them at six would cost
 # more triangles than the rest of the model put together, for a tube 5mm across.
 for major, z in ((0.082, -0.062), (0.059, -0.012), (0.037, 0.038)):
     parts.append(S.torus(major, 0.005, (0, 0, z), V_COIL,
@@ -58,7 +72,7 @@ for major, z in ((0.082, -0.062), (0.059, -0.012), (0.037, 0.038)):
 for i in range(3):
     a = math.radians(120 * i)
     parts.append(S.cyl(0.014, 0.045, (math.cos(a) * 0.060, math.sin(a) * 0.060, 0.043),
-                       V_TANK, bands=[('Z', 400.0)], amp=0.18))
+                       V_TANK, bands=[('Z', 133.3)], amp=0.18))
 
 # Transfer lines from the throat down to each collection tank, and a fill hatch on every
 # tank.  The bell states the direction of flow; the plumbing states where it ends up.
@@ -66,8 +80,14 @@ for i in range(3):
     a = math.radians(120 * i)
     c, s_ = math.cos(a), math.sin(a)
     parts.append(S.pipe((c * 0.016, s_ * 0.016, 0.070), (c * 0.058, s_ * 0.058, 0.058),
-                        0.0040, (0.52, 0.50, 0.48), bands=[('Z', 600.0)], amp=0.25))
-    parts.append(S.hatch((c * 0.060, s_ * 0.060, 0.067), 0.008, (0.24, 0.26, 0.30),
-                         depth=0.006, bands=[('Z', 900.0)], amp=0.25))
+                        0.0040, V_LINE))
+    parts.append(S.hatch((c * 0.060, s_ * 0.060, 0.067), 0.008, S.BLACK,
+                         depth=0.006))
+
+# Markings.  The throat band has to stand clear of the 0.021 housing by more than a
+# hair or the bake never catches it - 0.001 proud reads as nothing at a 512 map.  The
+# second one rings the mouth: the line a tug does not cross, on the part aimed at a star.
+parts.append(S.cyl(0.026, 0.005, (0, 0, 0.0775), S.RED))
+parts.append(S.torus(0.0845, 0.0035, (0, 0, -0.078), S.RED, major_seg=20, minor_seg=3))
 
 S.finish(parts, "StarLifter", out, tex_out, tag="LIFTER")

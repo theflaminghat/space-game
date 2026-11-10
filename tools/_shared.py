@@ -31,7 +31,7 @@ def setup():
     return bpy.context.scene
 
 
-def mat(value, bands=(), windings=0, amp=0.0):
+def mat(value, bands=(), windings=0, amp=0.0, duty=0.12):
     """A material: one flat base colour, broken only by hard-edged construction seams.
 
     `value` is either a float (a neutral grey of that value) or an (r, g, b) triple.
@@ -57,6 +57,11 @@ def mat(value, bands=(), windings=0, amp=0.0):
                  fractional part is continuous only when n is an integer.  A fractional
                  count puts one mismatched band in the ring.
       amp      - how much darker a seam is than the plate it borders.
+      duty     - the fraction of each pitch the dark band covers.  The default is a
+                 narrow seam.  Raise it and the same machinery draws broad stripes
+                 instead: the habitat's windows are windings at duty 0.45, which under
+                 the old smooth mask came free from the sine's shape and vanished the
+                 moment the edges went hard - a 12%-wide line is a seam, not a window.
 
     Deliberately NOT metallic.  This is baked with a DIFFUSE/COLOR pass, and Cycles
     scales diffuse albedo down by metalness - so setting it would darken the map by the
@@ -89,14 +94,12 @@ def mat(value, bands=(), windings=0, amp=0.0):
     sep = mk("ShaderNodeSeparateXYZ")
     nt.links.new(coord.outputs["Object"], sep.inputs[0])
 
-    # One cycle of `turns` is one plate and the seam after it.  GREATER_THAN is what makes
-    # the edge hard: the result is exactly 0 on the plate and exactly 1 in the seam, so the
-    # plate is flat colour right up to the join.  SEAM is the last 12% of the pitch, about
-    # as narrow as a 512-map can resolve and still land a clean line.
-    SEAM = 0.88
-
+    # One cycle of `turns` is one plate and the dark band after it.  GREATER_THAN is what
+    # makes the edge hard: the result is exactly 0 on the plate and exactly 1 in the band,
+    # so the plate is flat colour right up to the join.  The default 12% is about as narrow
+    # as a 512-map resolves and still lands a clean line.
     def seam_mask(turns):
-        return op("GREATER_THAN", op("FRACT", turns), SEAM)
+        return op("GREATER_THAN", op("FRACT", turns), 1.0 - duty)
 
     # The masks are OR-ed, not multiplied: a seam is a seam wherever either family puts one,
     # which gives crossing plate joins.  Multiplying would have darkened only the points
@@ -133,6 +136,23 @@ def mat(value, bands=(), windings=0, amp=0.0):
     height = mk("ShaderNodeEmission", name="LaneHeight")
     nt.links.new(out, height.inputs["Color"])
     return m
+
+
+# ── Shared accents ──────────────────────────────────────────────────────
+
+# These two sit here rather than being restated in each model's palette, because they mean
+# the same thing on every one of them and a lane that drifted half a shade off would read
+# as a different material instead of the same marking.
+#
+# BLACK is for anything that should read as a hole or as cable rather than as hull:
+# apertures, sensor faces, hatch interiors, conduit.  Hull values all live up around 0.4
+# to 0.9, so a genuine near-zero is the one value that cannot be mistaken for structure.
+#
+# RED is a MARKING, not a material: docking alignment, hazard bands at a muzzle or a hot
+# throat, and shutoff valves.  It goes on in small amounts for the same reason the gold
+# came off the hulls - paint that covers a panel stops being a warning and becomes livery.
+BLACK = (0.05, 0.05, 0.06)
+RED   = (0.64, 0.11, 0.09)
 
 
 # ── Primitives.  Each takes its greyscale value and pattern, and returns the object ──

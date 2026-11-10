@@ -20,27 +20,27 @@ out = sys.argv[-1]
 tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
-V_FACE  = (0.22, 0.26, 0.36)   # emitter face
+V_FACE  = (0.09, 0.11, 0.20)   # emitter face
 V_BUS   = (0.40, 0.42, 0.46)   # driver box - electrical, so bare
 V_FEED  = (0.76, 0.48, 0.27)   # copper feeds, driver up to the emitter face
 V_MAST  = (0.40, 0.41, 0.44)   # mast
 V_MOUNT = (0.56, 0.58, 0.62)   # mount
-V_FIN   = (0.87, 0.87, 0.85)   # fins
+V_FIN   = (0.88, 0.63, 0.16)   # gold radiator fins
 
 parts = []
 
 # Emitter face: hexagonal, with the element grid crossing it.
 parts.append(S.cyl(0.070, 0.016, (0, 0, 0.031), V_FACE, segments=6,
-                   bands=[('X', 600.0), ('Y', 600.0)], amp=0.40))
+                   bands=[('X', 200.0), ('Y', 200.0)], amp=0.40))
 parts.append(S.cyl(0.010, 0.030, (0, 0, 0.017), V_MAST))
 
 # Bus, its mount, and a pair of small fins.
 parts.append(S.box((0.050, 0.050, 0.040), (0, 0, -0.009), V_BUS,
-                   bands=[('Z', 400.0)], amp=0.18))
-parts.append(S.cyl(0.034, 0.012, (0, 0, -0.033), V_MOUNT, bands=[('Z', 520.0)], amp=0.14))
+                   bands=[('Z', 133.3)], amp=0.18))
+parts.append(S.cyl(0.034, 0.012, (0, 0, -0.033), V_MOUNT, bands=[('Z', 173.3)], amp=0.14))
 for sx in (-1, 1):
     parts.append(S.box((0.030, 0.004, 0.030), (sx * 0.035, 0, -0.009), V_FIN,
-                       bands=[('Z', 520.0)], amp=0.30))
+                       bands=[('Z', 173.3)], amp=0.30))
 
 # Feeds from the driver box up around the mast into the emitter face, and a hatch on the
 # box.  A phased array is driven element by element, and the conductors that do it are
@@ -49,8 +49,10 @@ for i in range(3):
     a = math.radians(120 * i)
     c, s_ = math.cos(a), math.sin(a)
     parts.append(S.pipe((c * 0.022, s_ * 0.022, -0.004), (c * 0.030, s_ * 0.030, 0.026),
-                        0.0030, V_FEED, bands=[('Z', 600.0)], amp=0.25))
-parts.append(S.hatch((0, -0.026, -0.009), 0.012, (0.24, 0.26, 0.30), axis='Y',
-                     depth=0.006, bands=[('Z', 800.0)], amp=0.25))
+                        0.0030, V_FEED))
+parts.append(S.hatch((0, -0.026, -0.009), 0.012, S.BLACK, axis='Y',
+                     depth=0.006))
+
+parts.append(S.box((0.058, 0.058, 0.005), (0, 0, 0.008), S.RED))
 
 S.finish(parts, "MicrowaveUplink", out, tex_out, tag="UPLINK")

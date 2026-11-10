@@ -23,19 +23,19 @@ S.setup()
 V_DECK   = (0.56, 0.58, 0.62)   # deck
 V_BUSBAR = (0.76, 0.48, 0.27)   # superconducting busbars
 V_STRUT  = (0.40, 0.41, 0.44)   # struts
-V_PORT   = (0.24, 0.26, 0.30)   # breaker hatches on the deck
-V_CABLE  = (0.15, 0.16, 0.19)   # jumpers between the busbars
+V_PORT   = S.RED     # breaker hatches on the deck
+V_CABLE  = S.BLACK   # jumpers between the busbars
 V_MIRROR = (0.90, 0.92, 0.95)   # mirror
 
 parts = []
 
 parts.append(S.box((0.120, 0.100, 0.012), (0, 0, -0.030), V_DECK,
-                   bands=[('Z', 420.0)], amp=0.18))
+                   bands=[('Z', 140.0)], amp=0.18))
 
 # Superconducting busbars, lying along the deck.
 for sy in (-1, 1):
     parts.append(S.cyl(0.008, 0.110, (0, sy * 0.044, -0.018), V_BUSBAR,
-                       rot=(0, math.radians(90), 0), bands=[('Z', 300.0)], amp=0.22))
+                       rot=(0, math.radians(90), 0), bands=[('Z', 100.0)], amp=0.22))
 
 # Mirror, canted, on a pair of struts.
 for sx in (-1, 1):
@@ -46,9 +46,8 @@ parts.append(S.box((0.100, 0.070, 0.004), (0, 0, 0.026), V_MIRROR,
 # Breaker hatches between the busbars and the jumpers tying the pair together.  Two bare
 # conduits lying on a deck could be anything; switchgear on them makes it a relay.
 for sx in (-1, 1):
-    parts.append(S.hatch((sx * 0.034, 0, -0.026), 0.010, V_PORT, depth=0.008,
-                         bands=[('Z', 900.0)], amp=0.25))
+    parts.append(S.hatch((sx * 0.034, 0, -0.026), 0.010, V_PORT, depth=0.008))
     parts.append(S.pipe((sx * 0.046, -0.044, -0.018), (sx * 0.046, 0.044, -0.018),
-                        0.0030, V_CABLE, bands=[('Y', 600.0)], amp=0.25))
+                        0.0030, V_CABLE))
 
 S.finish(parts, "PowerRelaySatellite", out, tex_out, tag="RELAY")

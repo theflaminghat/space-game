@@ -31,9 +31,9 @@ tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
 V_LOOP    = (0.77, 0.83, 0.88)   # cryogenic loop
-V_STATION = (0.88, 0.63, 0.16)   # gold MLI on the tap stations: a cryogenic tap really
-                                 # is blanketed, where the bare conduit beside it is not
-V_VALVE   = (0.24, 0.26, 0.30)   # isolation valves either side of each tap
+V_STATION = (0.88, 0.63, 0.16)   # gold MLI on the tap stations: small boxes standing on a
+                                 # bare loop, so the blanket is on hardware, not the body
+V_VALVE   = S.RED     # isolation valves either side of each tap
 
 R_MAJOR = 0.145   # near the widest the 0.04 lane spacing leaves room for
 R_TUBE = 0.014
@@ -51,7 +51,7 @@ for i in range(3):
     a = math.radians(120 * i)
     parts.append(S.box((0.032, 0.026, 0.044),
                        (math.cos(a) * R_MAJOR, math.sin(a) * R_MAJOR, 0),
-                       V_STATION, rot=(0, 0, a), bands=[('Z', 400.0)], amp=0.18))
+                       V_STATION, rot=(0, 0, a), bands=[('Z', 133.3)], amp=0.18))
 
 # An isolation valve either side of every tap, straddling the conduit.  A loop with taps
 # on it and no way to shut them is a hoop with lumps.
@@ -60,7 +60,6 @@ for i in range(3):
     for d in (-1, 1):
         b = a + d * math.radians(9)
         parts.append(S.hatch((math.cos(b) * R_MAJOR, math.sin(b) * R_MAJOR, 0.018),
-                             0.008, V_VALVE, depth=0.008,
-                             bands=[('Z', 900.0)], amp=0.25))
+                             0.008, V_VALVE, depth=0.008))
 
 S.finish(parts, "OrbitalRingStore", out, tex_out, tag="STORE")

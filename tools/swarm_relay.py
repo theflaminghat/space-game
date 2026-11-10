@@ -19,22 +19,25 @@ tex_out = out.replace(".glb", "_albedo.png")
 S.setup()
 
 V_TETHER   = (0.40, 0.41, 0.44)   # tether
-V_APERTURE = (0.14, 0.18, 0.34)   # phased apertures: emitter faces, not blanket
+V_APERTURE = (0.06, 0.08, 0.20)   # phased apertures: emitter faces, not blanket
 V_FEED     = (0.76, 0.48, 0.27)   # copper feed line down the tether
 
 parts = []
 
-parts.append(S.cyl(0.006, 0.230, (0, 0, 0), V_TETHER, bands=[('Z', 240.0)], amp=0.20))
+parts.append(S.cyl(0.006, 0.230, (0, 0, 0), V_TETHER, bands=[('Z', 80.0)], amp=0.20))
 
 # Five apertures strung along it.  Each is centred on the tether and wider than it, so
 # the tether runs through them and the run is one piece.
 for z in (-0.090, -0.045, 0.0, 0.045, 0.090):
     parts.append(S.cyl(0.026, 0.008, (0, 0, z), V_APERTURE, segments=6,
-                       bands=[('X', 700.0), ('Y', 700.0)], amp=0.35))
+                       bands=[('X', 233.3), ('Y', 233.3)], amp=0.35))
 
 # The feed line down the tether, stepping into each aperture.  A string of discs on a
 # thread needs something connecting them electrically or it is a string of discs.
-parts.append(S.pipe((0.008, 0, -0.112), (0.008, 0, 0.112), 0.0025, V_FEED,
-                    bands=[('Z', 500.0)], amp=0.25))
+parts.append(S.pipe((0.008, 0, -0.112), (0.008, 0, 0.112), 0.0025, V_FEED))
+
+# Marked caps on the tether ends, where it couples to the next element.
+for sz in (-1, 1):
+    parts.append(S.hatch((0, 0, sz * 0.117), 0.008, S.RED, depth=0.006))
 
 S.finish(parts, "SwarmRelayNetwork", out, tex_out, tag="SWARMRELAY")
