@@ -1507,6 +1507,71 @@ standard-diversity civilisation, so holding the old base would have doubled the 
 effect of a rewrite that was not supposed to change how often this happens. 0.017 puts that
 civilisation back where it was; everything above it is the player's own doing.
 
+### Alignment, and the fourth way a run ends
+
+`ai_investment` was the strongest compute lever in the game and a one-way ratchet. Autonomy was
+a pure function of the sliders, so it had no memory — set one back and the risk vanished the
+same year — and `existential_risk` was `autonomy x 0.6`, a number that could not be driven to
+zero and fed nothing but a happiness penalty and the pandemic odds. The three catastrophes were
+an asteroid, a plague and a war, so the quantity the game is named after could not end a run.
+The player took the slider to 100 because compute is the win condition, watched the figure
+climb, and there was never anything on the other end of the decision.
+
+**Two stocks, both ratchets.** Capability and understanding are not settings:
+
+| | moves | falls |
+|---|---|---|
+| `_ai_capability` | closes `AI_CLOSE_RATE` of the distance to `PoliticsData.ai_autonomy(policies)` each check | never |
+| `_ai_understood` | gains `AI_ALIGN_GAIN x` the alignment slider each check | never |
+
+Capability that exists does not stop existing when the budget is cut, and understanding once had
+is kept. `AI_ALIGN_GAIN` is deliberately the slower of the two: at equal budgets capability
+outruns understanding, so **racing ahead is the default and catching up is the work**. Four
+checks (~200 years at the mean gap) take capability most of the way to whatever is being asked
+for; a full alignment budget needs about thirteen to cover it.
+
+**The exposure is the gap**, and the per-check probability is that gap squared above a floor —
+convex, so the difference between a small gap and a slightly larger one is small and the
+difference between a large one and a slightly larger one is not. Level, the probability is
+**exactly zero and stays there**.
+
+Both of those matter for the same reason: a run reaches 10¹⁰⁰ years and this is checked every
+20–80, so **any** non-zero per-check probability is a certainty given enough checks. That is
+why the floor sits above the autonomy the *default* policy asks for — at 0.20 a civilisation
+that never touched the AI sliders had a 61% chance of ending this way inside 100 000 years and
+none at all of surviving a million, which is not a risk the player chose. Leaving the page
+alone is exactly safe; the exposure starts where the deliberate investment does, and closing
+it again is what alignment buys.
+
+**Alignment is paid for in compute** — `compute_mult` loses up to 30% — and it does **not**
+reduce `ai_autonomy`. Safety work does not make a system less capable; it makes it better
+understood. Subtracting it from capability would have made the slider a way to un-build what was
+built, which is the thing the whole model exists to deny.
+
+**The politics page shows both numbers**: `72% → 0%`, where it is now and where the settings
+take it. The stocks walk towards a setting over centuries, so a page showing only the settled
+figure would report a slider as having already worked — and the lag between moving it and the
+stock answering is the whole of the decision. Game pushes `ai_exposure()` into the page from the
+throttled UI pass; `PoliticsData.existential_risk` is the settled figure and says so.
+
+**It is the one ending that holdings do not blunt.** A war is fought between Earth powers, an
+impactor hits one world, a plague crosses on traffic — every other threat in this game is
+survived by being somewhere else, and that is deliberately the shape of them. A system that
+improves itself has no blast radius to be outside of, so a civilisation across a hundred stars
+ends exactly as one on Earth does. `verify_ai_runaway` asserts it with three settled stars on
+the roster, because the temptation to make this work like the other three is the temptation to
+give every risk in the game the same answer.
+
+There is **no forecast track** for it either, where the other three each have one. A projection
+of a system built to be better at projecting than its makers is not a thing the civilisation
+gets to have. The warning is the risk row on the politics page, which is driven by the player's
+own settings and visible from the first year.
+
+The ending empties the roster before `trigger_game_over`, because the extinction screen reads
+live state for its final figures and a headcount of two trillion under that header is a
+contradiction. `_last_catastrophe` is recorded on the way out so the run record names it
+(`no_mouth`, after Harlan Ellison).
+
 ### A colony's probes are built with a colony's star
 
 `_vn_launch` charged `ResearchTree.resources["energy"]` whoever launched — so a probe assembled

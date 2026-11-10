@@ -46,9 +46,16 @@ const POLICIES: Array = [
 	{
 		"id":       "ai_investment",
 		"name":     "AI Investment",
-		"desc":     "State-backed AI accelerates compute (up to +60%) — but every point raises AI autonomy and existential risk.",
+		"desc":     "State-backed AI accelerates compute (up to +60%) — and every point raises how capable the machines are. Capability that outruns Alignment Research is what the existential-risk figure counts.",
 		"category": "Science",
 		"type":     "slider", "min": 0.0, "max": 100.0, "step": 10.0, "default": 20.0, "unit": "%",
+	},
+	{
+		"id":       "ai_alignment",
+		"name":     "Alignment Research",
+		"desc":     "Work on understanding what the machines are doing before they do it. Closes the gap between how capable they are and how well they are understood — but it runs on the same compute as everything else, so the understanding is paid for in thinking.",
+		"category": "Science",
+		"type":     "slider", "min": 0.0, "max": 100.0, "step": 10.0, "default": 0.0, "unit": "%",
 	},
 	{
 		"id":       "open_science",
@@ -120,6 +127,9 @@ static func science_mult(s: Dictionary) -> float:
 static func compute_mult(s: Dictionary) -> float:
 	var m := 1.0
 	m += float(s.get("ai_investment", 20.0)) / 100.0 * 0.60             # +60% at max
+	# Safety work is work. It runs on the same machines as the tree and the forecasts, so the
+	# only way to buy understanding is with thinking that was going to go somewhere else.
+	m -= float(s.get("ai_alignment", 0.0)) / 100.0 * 0.30               # -30% at max
 	if bool(s.get("automation", false)):      m += 0.15
 	if bool(s.get("open_science", true)):     m += 0.10
 	if bool(s.get("civil_liberties", true)):  m += 0.10
@@ -178,7 +188,11 @@ static func co2_mult(s: Dictionary) -> float:
 	if bool(s.get("automation", false)): m -= 0.10                     # efficiency
 	return maxf(0.1, m)
 
-## Live AI-autonomy level [0,1] — a visible existential-risk indicator driven by AI policy.
+## How far the machines are being pushed [0,1].
+##
+## Alignment is deliberately NOT subtracted here: safety research does not make a system less
+## capable, it makes it better understood. The two are separate quantities and the gap between
+## them is the thing that matters — see existential_risk below.
 static func ai_autonomy(s: Dictionary) -> float:
 	var a := 0.10
 	a += float(s.get("ai_investment", 20.0)) / 100.0 * 0.60
@@ -186,6 +200,19 @@ static func ai_autonomy(s: Dictionary) -> float:
 	if bool(s.get("open_science", true)): a += 0.08
 	return clampf(a, 0.0, 1.0)
 
-## Live existential-risk level [0,1] — rises with unchecked AI autonomy.
+## How much of that capability is understood [0,1], at these settings, once the work has landed.
+static func ai_alignment_level(s: Dictionary) -> float:
+	return clampf(float(s.get("ai_alignment", 0.0)) / 100.0, 0.0, 1.0)
+
+## Capability nobody understands [0,1] — what the run is actually exposed to.
+##
+## This used to be `autonomy x 0.6`: a number that rose with AI investment, had no counter-move,
+## and could not be driven to zero. It fed nothing but a happiness penalty and the pandemic odds,
+## so the strongest compute lever in the game was a one-way ratchet with no failure mode of its
+## own. It is the GAP now — capability minus understanding — which is a quantity the player can
+## close, and the only reading on this page that can be taken to a true zero and kept there.
+##
+## This is where the settings SETTLE. The live figure is Game.ai_exposure(), which walks towards
+## it: capability and understanding are both stocks and neither moves the year a slider does.
 static func existential_risk(s: Dictionary) -> float:
-	return clampf(ai_autonomy(s) * 0.6, 0.0, 1.0)
+	return clampf(ai_autonomy(s) - ai_alignment_level(s), 0.0, 1.0)

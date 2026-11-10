@@ -234,6 +234,11 @@ const FIELDS: Array[Dictionary] = [
 	{"key": "next_pandemic_year", "prop": "_next_pandemic_year", "custom": true},
 	{"key": "next_nuclear_year",  "prop": "_next_nuclear_year", "custom": true},
 	{"key": "arms_strain",        "prop": "_arms_strain", "kind": FLOAT, "default": 0.0},
+	{"key": "next_ai_year",       "prop": "_next_ai_year", "custom": true},
+	# Both stocks default to zero, which is exactly right for a save made before the machines
+	# were a threat: that run never pushed capability, so it has none to be exposed by.
+	{"key": "ai_capability",      "prop": "_ai_capability", "kind": FLOAT, "default": 0.0},
+	{"key": "ai_understood",      "prop": "_ai_understood", "kind": FLOAT, "default": 0.0},
 
 	# ── Panels that keep their own state ──
 	{"key": "stats_history", "custom": true},

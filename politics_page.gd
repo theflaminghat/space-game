@@ -18,6 +18,9 @@ var _state: Dictionary = {}
 ## Maps effect key → value Label in the "Current Effects" summary.
 var _effect_labels: Dictionary = {}
 
+## Live exposure from Game, or -1 before it has said. See _set_risk.
+var _live_risk: float = -1.0
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 ## Swallow mouse-wheel events so scrolling over this panel doesn't zoom the
@@ -269,7 +272,7 @@ func _refresh_effects() -> void:
 	_set_effect_years("life_exp", PoliticsData.life_expectancy_bonus(_state))
 	# CO₂: a multiplier below 1.0 is the beneficial direction.
 	_set_effect("co2",        PoliticsData.co2_mult(_state),           true)
-	_set_effect_pct("risk",   PoliticsData.existential_risk(_state))
+	_set_risk(PoliticsData.existential_risk(_state))
 
 ## Update one effect label's text and colour.  `lower_is_better` flips the
 ## green/red sense (used for CO₂, where less is good).
@@ -298,12 +301,32 @@ func _set_effect_years(key: String, years: float) -> void:
 		lbl.add_theme_color_override("font_color",
 			UIPalette.GOOD if years > 0.0 else UIPalette.BAD)
 
-## Effect shown as a percentage where lower is better (existential risk): "18%".
-func _set_effect_pct(key: String, frac: float) -> void:
-	var lbl: Label = _effect_labels.get(key, null)
+## Capability the civilisation does not understand, as a percentage. Lower is better, and zero
+## is reachable — it is the one reading here that can be driven to a true zero and kept there.
+##
+## TWO numbers when they differ: where it is now, and where these settings take it. Capability
+## and understanding are stocks that walk towards a setting over centuries, so a page showing
+## only the settled figure would report a slider as having already worked — and the lag between
+## moving it and the stock answering is the whole of the decision.
+func _set_risk(settled: float) -> void:
+	var lbl: Label = _effect_labels.get("risk", null)
 	if lbl == null:
 		return
-	lbl.text = "%d%%" % int(round(frac * 100.0))
+	var shown: float = _live_risk if _live_risk >= 0.0 else settled
+	if _live_risk >= 0.0 and absf(_live_risk - settled) >= 0.005:
+		lbl.text = "%d%%  →  %d%%" % [
+			int(round(_live_risk * 100.0)), int(round(settled * 100.0))]
+	else:
+		lbl.text = "%d%%" % int(round(shown * 100.0))
 	# Green when low, red when high.
 	lbl.add_theme_color_override("font_color",
-		UIPalette.GOOD.lerp(UIPalette.BAD, clampf(frac / 0.5, 0.0, 1.0)))
+		UIPalette.GOOD.lerp(UIPalette.BAD, clampf(shown / 0.5, 0.0, 1.0)))
+
+
+## What the exposure actually IS right now, pushed in by Game. Negative means "not told yet",
+## which is what the page shows before a run is under way.
+func set_live_risk(now: float) -> void:
+	if is_equal_approx(now, _live_risk):
+		return
+	_live_risk = now
+	_set_risk(PoliticsData.existential_risk(_state))

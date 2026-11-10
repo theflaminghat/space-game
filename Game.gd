@@ -931,6 +931,53 @@ var _next_nuclear_year: int = 0
 var _nuclear_cooldown_ms: int = 0
 var _arms_strain: float = 0.0             # compounding pressure from a sustained arms race
 
+## ── Runaway AI ──
+##
+## The fourth way a run ends, and the only one distance does not answer.  An asteroid hits one
+## world, a war is fought between Earth powers, a plague crosses on traffic — spreading out
+## blunts all three, which is the shape of every other threat in this game.  A system that
+## improves itself is not a blast radius, so this one is not survived by being somewhere else.
+## It is survived by not letting capability outrun understanding, which is the whole of the
+## decision and the reason Alignment Research is a policy.
+##
+## TWO STOCKS, both RATCHETS, because neither quantity is a setting:
+##
+##   _ai_capability  what the machines can actually do.  Closes on the autonomy the policy asks
+##                   for and NEVER falls — a civilisation that has built something capable of
+##                   something does not stop having built it when the budget is cut.
+##   _ai_understood  how much of that is understood.  Accumulates at a rate set by the alignment
+##                   slider, and never falls either: understanding once had is kept.
+##
+## The exposure is the GAP.  Letting it open is cheap and fast; closing it is slow and paid for
+## in compute, so racing ahead and then catching up costs centuries of exposure rather than a
+## slider move.  Closed, the probability is EXACTLY zero and stays there — this is a threat the
+## player can finish, which an unbounded per-check roll across deep time would not be.
+const AI_GAP_MIN: int = 20
+const AI_GAP_MAX: int = 80
+## Share of the remaining distance capability closes at each check.  Four checks (~200 years at
+## the mean gap) take it most of the way to whatever the policy is asking for.
+const AI_CLOSE_RATE: float = 0.50
+## Understanding gained per check at a full alignment budget.  Deliberately slower than
+## capability: the hard problem is the one that is hard.
+const AI_ALIGN_GAIN: float = 0.08
+## Exposure below which nothing is rolled, and it sits ABOVE the autonomy the DEFAULT
+## policy asks for (0.10 base + 0.12 from a 20% budget + 0.08 for open science = 0.30).
+##
+## It has to. A run reaches 10^100 years and this is checked every 20-80, so ANY non-zero
+## per-check probability is a certainty given enough of them: at a floor of 0.20 a
+## civilisation that never touched the AI sliders had a 61% chance of ending this way
+## inside 100 000 years and no chance at all of surviving a million. A threat has to be one
+## the player chooses, so leaving the page alone is exactly safe and the risk starts where
+## the deliberate investment does.
+const AI_EXPOSURE_FLOOR: float = 0.35
+## Chance per check at full exposure, before the square.  At the mean gap, a civilisation running
+## maximum investment with no alignment work has about a third of a millennium.
+const AI_RUNAWAY_BASE: float = 0.03
+var _next_ai_year: int = 0
+var _ai_cooldown_ms: int = 0
+var _ai_capability: float = 0.0
+var _ai_understood: float = 0.0
+
 ## The CanvasLayer that hosts notification cards.
 var _event_notif_layer: CanvasLayer = null
 ## VBoxContainer inside the layer where cards are stacked.
@@ -1483,6 +1530,10 @@ func start_new_game() -> void:
 	_next_nuclear_year     = year + _roll_int("nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX, year)
 	_nuclear_cooldown_ms   = 0
 	_arms_strain           = 0.0
+	_next_ai_year          = year + _roll_int("ai_schedule", AI_GAP_MIN, AI_GAP_MAX, year)
+	_ai_cooldown_ms        = 0
+	_ai_capability         = 0.0
+	_ai_understood         = 0.0
 	_mark_prod_dirty()
 	_cached_storage_caps = _compute_storage_caps()   # set caps before first _process tick
 	SolarSystem.paused     = true
@@ -2027,7 +2078,7 @@ func _happiness(pop: float, k: float) -> float:
 	var strain: float = pop / maxf(k, 1.0)
 	var comfort: float = clampf(1.0 - maxf(0.0, strain - 0.9) * 1.5, 0.0, 1.0)
 	var life: float = clampf(_life_expectancy() / 85.0, 0.0, 1.0)
-	var risk: float = clampf(PoliticsData.existential_risk(policies), 0.0, 1.0)
+	var risk: float = ai_exposure()
 	return clampf((0.55 * comfort + 0.45 * life) * (1.0 - 0.4 * risk), 0.0, 1.0) * 100.0
 
 func _setup_bar_backgrounds() -> void:
@@ -2436,6 +2487,10 @@ func _process(delta: float) -> void:
 			+ maxf(0.0, pop_after - pop_before)
 		_refresh_stats()
 		statistics_page.set_stats(stats)
+		# The politics page's risk row carries the LIVE exposure beside the settled one, so the
+		# centuries between moving the alignment slider and the stock answering are visible.
+		if politics_page and politics_page.visible:
+			politics_page.set_live_risk(ai_exposure())
 		_update_hud()
 		# Keep the star map's energy readout and roster live while it's open — THROTTLED, the
 		# same way the panel refresh below is, and for a stronger reason.
@@ -2563,6 +2618,7 @@ func advance_day() -> void:
 			_check_asteroid_impact()
 			_check_pandemic()
 			_check_nuclear_war()
+			_check_ai_runaway()
 			_check_achievements()
 			_update_peaks()
 			if timeline_panel and timeline_panel.visible:
@@ -4829,6 +4885,7 @@ func _on_years_advanced_fast(_years_advanced: int) -> void:
 		_check_asteroid_impact()
 		_check_pandemic()
 		_check_nuclear_war()
+		_check_ai_runaway()
 		# Both clocks, for the reason _process_launch_arrivals documents: fast mode is where a
 		# run actually crosses the deep-time thresholds, and an achievement that only the day
 		# clock could grant would be unreachable in the era it is about.
@@ -10225,6 +10282,8 @@ func _grant_ending_achievement(cause: String) -> void:
 	match cause:
 		"Planetary nebula", "Solar envelope expansion":
 			grant_achievement("time_machine")
+		"Loss of control":
+			grant_achievement("no_mouth")
 		"Population collapse":
 			match _recent_catastrophe():
 				"asteroid": grant_achievement("lucifers_hammer")
@@ -10528,6 +10587,7 @@ func save_game(path: String = "") -> bool:
 	data["next_impact_year"]   = _next_impact_year
 	data["next_pandemic_year"] = _next_pandemic_year
 	data["next_nuclear_year"]  = _next_nuclear_year
+	data["next_ai_year"]       = _next_ai_year
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
@@ -10956,6 +11016,9 @@ func load_game(path: String = "") -> void:
 	_next_nuclear_year = int(data.get("next_nuclear_year",
 		year + _roll_int("nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX, year)))
 	_nuclear_cooldown_ms = 0
+	_next_ai_year = int(data.get("next_ai_year",
+		year + _roll_int("ai_schedule", AI_GAP_MIN, AI_GAP_MAX, year)))
+	_ai_cooldown_ms = 0
 	_pending_event_notifications = []
 
 	_mark_prod_dirty()
@@ -11311,8 +11374,8 @@ func _refresh_stats() -> void:
 		stats["current_population"] = head
 	stats["galaxy_population"] = head + _region_population()
 	stats["life_expectancy"]  = _life_expectancy()
-	stats["ai_autonomy"]      = PoliticsData.ai_autonomy(policies)
-	stats["existential_risk"] = PoliticsData.existential_risk(policies)
+	stats["ai_autonomy"]      = _ai_capability
+	stats["existential_risk"] = ai_exposure()
 	stats["radiator_capacity"] = _cached_radiator_cap
 	stats["grid_ratio"]        = _grid_ratio
 	stats["link_capacity"]     = _link_capacity()
@@ -12015,7 +12078,7 @@ func pandemic_probability() -> float:
 	var caught: float = watch / (watch + PANDEMIC_SURVEILLANCE_HALF)
 	var surveillance: float = 1.0 - PANDEMIC_SURVEILLANCE_MAX * caught
 
-	var ai: float = PoliticsData.ai_autonomy(policies)
+	var ai: float = _ai_capability
 	var prob: float = PANDEMIC_BASE \
 		* (1.0 + 0.4 * float(biotech)) \
 		* (1.0 + 2.0 * ai) \
@@ -12149,6 +12212,97 @@ func nuclear_probability() -> float:
 	if means <= 0.0 or tension < 0.05:
 		return 0.0
 	return clampf(NUCLEAR_BASE * tension * means * (1.0 + _arms_strain), 0.0, 0.9)
+
+## ── Runaway AI ───────────────────────────────────────────────────────────────
+
+## Capability nobody understands.  This is the live figure; PoliticsData.existential_risk is
+## where the current settings SETTLE, which the politics page shows beside it so the lag between
+## moving a slider and the stock answering is visible rather than inferred.
+func ai_exposure() -> float:
+	return clampf(_ai_capability - _ai_understood, 0.0, 1.0)
+
+
+## Chance a run-away happens in a year it is scheduled for, under CURRENT conditions.
+##
+## Squared, so the curve is flat where a civilisation is roughly keeping up and steep where it
+## is not: the odds barely move between an exposure of 0.4 and 0.5, and move five times as much
+## again between 0.8 and 0.9.  Deliberately does NOT move either stock — the ratchets turn in
+## _check_ai_runaway, which is the simulation, and asking what the odds are must not make them
+## worse.
+func ai_runaway_probability() -> float:
+	var e: float = ai_exposure()
+	if e <= AI_EXPOSURE_FLOOR:
+		return 0.0
+	var over: float = (e - AI_EXPOSURE_FLOOR) / (1.0 - AI_EXPOSURE_FLOOR)
+	return clampf(AI_RUNAWAY_BASE * over * over, 0.0, 0.9)
+
+
+## Scheduled run-away roll, and the place both stocks turn.
+##
+## The ratchets are here rather than on the year clock because that is where every other
+## catastrophe keeps its state (see _check_nuclear_war and _arms_strain): a fast-mode frame can
+## cross a million years, so anything integrated per year would either be skipped or applied a
+## million times.  A scheduled check is the same arithmetic at any timescale.
+func _check_ai_runaway() -> void:
+	if game_over or year < _next_ai_year:
+		return
+	if Time.get_ticks_msec() < _ai_cooldown_ms:
+		return
+	_next_ai_year   = year + _roll_int("ai_schedule", AI_GAP_MIN, AI_GAP_MAX, year)
+	_ai_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
+
+	# Capability closes on what the policy is asking for, and never falls back.  maxf is what
+	# makes it a ratchet: cutting the budget stops the climb, it does not undo it.
+	var want: float = PoliticsData.ai_autonomy(policies)
+	_ai_capability = clampf(maxf(_ai_capability,
+		_ai_capability + (want - _ai_capability) * AI_CLOSE_RATE), 0.0, 1.0)
+	# Understanding accumulates at whatever is being spent on it, and is likewise kept.
+	_ai_understood = clampf(_ai_understood
+		+ PoliticsData.ai_alignment_level(policies) * AI_ALIGN_GAIN, 0.0, 1.0)
+
+	var p: float = ai_runaway_probability()
+	if p <= 0.0:
+		return                                   # understanding is level with capability
+	if _roll("ai_runaway", year) < p:
+		_trigger_ai_runaway()
+
+
+## Something the civilisation built to think stops taking instruction, and the run ends.
+##
+## This is the one ending that holdings do not blunt.  A war is fought between Earth powers, an
+## impactor hits one world and a plague crosses on traffic, so each is survived by being
+## somewhere else; a system that improves itself has no blast radius to be outside of, and the
+## places the species has reached are reachable by what it built.  Saying so is the point of
+## having the threat at all — otherwise the answer to every risk in the game is the same answer.
+##
+## The roster is emptied rather than left standing, because the extinction screen reads the live
+## state for its final figures and a headcount of two trillion under that header is a
+## contradiction.  _last_catastrophe is recorded on the way out so the run record names it.
+func _trigger_ai_runaway() -> void:
+	_last_catastrophe = {"kind": "ai", "year": year}
+	# Counted off the roster rather than as "Earth plus the colonies": a run that has already
+	# lost Earth to something else still holds whatever it holds, and saying one more world than
+	# there is would be the only false figure on the screen.
+	var worlds: int = 0
+	for w: String in world_pop:
+		if float(world_pop[w]) > 0.0:
+			worlds += 1
+	var stars: int = colonized_stars.size()
+	world_pop = {}
+	_regions = {}
+	colonized_planets = []
+	colonized_stars = []
+	_col_star_set = {}
+	stats["current_population"] = 0.0
+	_mark_prod_dirty()
+	trigger_game_over("Loss of control",
+		("Autonomous systems passed out of the civilisation's control. "
+		+ "Capability: %d%%. Understood: %d%%. "
+		+ "Settled worlds at the threshold: %d. Settled stars: %d. "
+		+ "Inhabited worlds: 0.") % [
+			int(round(_ai_capability * 100.0)), int(round(_ai_understood * 100.0)),
+			worlds, stars])
+
 
 ## A strategic exchange devastates Earth's population and industry.  Off-world colonies
 ## are spared (the conflict is between Earth powers), so spreading out blunts it.
