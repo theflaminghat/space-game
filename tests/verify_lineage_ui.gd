@@ -38,15 +38,14 @@ func _run() -> void:
 	sm.show()
 	for _i in range(4): await process_frame
 
-	check(sm._lineage_label != null, "the info box has a lineage line")
-	check(sm._lineage_btn != null, "and a request button")
+	check(sm._lineage_btn != null, "the panel has a request button")
 	check(sm._breed_opt != null, "and a breeding selector")
 
 	# ── Nothing of ours selected: the block stays out of the way ──
 	var plain: String = str(sm.all_stars()[1]["name"])
 	_select(sm, plain)
 	g._on_star_selected_lineage(plain)
-	check(not sm._lineage_label.visible, "an uncolonised star shows no lineage line")
+	check(str(sm._lineage_text) == "", "an uncolonised star shows no lineage line")
 	check(not sm._lineage_btn.visible, "and no request button")
 
 	# ── A colony that has not been out there long has nothing to send ──
@@ -59,9 +58,9 @@ func _run() -> void:
 	g.refresh_star_map()
 	_select(sm, w)
 	g._on_star_selected_lineage(w)
-	check(sm._lineage_label.visible, "a colony of ours shows its lineage")
-	check(sm._lineage_label.text.to_lower().find("unedited") >= 0,
-		"saying what its people are: %s" % sm._lineage_label.text)
+	check(str(sm._lineage_text) != "", "a colony of ours shows its lineage")
+	check(str(sm._lineage_text).to_lower().find("unedited") >= 0,
+		"saying what its people are: %s" % str(sm._lineage_text))
 	check(sm._lineage_btn.visible, "with the request button present")
 	check(sm._lineage_btn.disabled, "but greyed")
 	check(sm._lineage_btn.text.find("lineage of its own") >= 0,

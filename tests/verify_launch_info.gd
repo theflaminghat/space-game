@@ -41,16 +41,19 @@ func _run() -> void:
 	p._update_launch_ui()
 	for _i in range(2): await process_frame
 
-	var line: String = p.get("_launch_info").text
+	var line: String = str(p.get("_target_text"))
 	check(not line.to_lower().contains("energy"),
-		"an uncolonised star's info line says nothing about energy: " + line)
-	check(line.contains("Pick an action"), "it still tells the player what to do: " + line)
+		"an uncolonised star's readout says nothing about energy: " + line)
+	# What to do with the buttons is on the buttons' own panel now. The readout says what is at
+	# the star, and at an uninhabited one there is nothing beyond the physics already listed.
+	check(str(p._action_hint.text).contains("Pick an action"),
+		"the action panel tells the player what to do: " + str(p._action_hint.text))
 
 	# A large reserve must not put the figure back.
 	rt.resources["energy"] = 1.0e20
 	p.set_interstellar_state({}, [], 1.0e20)
 	for _i in range(2): await process_frame
-	check(not (p.get("_launch_info").text as String).to_lower().contains("energy"),
+	check(not str(p.get("_target_text")).to_lower().contains("energy"),
 		"and still says nothing with the reserve full")
 
 	# But the panel still HOLDS the reserve, because the dialog needs it to judge affordability.

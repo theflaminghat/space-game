@@ -861,6 +861,10 @@ const PICK_PX:   float = 16.0    # click tolerance for selecting a star
 ## bound to those two edges and grows up and to the left, so this is the only position it has —
 ## everything it gains extends away from the corner.
 const LAUNCH_UI_GAP: float = 10.0
+## The bottom-LEFT readout: its inset from the map's left and bottom edges, and the width it
+## never goes below. The width is a floor rather than the width — see _draw_info_box.
+const INFO_BOX_INSET: float = 12.0
+const INFO_BOX_MIN_W: float = 320.0
 ## Minimum width.  The wrapping info text is held to this so it cannot squeeze the panel thin,
 ## but a button whose label is longer — "Fire missiles…  (999 999 987 in stock)" — pushes the
 ## left edge further out rather than being cut off.
@@ -1976,7 +1980,8 @@ var _ref_name: String  = "Sol"
 var _thrust_btn: Button = null
 ## The lineage block in the info box: what a colony's people have become, the request for their
 ## sequence data, and the list of sequences that could be spliced into them.
-var _lineage_label: Label = null
+## What a colony of ours has become, for the bottom-left readout.
+var _lineage_text: String = ""
 var _lineage_btn: Button = null
 var _breed_opt: OptionButton = null
 var _breed_ids: Array = []
@@ -2182,11 +2187,18 @@ var _war_btn: Button = null
 
 ## Launch sub-panel (built in _ready, shown when a colonisable star is selected).
 var _launch_ui:     PanelContainer = null
-var _launch_title:  Label   = null
-var _intel_label:   Label   = null   # known infrastructure of a detected alien system
+## The selected system's own blocks, drawn in the bottom-left readout beside the star's physics.
+##
+## They used to be Labels in the action panel, which put WHAT IS THERE and WHAT CAN BE DONE in
+## one column, under a heading that repeated the name and distance the readout was already
+## showing two corners away. Held as text because the readout is drawn rather than built from
+## controls, and computed here rather than in _draw because _intel_block and _colony_infra_block
+## walk a system's buildings: once per selection, not once per frame.
+var _intel_text:    String  = ""   # known infrastructure of a detected alien system
+var _target_text:   String  = ""   # what is at the star: our colony, and what it holds
 var _speed_slider:  HSlider = null
 var _accel_slider:  HSlider = null   # log₁₀ of max acceleration in m/s²
-var _launch_info:   Label   = null
+var _action_hint:   Label   = null   # what the buttons below it do, in the panel they do it in
 var _launch_btn:    Button  = null
 var _laser_power_slider: HSlider = null   # laser energy multiplier (≥1)
 var _laser_btn:     Button  = null
@@ -2393,43 +2405,22 @@ func _build_launch_ui() -> void:
 	mc.add_child(vb)
 	_launch_ui.add_child(mc)
 
-	_launch_title = Label.new()
-	_launch_title.add_theme_font_size_override("font_size", 13)
-	_launch_title.modulate = UIPalette.TITLE
-	vb.add_child(_launch_title)
-
-	# Known infrastructure of a detected alien system (multi-line list; hidden otherwise).
-	_intel_label = Label.new()
-	_intel_label.add_theme_font_size_override("font_size", 11)
-	_intel_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_intel_label.custom_minimum_size = Vector2(360, 0)
-	_intel_label.modulate = UIPalette.WARN
-	_intel_label.hide()
-	vb.add_child(_intel_label)
-
-	_launch_info = Label.new()
-	_launch_info.add_theme_font_size_override("font_size", 11)
-	_launch_info.modulate = UIPalette.TEXT
-	# Wrap within a fixed width so long flight/intel text can't stretch the panel horizontally.
-	_launch_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_launch_info.custom_minimum_size = Vector2(360, 0)
-	_launch_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.add_child(_launch_info)
+	# Guidance about the buttons, in the corner the buttons are in. The star's name, distance and
+	# everything else about it is the bottom-left readout's.
+	_action_hint = Label.new()
+	_action_hint.add_theme_font_size_override("font_size", 11)
+	_action_hint.modulate = UIPalette.DIM
+	_action_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_action_hint.custom_minimum_size = Vector2(360, 0)
+	_action_hint.text = "Pick an action to set speed / acceleration / number and confirm."
+	vb.add_child(_action_hint)
 
 	# ── A colony of our own: what its people have become, and the trade in it ──
 	# Only a settled world shows these.  A colony four hundred light-years out is autonomous in
 	# every way that matters, and what can usefully cross that gap is its genetic data — so the
 	# offer belongs on the system itself, next to the distance that prices it.
-	_lineage_label = Label.new()
-	_lineage_label.add_theme_font_size_override("font_size", 11)
-	_lineage_label.modulate = UIPalette.GOOD
-	_lineage_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_lineage_label.custom_minimum_size = Vector2(360, 0)
-	_lineage_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_lineage_label.hide()
-	vb.add_child(_lineage_label)
-
 	_lineage_btn = Button.new()
+	_lineage_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_lineage_btn.hide()
 	_lineage_btn.pressed.connect(func() -> void:
 		var s: String = selected_star()
@@ -2441,6 +2432,7 @@ func _build_launch_ui() -> void:
 	# life history: the archive grows, and three buttons that are usually absent is a panel that
 	# changes shape every time a transfer lands.
 	_breed_opt = OptionButton.new()
+	_breed_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_breed_opt.fit_to_longest_item = false
 	_breed_opt.clip_text = true
 	_breed_opt.hide()
@@ -2496,8 +2488,6 @@ func _build_launch_ui() -> void:
 	_laser_btn.pressed.connect(func(): _open_action_dialog("laser"))
 	vb.add_child(_laser_btn)
 
-	var diplo := HBoxContainer.new()
-	diplo.add_theme_constant_override("separation", 6)
 	_contact_btn = _diplo_button("Contact", func(): _emit_message("contact"))
 	_ally_btn    = _diplo_button("Alliance", func(): _emit_message("ally"))
 	_trade_btn   = _diplo_button("Trade…", func():
@@ -2512,12 +2502,11 @@ func _build_launch_ui() -> void:
 		if n != "":
 			thrust_aim_requested.emit(n))
 	_thrust_btn.visible = false
-	diplo.add_child(_contact_btn)
-	diplo.add_child(_ally_btn)
-	diplo.add_child(_trade_btn)
-	diplo.add_child(_war_btn)
-	diplo.add_child(_thrust_btn)
-	vb.add_child(diplo)
+	vb.add_child(_contact_btn)
+	vb.add_child(_ally_btn)
+	vb.add_child(_trade_btn)
+	vb.add_child(_war_btn)
+	vb.add_child(_thrust_btn)
 
 	_build_action_dialog()
 
@@ -2525,7 +2514,6 @@ func _diplo_button(label: String, handler: Callable) -> Button:
 	var b := Button.new()
 	b.text = label
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.add_theme_font_size_override("font_size", 11)
 	b.pressed.connect(handler)
 	return b
 
@@ -3162,30 +3150,31 @@ func _update_launch_ui() -> void:
 	var star := selected_star()
 	if star == "":
 		_launch_ui.hide()
+		# Nothing is selected, so nothing is known: cleared rather than left behind, because the
+		# readout draws whatever is in these and the next selection may be a star with no intel.
+		_intel_text = ""
+		_target_text = ""
 		return
 	_launch_ui.show()
 	# Known-infrastructure listing for a detected alien system (shown for any selection above).
-	if _intel_label:
-		var block := _intel_block(star)
-		_intel_label.text = block
-		_intel_label.visible = block != ""
+	_intel_text = _intel_block(star)
 	var dist: float = _selected_dist()
 	if _colonized.has(star):
-		_launch_title.text = "%s  —  colonised" % star
-		_launch_info.text = "A human colony orbits this star.\n%s" % _colony_infra_block(star)
+		_target_text = "A human colony orbits this star.\n%s" % _colony_infra_block(star)
 		_launch_btn.disabled = true
 		_launch_btn.text = "Colonised"
 		_show_lineage_block(true)
 		_update_weapon_buttons(dist, true)
 		return
 	_show_lineage_block(false)
-	_launch_title.text = "%s  —  %.2f ly" % [star, dist]
 	# No energy figure here.  The reserve is the home grid's, and it has nothing to do with the
 	# star being looked at: it is a property of the civilisation, not of the target, and shown on
 	# an uncolonised system it read as a fact about that system.  What a launch costs and whether
 	# it can be paid for belong to the action dialog, where the speed and count that set the cost
 	# are actually chosen — see _update_dialog_info.
-	_launch_info.text = "Pick an action to set speed / acceleration / number and confirm."
+	# What to do with the buttons is on the buttons' own panel (_action_hint); the readout says
+	# what is at the star, and at an uninhabited one there is nothing beyond its physics.
+	_target_text = ""
 	# A detected civilisation makes the system a neighbour, not a site.  Blocked here rather
 	# than refused on confirm, so the map says why before the player commits to anything.
 	var inhabited: bool = _intel.has(star)
@@ -3228,16 +3217,15 @@ func set_lineage_state(state: Dictionary) -> void:
 ## light-year, out and back at the speed of light, and on a frontier colony that is most of a
 ## millennium.  Shown on the button rather than in a tooltip for exactly that reason.
 func _show_lineage_block(on: bool) -> void:
-	if _lineage_label == null:
+	if _lineage_btn == null:
 		return
 	var st: Dictionary = _lineage_state
 	if not on or st.is_empty():
-		_lineage_label.hide()
+		_lineage_text = ""
 		_lineage_btn.hide()
 		_breed_opt.hide()
 		return
-	_lineage_label.text = str(st.get("text", ""))
-	_lineage_label.show()
+	_lineage_text = str(st.get("text", ""))
 
 	var why: String = str(st.get("why", ""))
 	var years: float = float(st.get("years", 0.0))
@@ -4992,19 +4980,59 @@ func _draw() -> void:
 			lines.append("◇ Peaceful alien contact")
 		elif sfac == "unknown":
 			lines.append("? Alien presence — alignment unknown")
-		_draw_info_box(lines)
+		# Who is there and what they hold, under the star they hold it at. These used to be three
+		# labels in the action panel two corners away, which asked the player to read the system
+		# in one place and act on it in another, and repeated the name and distance to do it.
+		var tint: Dictionary = {}
+		for blk: Array in [[_intel_text, UIPalette.WARN], [_target_text, UIPalette.TEXT],
+				[_lineage_text, UIPalette.GOOD]]:
+			var body: String = str(blk[0])
+			if body == "":
+				continue
+			for ln: String in body.split("\n"):
+				if ln.strip_edges() == "":
+					continue
+				tint[lines.size()] = blk[1]
+				lines.append(ln)
+		_draw_info_box(lines, tint)
+
+## How wide the readout has to be for `lines`: the longest of them, never below INFO_BOX_MIN_W
+## and never wider than the map it sits in.
+##
+## Its own function because it is the part with a failure mode. The box was a fixed 320 px while
+## it held a star's physics, whose lines are all about the same length; it now also carries the
+## blocks naming a civilisation's buildings and a colony's lineage, which are as long as the
+## names in them, and a fixed width clips those instead of growing to them.
+func info_box_width(lines: Array) -> float:
+	var w: float = INFO_BOX_MIN_W
+	for li in range(lines.size()):
+		w = maxf(w, _font.get_string_size(str(lines[li]), HORIZONTAL_ALIGNMENT_LEFT, -1,
+			12 if li == 0 else 11).x + 20.0)
+	return minf(w, maxf(INFO_BOX_MIN_W, size.x - 2.0 * INFO_BOX_INSET))
+
 
 ## The bottom-left readout, shared by the star and cluster selections so they cannot drift apart.
 
-func _draw_info_box(lines: Array) -> void:
-	var box := Rect2(Vector2(12, size.y - (16.0 * lines.size() + 16.0) - 12.0),
-		Vector2(320, 16.0 * lines.size() + 16.0))
+## `tint` colours the lines that are not ordinary body text, by index — a detected
+## civilisation's infrastructure, our own colony's, what its people have become.
+##
+## The width is MEASURED rather than fixed at 320 px. It was fixed while the box held a star's
+## physics, whose lines are all about the same length; it now also carries blocks naming
+## buildings and lineages, and a fixed width clips those instead of growing. Bound to the left
+## edge, so what it gains extends to the right, away from the edge it is docked to — the mirror
+## of the action panel in the other corner.
+func _draw_info_box(lines: Array, tint: Dictionary = {}) -> void:
+	var w: float = info_box_width(lines)
+	var h: float = 16.0 * lines.size() + 16.0
+	var box := Rect2(Vector2(INFO_BOX_INSET, size.y - h - INFO_BOX_INSET), Vector2(w, h))
 	draw_rect(box, Color(0.06, 0.08, 0.14, 0.92))
 	draw_rect(box, Color(0.4, 0.55, 0.8, 0.5), false, 1.0)
 	for li in range(lines.size()):
+		var col: Color = Color(0.92, 0.96, 1.0) if li == 0 else Color(0.7, 0.78, 0.9)
+		if tint.has(li):
+			col = tint[li]
 		draw_string(_font, box.position + Vector2(10, 19 + li * 16), str(lines[li]),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 12 if li == 0 else 11,
-			Color(0.92, 0.96, 1.0) if li == 0 else Color(0.7, 0.78, 0.9))
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12 if li == 0 else 11, col)
 
 
 # ── Input ─────────────────────────────────────────────────────────────────────
