@@ -40,10 +40,20 @@ func _ready() -> void:
 # ── UI construction ───────────────────────────────────────────────────────────
 
 func _build_ui() -> void:
+	# Inset from the page's own edges, like every other page: the title, the legend and the
+	# year readout all started at the border. The MarginContainer the scene wraps this page in
+	# holds nothing any more — the whole layout is built here — so the padding belongs here too.
+	var pad := MarginContainer.new()
+	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pad.add_theme_constant_override("margin_left", 12)
+	pad.add_theme_constant_override("margin_right", 12)
+	pad.add_theme_constant_override("margin_top", 10)
+	pad.add_theme_constant_override("margin_bottom", 10)
+	add_child(pad)
+
 	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_theme_constant_override("separation", 6)
-	add_child(root)
+	pad.add_child(root)
 
 	# ── Header ────────────────────────────────────────────────────────────────
 	var header := HBoxContainer.new()

@@ -385,6 +385,10 @@ script = ExtResource("22_5t8nk")
 
 [node name="MarginContainer" type="MarginContainer" parent="main_ui/PlanetInfoPage" unique_id=1120603928]
 layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
 
 [node name="VBoxContainer" type="VBoxContainer" parent="main_ui/PlanetInfoPage/MarginContainer" unique_id=1451896717]
 layout_mode = 2
@@ -442,6 +446,10 @@ script = ExtResource("30_bpnl")
 
 [node name="MarginContainer" type="MarginContainer" parent="main_ui/BuildPanel" unique_id=100202]
 layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
 
 [node name="VBoxContainer" type="VBoxContainer" parent="main_ui/BuildPanel/MarginContainer" unique_id=100203]
 layout_mode = 2
@@ -471,6 +479,10 @@ script = ExtResource("31_lpnl")
 
 [node name="MarginContainer" type="MarginContainer" parent="main_ui/LaunchPanel" unique_id=200002]
 layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
 
 [node name="VBoxContainer" type="VBoxContainer" parent="main_ui/LaunchPanel/MarginContainer" unique_id=200003]
 layout_mode = 2

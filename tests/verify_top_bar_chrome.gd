@@ -324,6 +324,74 @@ func _run() -> void:
 		"and every page reaches the far edge at %.0f: %s" % [
 			view.end.x, str(short_pages.slice(0, 6))])
 
+	# ── A page's text does not run into the panel's own border ──
+	#
+	# Three panels in node_3d.tscn wrap their contents in a MarginContainer and set no margins
+	# on it, so the container did nothing and every line started at the panel's own border: the
+	# body's Info page (its name, every key and value in the stat grid, every composition row)
+	# and the Infrastructure and Launch titles. The pages built in code — Population, Inventory,
+	# Extraction, Production — all set their own, which is what made the ones that did not look
+	# like a mistake rather than a style. Statistics builds its whole
+	# layout in code and the MarginContainer the scene wraps it in holds nothing, so its padding
+	# is in statistics_page.gd rather than the scene.
+	#
+	# Measured as the gap between a page's edge and the nearest visible label's BOX, which is
+	# where a left-aligned label's text starts.
+	const PAD_MIN: float = 8.0
+	# The body's pages have to be FILLED before they are measured: an Info page nobody has handed
+	# a planet to has no text on it, and a page with nothing written on it passes anything.
+	g.planet_info_page.set_planet_info(g.get_planet_data("earth"))
+	var tabs2 = g._planet_tabs
+	# Every ancestor too: the checks above hide pages to measure the frame, and a label whose
+	# PARENT is hidden reports is_visible_in_tree() false — which skipped every page in silence
+	# and passed this whole section however the panels were laid out.
+	var anc: Node = tabs2
+	while anc != null:
+		if anc is CanvasItem:
+			(anc as CanvasItem).visible = true
+		anc = anc.get_parent()
+	var padded_pages: Array = []
+	for t2 in range(tabs2.get_tab_count()):
+		tabs2.current_tab = t2
+		for _i in range(8): await process_frame
+		padded_pages.append(tabs2.get_tab_control(t2))
+	check(padded_pages.size() >= 6, "every body page is measured: %d" % padded_pages.size())
+	# Build and Info live in the tabs above, having been re-parented there at startup; these two
+	# are still where the scene put them.
+	for extra: String in ["main_ui/VBoxContainer3/HBoxContainer2/StatisticsPage",
+			"main_ui/LaunchPanel"]:
+		var e: Control = g.get_node_or_null(extra) as Control
+		check(e != null, "%s is where it is looked for" % extra)
+		if e != null:
+			e.visible = true
+			for _i in range(8): await process_frame
+			padded_pages.append(e)
+	var measured: int = 0
+	for pg: Control in padded_pages:
+		var l_gap: float = 1.0e9
+		var r_gap: float = 1.0e9
+		var who: String = ""
+		for n: Node in pg.find_children("*", "Label", true, false):
+			var lab := n as Label
+			if not lab.visible or lab.text == "":
+				continue
+			var lg: float = lab.global_position.x - pg.global_position.x
+			if lg < l_gap:
+				l_gap = lg
+				who = lab.text.substr(0, 24)
+			r_gap = minf(r_gap, (pg.global_position.x + pg.size.x)
+				- (lab.global_position.x + lab.size.x))
+		if l_gap > 1.0e8:
+			continue        # a page with nothing written on it yet
+		measured += 1
+		check(l_gap >= PAD_MIN, "%s insets its text from the left: %.1f px (\"%s\")" % [
+			str(pg.name), l_gap, who])
+		check(r_gap >= PAD_MIN, "%s insets its text from the right: %.1f px" % [
+			str(pg.name), r_gap])
+	# A page with no text on it is skipped above, so the count is asserted: the first version of
+	# this check measured nothing at all and passed.
+	check(measured >= 7, "every page with text on it was measured: %d" % measured)
+
 	print("FAILS: %d" % fails)
 	quit()
 
