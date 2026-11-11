@@ -79,13 +79,14 @@ const POLICIES: Array = [
 		"category": "Society",
 		"type":     "slider", "min": -50.0, "max": 50.0, "step": 10.0, "default": 0.0, "unit": "%",
 	},
-	{
-		"id":       "welfare",
-		"name":     "Social Welfare",
-		"desc":     "A safety net: faster population growth and a few years of life expectancy, funded by matter.",
-		"category": "Society",
-		"type":     "slider", "min": 0.0, "max": 50.0, "step": 5.0, "default": 15.0, "unit": "%",
-	},
+	# Social Welfare was here, and it was the two Society policies either side of it at a
+	# smaller size: population growth and capacity in natalism's 2:1 ratio, life expectancy on
+	# healthcare's matter-funded terms, and no cost of its own that those two did not already
+	# charge. Nothing could be asked of it that could not be asked elsewhere, so it was a
+	# second copy of two decisions rather than a third decision. The reachable envelope went
+	# with it — growth 1.69× → 1.49×, life +33 → +25 years, capacity 1.30× → 1.20× — and the
+	# default run is leaner on people and richer on matter by the 15% it used to be set to.
+	# Saves that carry it load fine: retired keys are dropped (see Game.load path).
 	{
 		"id":       "civil_liberties",
 		"name":     "Civil Liberties",
@@ -134,6 +135,12 @@ static func compute_mult(s: Dictionary) -> float:
 	if bool(s.get("open_science", true)):     m += 0.10
 	if bool(s.get("civil_liberties", true)):  m += 0.10
 	m -= float(s.get("natalism", 0.0)) / 50.0 * 0.15                    # more dependents ↓ per-capita
+	# Revenue taken is investment not made, and the machines are bought with the same money as
+	# the mine. The policy has SAID this since it was written — "high rates ... stifle compute"
+	# — while nothing in here read tax_rate, so the page promised an effect the simulation did
+	# not have. Neutral at 30% like its other two terms, so a default run is unchanged and what
+	# the fix adds is reach: a command economy digs hard and thinks slowly, and the reverse.
+	m -= (float(s.get("tax_rate", 30.0)) - 30.0) / 10.0 * 0.03
 	return maxf(0.1, m)
 
 ## Minerals (matter) production multiplier.
@@ -145,7 +152,6 @@ static func minerals_mult(s: Dictionary) -> float:
 	# Social and research spending divert matter.
 	m -= float(s.get("research_budget", 50.0)) / 100.0 * 0.15
 	m -= float(s.get("healthcare", 10.0)) / 60.0 * 0.15
-	m -= float(s.get("welfare", 15.0)) / 50.0 * 0.12
 	m -= float(s.get("military_spending", 10.0)) / 50.0 * 0.12
 	if bool(s.get("civil_liberties", true)):  m -= 0.08
 	return maxf(0.05, m)
@@ -161,7 +167,6 @@ static func energy_mult(s: Dictionary) -> float:
 static func pop_growth_mult(s: Dictionary) -> float:
 	var m := 1.0
 	m += float(s.get("natalism", 0.0)) / 50.0 * 0.40                    # ±40%
-	m += float(s.get("welfare", 15.0)) / 50.0 * 0.20
 	m -= (float(s.get("tax_rate", 30.0)) - 30.0) / 10.0 * 0.03
 	if bool(s.get("automation", false)): m -= 0.10                     # unemployment
 	return maxf(0.1, m)
@@ -170,7 +175,6 @@ static func pop_growth_mult(s: Dictionary) -> float:
 static func pop_capacity_mult(s: Dictionary) -> float:
 	var m := 1.0
 	m += float(s.get("natalism", 0.0)) / 50.0 * 0.20
-	m += float(s.get("welfare", 15.0)) / 50.0 * 0.10
 	m -= float(s.get("industrial_intensity", 50.0)) / 100.0 * 0.10     # pollution lowers capacity
 	return maxf(0.2, m)
 
@@ -178,7 +182,6 @@ static func pop_capacity_mult(s: Dictionary) -> float:
 static func life_expectancy_bonus(s: Dictionary) -> float:
 	var b := 0.0
 	b += float(s.get("healthcare", 10.0)) / 60.0 * 25.0                # up to +25 years
-	b += float(s.get("welfare", 15.0)) / 50.0 * 8.0
 	b -= float(s.get("industrial_intensity", 50.0)) / 100.0 * 10.0     # pollution
 	return b
 

@@ -221,6 +221,37 @@ cost more and do the same.
 **Research gates building availability** through `unlocks.gd`
 (`BUILDING_UNLOCK_REQUIREMENTS`), not through the building entry.
 
+### Policies: the page is the specification
+
+`politics_data.gd` holds the eleven policies and every formula they feed — `science_mult`,
+`compute_mult`, `minerals_mult`, `energy_mult`, `pop_growth_mult`, `pop_capacity_mult`,
+`life_expectancy_bonus`, `co2_mult`, `ai_autonomy`, `existential_risk`. `Game` applies them and
+the politics page displays them, so the description a player reads is the only account they get
+of what a slider does.
+
+Which makes the description part of the simulation, and it has to hold in both directions.
+**Tax Rate said that high rates "stifle compute" and `compute_mult` never read `tax_rate`** — a
+promise the arithmetic had not kept for as long as the policy had existed. It reads it now, at the
+same ±0.03 per 10 points as the population term and neutral at the same 30%, so a default run is
+unchanged and what the fix adds is reach: a command economy digs hard and thinks slowly, and a
+tax-free one is the reverse. The other direction is an effect nobody was told about, which is
+worse, because a player cannot even disagree with it.
+
+`verify_policy_effects` asserts both. `PROMISES` pairs a phrase that is really in a description
+with the output that phrase claims, and measures the direction between the policy's two ends;
+`REACH` pins the whole set of outputs each policy moves, so a new term in a formula fails until it
+is either declared there or described on the page. Mentioning an output is not promising one —
+Research Budget opens "Compute directed to structured science" and moves science and matter only —
+which is why the promises are a curated list of phrases rather than a scan for keywords.
+
+**Social Welfare was cut.** It raised population growth and capacity in natalism's 2:1 ratio,
+added life expectancy on healthcare's matter-funded terms, and charged nothing those two did not
+charge already: there was nothing it could be asked that could not be asked elsewhere, so it spent
+a row of the page on a decision made twice. The reachable envelope went with it — growth
+1.69× → 1.49×, life +33 → +25 years, capacity 1.30× → 1.20× — and the default run is leaner on
+people and richer on matter by the 15% the slider used to sit at. Saves carrying it load fine: the
+policy loader copies only keys that still exist, which is how the retired space policies left too.
+
 ### The cluster shell is streamed
 
 Clusters used to be one hexagonal tile's worth, generated once, with nothing at all beyond the
@@ -2467,6 +2498,13 @@ These are not style preferences; each was a bug.
 	before", so answering could never start the clock again. Both raisers now stand down while
 	`_pending_threat` is set, and the asteroid check stands down **before** advancing its
 	schedule, so the rock is postponed rather than skipped.
+
+14. **A policy's description is the specification.** The politics page is the only account a
+	player gets of what a slider does, so a sentence promising an output no formula produces is a
+	false reading — and an effect no sentence mentions is worse, because the player cannot even
+	disagree with it. Tax Rate claimed to stifle compute from the day it was written and
+	`compute_mult` never read it. `verify_policy_effects` measures every promise and pins every
+	policy's whole reach.
 
 ---
 

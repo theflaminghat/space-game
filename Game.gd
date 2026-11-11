@@ -6008,7 +6008,7 @@ func _life_expectancy() -> float:
 		if ResearchTree.is_unlocked(node_id):
 			le += float(MEDICAL_RESEARCH[node_id])
 	le -= _dirty_power_fraction() * POLLUTION_LE_PENALTY
-	le += PoliticsData.life_expectancy_bonus(policies)   # healthcare/welfare vs pollution
+	le += PoliticsData.life_expectancy_bonus(policies)   # healthcare vs pollution
 	# What medicine and politics reach, the population's own life history scales.  One figure
 	# rather than one per world, because every consumer of this — the stats line, the quality
 	# index, people-ever-lived — is civilisation-wide, and a population-weighted average is the
