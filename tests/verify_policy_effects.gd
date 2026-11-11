@@ -72,6 +72,7 @@ const REACH: Dictionary = {
 	"natalism":             ["capacity", "compute", "growth"],
 	"civil_liberties":      ["compute", "matter", "science"],
 	"military_spending":    ["matter", "science"],
+	"arms_control":         ["matter", "science"],
 }
 
 ## [policy id, a phrase from its description, the output it claims, +1 if raising the policy
@@ -118,6 +119,9 @@ const PROMISES: Array = [
 
 	["military_spending",    "up to +30% science",                            "science",  1],
 	["military_spending",    "at a matter cost",                              "matter",  -1],
+
+	["arms_control",         "paid for in inspection",                        "matter",  -1],
+	["arms_control",         "the research the arms race was producing",       "science", -1],
 ]
 
 ## The policy as it is at one end: a slider's limit, or a toggle's position.
@@ -218,20 +222,30 @@ func _run() -> void:
 		check(reached, "%s is reachable from the page" % key)
 
 
-	# ── The one promise that is kept outside this file ──
-	# Military Spending's description promises geopolitical tension and a risk of nuclear war,
-	# which are Game's, not PoliticsData's. Asserted at the source, because the alternative is a
-	# whole scene to establish one word.
+	# ── The promises that are kept outside this file ──
+	# Military Spending's description promises geopolitical tension and a risk of nuclear war, and
+	# Arms Control's promises safeguards on the fuel cycle and a standoff that unwinds. Both are
+	# Game's, not PoliticsData's. Asserted at the source, because the alternative is a whole scene
+	# to establish that a word is read at all.
+	#
+	# The means term is one function with two callers, and the pair is the point: a forecast that
+	# computes the odds from different arithmetic than the simulation is an instrument that lies.
 	var src: String = FileAccess.get_file_as_string("res://Game.gd")
-	for fn: String in ["_geopolitical_tension", "nuclear_probability"]:
+	var reads: Dictionary = {
+		"_geopolitical_tension": ["military_spending"],
+		"_nuclear_means":        ["military_spending", "arms_safeguards"],
+		"_check_nuclear_war":    ["_nuclear_means()", "arms_safeguards"],
+		"nuclear_probability":   ["_nuclear_means()"],
+	}
+	for fn: String in reads:
 		var start: int = src.find("func %s(" % fn)
 		check(start >= 0, "%s is there to look at" % fn)
 		if start < 0:
 			continue
 		var stop: int = src.find("\nfunc ", start + 8)
 		var body: String = src.substr(start, (stop if stop > start else src.length()) - start)
-		check(body.find("military_spending") >= 0,
-			"%s reads the policy that promises it" % fn)
+		for want: String in (reads[fn] as Array):
+			check(body.find(want) >= 0, "%s reads %s" % [fn, want])
 
 	print("FAILS: %d" % fails)
 	quit()

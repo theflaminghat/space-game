@@ -167,6 +167,9 @@ that showed them as fate would be telling the player their choices do not matter
 
 `pandemic_probability()` and `nuclear_probability()` exist so the check and the forecast read one
 formula; a forecast with its own copy would start lying the first time the real one was tuned.
+`_nuclear_means()` is shared for the same reason one level down: military spending plus whatever of
+the reactor fleet's latent arsenal is not under safeguards, written once because two functions have
+to agree about it.
 `nuclear_probability()` deliberately does not ratchet `_arms_strain` — asking what the odds are
 must not make them worse.
 
@@ -223,7 +226,7 @@ cost more and do the same.
 
 ### Policies: the page is the specification
 
-`politics_data.gd` holds the eleven policies and every formula they feed — `science_mult`,
+`politics_data.gd` holds the twelve policies and every formula they feed — `science_mult`,
 `compute_mult`, `minerals_mult`, `energy_mult`, `pop_growth_mult`, `pop_capacity_mult`,
 `life_expectancy_bonus`, `co2_mult`, `ai_autonomy`, `existential_risk`. `Game` applies them and
 the politics page displays them, so the description a player reads is the only account they get
@@ -243,6 +246,26 @@ with the output that phrase claims, and measures the direction between the polic
 is either declared there or described on the page. Mentioning an output is not promising one —
 Research Budget opens "Compute directed to structured science" and moves science and matter only —
 which is why the promises are a curated list of phrases rather than a scan for keywords.
+
+**Arms Control** is the newest, and it was added to fill two holes rather than to add a dial.
+`means = military_spending + _nuclear_proliferation()`, and proliferation is the civilian fission
+fleet: a civilisation that built reactors for their clean, dense energy carried war risk it could
+not lower at any military budget short of tearing the fleet down. And `_arms_strain`, the
+standoff's compounding carry, had no counter-move at all — spending moves the pressure a check
+*adds*, never how much of the last one is still there. Safeguards reach both: `ARMS_SAFEGUARD_CUT`
+(0.70) of the latent arsenal, and `ARMS_STRAIN_RELIEF` (0.60) of the carry.
+
+It is paid for in matter and in the research the arms race was producing — the science term is
+written against Military Spending's own bonus, so it cancels that spillover exactly rather than
+taxing science in general, and costs nothing at a zero budget. Which is what keeps it from being a
+smaller budget in a different hat: cutting the budget lowers *tension*, which safeguards do not
+touch, and refunds the matter; safeguards cut the *latent* arsenal, which the budget does not
+touch. For a reactor-heavy civilisation at the default budget safeguards are the better of the two
+at the same price in science, and for one with no reactors they do nothing at all, so the decision
+is settled by how the civilisation makes its power. `means` is also clamped at 1.0, so a full
+military budget saturates it alone and safeguards are worth most to a civilisation that is not
+itself armed; the description says the policy covers the fuel cycle and not the declared arsenal,
+and `verify_arms_control` pins that limit rather than apologising for it.
 
 **Social Welfare was cut.** It raised population growth and capacity in natalism's 2:1 ratio,
 added life expectancy on healthcare's matter-funded terms, and charged nothing those two did not

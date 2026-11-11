@@ -101,6 +101,13 @@ const POLICIES: Array = [
 		"category": "Society",
 		"type":     "slider", "min": 0.0, "max": 50.0, "step": 5.0, "default": 10.0, "unit": "%",
 	},
+	{
+		"id":       "arms_control",
+		"name":     "Arms Control",
+		"desc":     "Safeguards on the civilian fuel cycle, inspectors, and a verified treaty regime. Puts most of the latent arsenal a reactor fleet represents out of reach, and lets an accumulated standoff unwind — paid for in inspection and in the research the arms race was producing. It covers the fuel cycle, not the declared arsenal.",
+		"category": "Society",
+		"type":     "slider", "min": 0.0, "max": 100.0, "step": 10.0, "default": 0.0, "unit": "%",
+	},
 ]
 
 ## Returns a fresh Dictionary of {policy_id: default_value} for all policies.
@@ -122,6 +129,10 @@ static func science_mult(s: Dictionary) -> float:
 	if bool(s.get("civil_liberties", true)):  m += 0.10
 	m += (float(s.get("research_budget", 50.0)) - 50.0) / 50.0 * 0.40   # ±40%
 	m += float(s.get("military_spending", 10.0)) / 50.0 * 0.30          # arms race → tech, +30% at max
+	# A verified regime is the end of the race, so the spillover goes with it. Written against the
+	# line above rather than as a tax on science in general: what arms control costs is the
+	# research the buildup was producing, which is nothing at all at a zero budget.
+	m -= float(s.get("military_spending", 10.0)) / 50.0 * 0.30 * arms_safeguards(s)
 	return maxf(0.1, m)
 
 ## Compute multiplier (applied to total compute, which feeds science).
@@ -153,6 +164,7 @@ static func minerals_mult(s: Dictionary) -> float:
 	m -= float(s.get("research_budget", 50.0)) / 100.0 * 0.15
 	m -= float(s.get("healthcare", 10.0)) / 60.0 * 0.15
 	m -= float(s.get("military_spending", 10.0)) / 50.0 * 0.12
+	m -= arms_safeguards(s) * 0.08                                      # inspection, dismantlement
 	if bool(s.get("civil_liberties", true)):  m -= 0.08
 	return maxf(0.05, m)
 
@@ -190,6 +202,17 @@ static func co2_mult(s: Dictionary) -> float:
 	var m := 0.5 + float(s.get("industrial_intensity", 50.0)) / 100.0  # 0.5×…1.5×
 	if bool(s.get("automation", false)): m -= 0.10                     # efficiency
 	return maxf(0.1, m)
+
+## How much of the fuel cycle is under safeguards [0,1].
+##
+## Read twice in Game, and neither effect is on this page: it puts ARMS_SAFEGUARD_CUT of the
+## reactor fleet's latent arsenal out of the war-risk "means" term, and unwinds ARMS_STRAIN_RELIEF
+## of the standoff's carry between checks. The second one is the only lever on `_arms_strain` that
+## exists — military spending moves the pressure a check ADDS, never how much of the last one is
+## still there — which is what makes a treaty regime a different move from a smaller budget
+## rather than a weaker one.
+static func arms_safeguards(s: Dictionary) -> float:
+	return clampf(float(s.get("arms_control", 0.0)) / 100.0, 0.0, 1.0)
 
 ## How far the machines are being pushed [0,1].
 ##

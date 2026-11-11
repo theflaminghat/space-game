@@ -927,6 +927,12 @@ const NUCLEAR_STRAIN_DECAY: float = 0.6   # how much standoff pressure carries b
 ## arsenal (fissile material + expertise) to the war-risk "means" term.  The effect
 ## saturates — this is the plant count at which proliferation reaches half its ceiling.
 const NUCLEAR_PROLIF_HALF: float = 12.0
+## Arms Control. Safeguards are not disarmament: the material and the expertise stay where they
+## are, so a share of the latent arsenal survives any inspection regime and the policy cannot
+## take the means to zero. The relief figure is the one lever on the standoff's CARRY — see
+## PoliticsData.arms_safeguards.
+const ARMS_SAFEGUARD_CUT: float = 0.70    # of the latent arsenal put out of reach at full safeguards
+const ARMS_STRAIN_RELIEF: float = 0.60    # of the standoff's carry between checks that a treaty unwinds
 var _next_nuclear_year: int = 0
 var _nuclear_cooldown_ms: int = 0
 var _arms_strain: float = 0.0             # compounding pressure from a sustained arms race
@@ -12171,12 +12177,30 @@ func _nuclear_proliferation() -> float:
 	var n: float = float(_nuclear_plant_count())
 	return n / (n + NUCLEAR_PROLIF_HALF)
 
+## The means to wage a strategic exchange [0,1]: declared military spending, plus whatever of the
+## reactor fleet's latent arsenal is not under safeguards.  A nuclear-heavy grid therefore raises
+## the risk at any budget — the real downside to that clean, dense energy — and Arms Control is
+## what answers for it without tearing the fleet down.
+##
+## One function because there are two callers — the check and the forecast — and a forecast that
+## computes the odds from different arithmetic than the simulation is an instrument that lies.
+## The term was written out twice, which is one copy too many for something two functions have to
+## agree about.
+##
+## Note what the clamp does: military spending alone saturates this at a full budget, so
+## safeguards on the fuel cycle are worth most to a civilisation that is not itself armed. That
+## is the shape of the decision rather than a defect in it — a treaty regime covers the fuel
+## cycle, and the policy says so.
+func _nuclear_means() -> float:
+	var military: float = clampf(float(policies.get("military_spending", 10.0)) / 50.0, 0.0, 1.0)
+	var latent: float = _nuclear_proliferation() \
+		* (1.0 - ARMS_SAFEGUARD_CUT * PoliticsData.arms_safeguards(policies))
+	return clampf(military + latent, 0.0, 1.0)
+
 ## Scheduled nuclear-war roll.  Probability compounds with a sustained military/tension
-## standoff (_arms_strain) and is rate-limited like the other catastrophes.  The "means"
-## term is military spending plus the civilian reactor fleet's latent arsenal, so a
-## nuclear-heavy grid raises the risk even if spending is low.  No means at all, or
-## near-zero tension, means no exchange — so spreading off-world (which collapses
-## tension) is the real escape, not merely cutting spending or reactors.
+## standoff (_arms_strain) and is rate-limited like the other catastrophes.  No means at all, or
+## near-zero tension, means no exchange — so spreading off-world (which collapses tension) is the
+## real escape, not merely cutting spending, reactors or signing for safeguards.
 func _check_nuclear_war() -> void:
 	if game_over or year < _next_nuclear_year:
 		return
@@ -12186,14 +12210,14 @@ func _check_nuclear_war() -> void:
 	_nuclear_cooldown_ms = Time.get_ticks_msec() + IMPACT_REAL_COOLDOWN_MS
 
 	var tension: float = _geopolitical_tension()
-	# The "means" to wage nuclear war: declared military spending PLUS the latent arsenal
-	# the civilian reactor fleet represents.  So building out nuclear power raises the
-	# risk even at low military spending — a real downside to that clean, dense energy.
-	var military: float = clampf(float(policies.get("military_spending", 10.0)) / 50.0, 0.0, 1.0)
-	var means: float = clampf(military + _nuclear_proliferation(), 0.0, 1.0)
+	var means: float = _nuclear_means()
 	var pressure: float = tension * means
-	# Compounding: a sustained standoff ratchets the danger; calm/de-escalation relaxes it.
-	_arms_strain = clampf(_arms_strain * NUCLEAR_STRAIN_DECAY + pressure, 0.0, 5.0)
+	# Compounding: a sustained standoff ratchets the danger; calm/de-escalation relaxes it. Arms
+	# Control is the only thing that reaches this line: a smaller budget lowers the pressure a
+	# check ADDS, while a treaty regime unwinds what the last ones left behind.
+	var carry: float = NUCLEAR_STRAIN_DECAY \
+		* (1.0 - ARMS_STRAIN_RELIEF * PoliticsData.arms_safeguards(policies))
+	_arms_strain = clampf(_arms_strain * carry + pressure, 0.0, 5.0)
 	if means <= 0.0 or tension < 0.05:
 		return   # no arsenal at all, or nothing left to fight over
 
@@ -12207,8 +12231,7 @@ func _check_nuclear_war() -> void:
 ## is the simulation.  Asking the forecast what the odds are must not make them worse.
 func nuclear_probability() -> float:
 	var tension: float = _geopolitical_tension()
-	var military: float = clampf(float(policies.get("military_spending", 10.0)) / 50.0, 0.0, 1.0)
-	var means: float = clampf(military + _nuclear_proliferation(), 0.0, 1.0)
+	var means: float = _nuclear_means()
 	if means <= 0.0 or tension < 0.05:
 		return 0.0
 	return clampf(NUCLEAR_BASE * tension * means * (1.0 + _arms_strain), 0.0, 0.9)
