@@ -1325,6 +1325,58 @@ Three things the filter has to be careful about:
 - **The filter is not saved.** It is a way of looking at the map rather than a property of the
   run, and a save that came back with half the galaxy missing would read as a bug.
 
+### The band: one size of hardware, and a gap wider than it
+
+Every orbital structure is drawn from a model authored on its own in Blender, and they came out
+over a 2.5× spread of sizes — 0.178 world units for a relay satellite against 0.453 for a ring
+store. The draw loop then **divided the body's scale back out**, so a structure was that fixed
+size around everything: around Mercury, whose radius is 0.161 units, one orbital habitat was
+twice the width of the planet it orbited. The lanes meanwhile were spaced 0.04 of the body's
+scale apart, which is 0.013 world units at Mercury and 0.188 at the Sun — in every case closer
+than the hardware flying in them was wide. Every lane's structures stood inside its neighbours'
+and what kept them apart was the angle between their orbital planes, which the lane table said
+in as many words.
+
+Three numbers replace that, all in `planet.gd`:
+
+| | |
+|---|---|
+| `INFRA_SIZE_FRAC` (0.070) | a structure's longest dimension, as a fraction of the body's scale |
+| `INFRA_SIZE_MAX` (0.060) | and never more than this in world units, however big the body |
+| `INFRA_LANE_PITCH` (4/3) | lanes are this many structures apart, so hardware fills three quarters of the gap |
+
+Each model is normalised by its own AABB (`infra_model_norm`), so re-exporting one at a different
+size in Blender changes nothing. The instance basis carries that scale and **nothing cancels the
+body's scale any more** — a structure is a fixed fraction of what it orbits, which is what keeps
+it inside a gap that is also a fraction of what it orbits.
+
+**The cap is what buys the inner system its room.** Twenty lanes a structure-and-a-third apart is
+a band 19 steps wide, and around the Sun that band has to fit between the Dyson swarm at 4.39 and
+Mercury's perihelion at 8.58. Capping the star's hardware rather than everyone's lets the
+fraction be three times what it could otherwise be: Earth's structures are 0.0485 world units
+across rather than 0.0156, and the Sun's are the same 0.060 as Jupiter's.
+
+**The Sun's band already reached Mercury's**, by 4% of the distance between them, once an orbit,
+for the whole run — its outermost lane stood at 8.367 and Mercury's own band reaches 0.573 inward
+from 8.578. Nothing measured it, because `verify_infra_band` compared the Sun's lanes against
+Mercury's *centre*. The tightest pair now has 1.32 world units of clear space.
+
+**Moving the planets out does not help**, which is worth recording because it is the obvious
+first idea. `ORBIT_RADIUS_MULT` is the one lever on how far apart the bodies are, and the Dyson
+swarm is placed in AU through the same log map — so the swarm moves out with Mercury, into the
+inner edge of the very band being made room for. The swarm reaches the band's inner lane at a
+multiplier of about 34.9, which is a 9% bump, long before the Sun's budget improves enough to
+matter.
+
+**A moon is not a lane but it flies through them.** Every planet's first moon orbited at 1.3 scale
+units, through the middle of a band running 1.020 to 1.780 — eight or nine shells of hardware,
+twice an orbit. `_create_moons` now starts them at `infra_band_outer()` plus the largest moon's
+own radius and the jitter below it, which is a different radius per body because the band is.
+
+The belt's lanes ring the Sun rather than a body, so they have no scale to be proportional to:
+`asteroid_belt._infra_size()` takes three quarters of its own lane gap, which is the same rule
+arriving at a much bigger number because its lanes are half a world unit apart.
+
 ### Orbital structures are right-handed
 
 `Planet.infra_orientation()` builds each orbital structure's basis: up-axis outward, +Y radial,

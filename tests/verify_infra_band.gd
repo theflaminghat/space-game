@@ -24,10 +24,10 @@ extends SceneTree
 ## and the biggest mirror's rim reached 1.6 solar radii, into the swarm's inner lane at 1.3.
 
 ## The innermost orbital lane, in planet radii — the floor the mirror has to stay under.
-func _innermost_lane(P) -> float:
+func _innermost_lane(P, body_scale: float) -> float:
 	var r: float = INF
 	for spec: Dictionary in P.INFRA_LANES:
-		r = minf(r, float(spec["radius"]))
+		r = minf(r, P.infra_lane_radius(int(spec["order"]), body_scale))
 	return r
 
 var fails := 0
@@ -107,11 +107,11 @@ func _run() -> void:
 	# has no point further out than any other, so this one number answers for every size of it.
 	var stand: float = P.mirror_standoff()
 	print("mirror: standoff %.3f local = %.3f world (surface %.3f, band from %.3f, swarm from %.3f)"
-		% [stand, stand * sun.scale.x, surface, _innermost_lane(P), swarm_in])
+		% [stand, stand * sun.scale.x, surface, _innermost_lane(P, sun.scale.x), swarm_in])
 	check(stand * sun.scale.x > surface,
 		"the sail clears the photosphere: %.3f vs %.3f" % [stand * sun.scale.x, surface])
-	check(stand < _innermost_lane(P),
-		"and stays inside the band: %.3f vs %.3f" % [stand, _innermost_lane(P)])
+	check(stand < _innermost_lane(P, sun.scale.x),
+		"and stays inside the band: %.3f vs %.3f" % [stand, _innermost_lane(P, sun.scale.x)])
 	check(stand * sun.scale.x < swarm_in,
 		"and inside the collector shell: %.3f vs %.3f" % [stand * sun.scale.x, swarm_in])
 	# At every coverage, including the full sky, which is the cap closed into a shell.
@@ -242,7 +242,7 @@ func _run() -> void:
 	for spec2: Dictionary in P.INFRA_LANES:
 		var incl2: float = fposmod(float(lane_i) * P.INFRA_PLANE_ANGLE, PI)
 		lane_i += 1
-		var rr: float = float(spec2["radius"])
+		var rr: float = P.infra_lane_radius(int(spec2["order"]), sun.scale.x)
 		var onormal: Vector3 = P.infra_orbit_normal(incl2)
 		var prev: Basis = Basis()
 		for s in range(steps + 1):
@@ -297,11 +297,18 @@ func _run() -> void:
 			var th: float = TAU * float(st) / float(bsteps)
 			ln["phase"] = th
 			var xf: Transform3D = AB.infra_transform(ln, 0, 1)
+			# The transform carries the model's normalising scale as well as its orientation, so
+			# the frame is read off a copy with that divided out — and the scale itself is
+			# checked for being UNIFORM, which is the part that would shear the hardware.
+			var sc: Vector3 = xf.basis.get_scale()
+			if absf(sc.x - sc.y) > 1.0e-4 or absf(sc.y - sc.z) > 1.0e-4 or sc.x <= 0.0:
+				b_bad.append("%s: the model scale is not uniform and positive" % str(lane["type"]))
+			xf.basis = xf.basis.orthonormalized()
 			# Where it is a moment later, which is the direction it is travelling.
 			ln["phase"] = th + 1.0e-3
 			var vel: Vector3 = (AB.infra_position(ln, 0, 1) - xf.origin).normalized()
 			var radial: Vector3 = xf.origin.normalized()
-			b_det = minf(b_det, xf.basis.determinant())
+			b_det = minf(b_det, xf.basis.determinant())   # of the orientation, scale divided out
 			# Both of these lie in the lane's plane, so its normal is perpendicular to both.
 			b_perp = maxf(b_perp, absf(onormal.dot(radial)))
 			b_perp = maxf(b_perp, absf(onormal.dot(vel)))

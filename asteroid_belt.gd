@@ -188,6 +188,17 @@ func band_outline(cam: Camera3D) -> Array:
 ## rocks, and every lane advances at the Keplerian rate for that radius on the same game-day
 ## clock the rocks use.  The "ground" types that get no lane on a rocky planet get one here: in
 ## the belt, the ground is itself in orbit.
+## How big one of the belt's structures is, in world units: three quarters of the gap between
+## one heliocentric lane and the next, which is the rule a planet's band uses in its own scale
+## units. The belt has no body to be proportional to — its lanes ring the Sun out among the
+## rocks — so the gap is what there is to be proportional to.
+func _infra_size() -> float:
+	var n: int = INFRA_LANES.size()
+	var span: float = log(BELT_OUTER_AU - INFRA_LANE_MARGIN_AU + 1.0) * ORBIT_RADIUS_MULT \
+		- log(BELT_INNER_AU + INFRA_LANE_MARGIN_AU + 1.0) * ORBIT_RADIUS_MULT
+	return 0.75 * span / float(maxi(n, 1))
+
+
 func _create_infra_lanes() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(BODY_NAME + "_infra")
@@ -216,6 +227,10 @@ func _create_infra_lanes() -> void:
 			"mm":     mm,
 			"type":   str(spec["type"]),
 			"r_vis":  log(a_au + 1.0) * ORBIT_RADIUS_MULT,
+			# Normalised like a planet's, to the belt's own gap rather than a body's. The models
+			# were drawn here at whatever size each was authored at, 0.18 to 0.45 units across,
+			# which is most of the way to the next lane for the largest of them.
+			"mscale": Planet.infra_model_norm(str(spec["mesh"])) * _infra_size(),
 			"motion": TAU / (EARTH_ORBIT_DAYS * pow(a_au, 1.5)),   # rad per game-day
 			"phase":  rng.randf() * TAU,
 			"incl":   rng.randf_range(-INFRA_LANE_MAX_INCL, INFRA_LANE_MAX_INCL),
@@ -266,7 +281,9 @@ static func infra_position(lane: Dictionary, i: int, count: int) -> Vector3:
 ## reading the lanes back passes whatever the maths does. planet.gd records the same of its own.
 static func infra_transform(lane: Dictionary, i: int, count: int) -> Transform3D:
 	var pos: Vector3 = infra_position(lane, i, count)
-	return Transform3D(Planet.infra_orientation(pos, infra_plane_normal(lane)), pos)
+	var ms: float = float(lane.get("mscale", 1.0))
+	return Transform3D(
+		Planet.infra_orientation(pos, infra_plane_normal(lane)).scaled(Vector3(ms, ms, ms)), pos)
 
 
 ## The normal of the plane one structure lane orbits in — the axis Planet.infra_orientation

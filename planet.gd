@@ -57,15 +57,21 @@ const MOON_TEXTURES := {
 ## instance orbits per building of that type the player has raised there.
 ## Every orbital structure gets a lane, a stand-in shape and the shared placeholder texture, so
 ## anything the player puts in orbit is actually visible there — around a planet or around the
-## Sun.  Lanes are spaced 0.04 apart in planet radii; colour groups them by what they do
-## (amber = heat, blue = power link, grey = storage, green = people).
+## Sun.  Lanes are spaced by the size of what flies in them (see INFRA_LANE_PITCH below); colour
+## groups them by what they do (amber = heat, blue = power link, grey = storage, green = people).
 ##
-## The band runs 1.020 .. 1.780 planet radii, which around the SUN puts it OUTSIDE the Dyson
-## swarm rather than through it.  Both bands scale with the star, so the comparison is a fixed
-## one: at the Sun's base scale of ~4.70 these lanes span 4.79 .. 8.37 world units, against the
-## swarm's 3.05 .. 4.39 and Mercury's perihelion at 8.58.  It used to run 0.640 .. 1.700, i.e.
-## 3.01 .. 7.99 — straight through the collector shell, with most of the infrastructure
-## embedded in it.  tests/verify_infra_band.gd holds all three apart.
+## The band starts at 1.020 scale units, which around the SUN puts it OUTSIDE the Dyson swarm
+## rather than through it: at the Sun's base scale of ~4.70 the innermost lane is 4.79 world
+## units out, against the swarm's 3.05 .. 4.39 and Mercury's perihelion at 8.58.  It used to run
+## 0.640 .. 1.700, i.e. 3.01 .. 7.99 — straight through the collector shell, with most of the
+## infrastructure embedded in it.  tests/verify_infra_band.gd holds all three apart, and
+## tests/verify_lane_clearance.gd holds every body's band clear of every other body's.
+##
+## Where the band ENDS is no longer one number: the lanes are a structure-and-a-third apart and
+## the structures are capped in world size, so the Sun's twenty lanes close up into 1.020 .. 1.35
+## while Earth's spread over 1.020 .. 2.83.  The band is widest, in its own body's units, around
+## the smallest bodies — which is what it costs to have hardware that is the same size wherever
+## it is built and never standing inside its neighbours'.
 ##
 ## It used to start at 0.980, when the Shkadov Mirror had the innermost lane of the band; the
 ## mirror now stands at the photosphere instead and has no lane at all.
@@ -75,58 +81,113 @@ const MOON_TEXTURES := {
 ## lane around a gas giant, where there is no ground to stand on and everything built is hanging
 ## in vacuum by definition.  The Matter Depot has no lane at all — silos and bunkers are not
 ## orbital infrastructure anywhere, and solar orbit stores its matter in Orbital Vaults.
+## Where the band sits, how far apart its lanes are, and how big the things flying in them are —
+## all three in the body's own scale units, which to_global multiplies by, so the whole band is
+## the same shape around every body and around the star.
+##
+## ONE STRUCTURE PER GAP, and that is the point of these three numbers together. A lane's
+## hardware is INFRA_SIZE_FRAC across and the next lane is INFRA_LANE_STEP further out, so a
+## structure occupies three quarters of the space between its own lane and its neighbour's and
+## no shell can reach another. It did not before: the structures were a FIXED world size
+## whatever they orbited — 0.18 to 0.45 units, authored that way one model at a time — while the
+## lanes were 0.04 scale units apart, which is 0.013 units around Mercury. Every lane's hardware
+## stood inside its neighbours' on every body, nothing but the angle between the orbital planes
+## kept any of it apart, and around Mercury (radius 0.161) a single orbital habitat was twice
+## the width of the planet it orbited.
+##
+## The band ends at 1.590 rather than 1.780 because of the one pair of bodies in the system that
+## has no room: the Sun's outermost lane stood at 8.367 world units and Mercury's own band
+## reaches 0.573 inward from a perihelion of 8.578, so the two overlapped by 4% of the distance
+## between them — the star's infrastructure flew through the planet's once an orbit. Moving the
+## planets out does not fix that, because the Dyson swarm is placed in AU and moves with them,
+## into the inner edge of the very band being made room for. See tests/verify_lane_clearance.gd.
+const INFRA_BAND_INNER: float = 1.020
+## A structure's LONGEST dimension: this much of the body's scale, and never more than
+## INFRA_SIZE_MAX world units however big the body is. Every lane model is normalised to it —
+## they were authored over a 2.5x spread — so one piece of orbital hardware is the size of the
+## next, and all of them scale with whatever they are in orbit around.
+##
+## The CAP is what buys the inner system its room. Without it the Sun, at a scale of 4.70, takes
+## a band 19 steps of its own size wide, and the only place that band can go is the gap between
+## the Dyson swarm and Mercury. Capping the star's hardware rather than everyone's lets the
+## fraction be three times what it could otherwise be: Earth's structures are 0.0485 world units
+## across instead of 0.0156, and the Sun's are the same 0.06 as Jupiter's.
+const INFRA_SIZE_FRAC:  float = 0.070
+const INFRA_SIZE_MAX:   float = 0.060
+## A lane is four thirds of a structure from the next, so the hardware fills three quarters of
+## the space between its own shell and its neighbour's and the two can never meet.
+const INFRA_LANE_PITCH: float = 4.0 / 3.0
+
+## One structure's longest dimension in WORLD units, around a body of this scale.
+static func infra_structure_size(body_scale: float) -> float:
+	return minf(INFRA_SIZE_FRAC * body_scale, INFRA_SIZE_MAX)
+
+## The gap between one lane and the next, in the body's scale units.
+static func infra_lane_step(body_scale: float) -> float:
+	return infra_structure_size(body_scale) * INFRA_LANE_PITCH / maxf(body_scale, 0.0001)
+
+## Where lane `order` sits, in the body's scale units.
+static func infra_lane_radius(order: int, body_scale: float) -> float:
+	return INFRA_BAND_INNER + infra_lane_step(body_scale) * float(order)
+
+## The outermost lane's hardware, in the body's scale units: what a moon has to clear.
+static func infra_band_outer(body_scale: float) -> float:
+	return infra_lane_radius(INFRA_LANES.size() - 1, body_scale) \
+		+ 0.5 * infra_structure_size(body_scale) / maxf(body_scale, 0.0001)
+
+
 ## Golden angle (rad).  Stepping each successive lane's orbital plane by this spreads the planes
 ## evenly over the sphere however many lanes there are, with no two consecutive ones alike.
 const INFRA_PLANE_ANGLE: float = 2.399963229728653
 
 const INFRA_LANES := [
-	{"type": "Orbital Laser",         "radius": 1.140, "color": Color(1.00, 0.45, 0.40),
+	{"type": "Orbital Laser",         "order": 3, "color": Color(1.00, 0.45, 0.40),
 		"mesh": "laser", "texture": "res://models/orbital_laser_albedo.png"},
-	{"type": "Space Telescope",       "radius": 1.220, "color": Color(0.60, 0.85, 1.00),
+	{"type": "Space Telescope",       "order": 5, "color": Color(0.60, 0.85, 1.00),
 		"mesh": "telescope", "texture": "res://models/orbital_telescope_albedo.png"},
-	{"type": "Thermal Radiator",      "radius": 1.260, "color": Color(0.95, 0.75, 0.40),
+	{"type": "Thermal Radiator",      "order": 6, "color": Color(0.95, 0.75, 0.40),
 		"mesh": "thermal", "ground": true,
 		"texture": "res://models/orbital_thermal_radiator_albedo.png"},
-	{"type": "Orbital Vault",         "radius": 1.300, "color": Color(0.72, 0.74, 0.80), "mesh": "depot",
+	{"type": "Orbital Vault",         "order": 7, "color": Color(0.72, 0.74, 0.80), "mesh": "depot",
 		"texture": "res://models/orbital_depot_albedo.png"},
-	{"type": "Orbital Battery",       "radius": 1.340, "color": Color(0.50, 0.95, 0.62),
+	{"type": "Orbital Battery",       "order": 8, "color": Color(0.50, 0.95, 0.62),
 		"mesh": "battery", "texture": "res://models/orbital_battery_albedo.png"},
 	# Power link: receiving and transmitting apertures.
-	{"type": "Microwave Uplink",      "radius": 1.380, "color": Color(0.55, 0.80, 0.95),
+	{"type": "Microwave Uplink",      "order": 9, "color": Color(0.55, 0.80, 0.95),
 		"mesh": "uplink", "texture": "res://models/orbital_uplink_albedo.png"},
-	{"type": "Orbital Rectenna",      "radius": 1.420, "color": Color(0.45, 0.75, 1.00),
+	{"type": "Orbital Rectenna",      "order": 10, "color": Color(0.45, 0.75, 1.00),
 		"mesh": "rectenna", "texture": "res://models/orbital_rectenna_albedo.png"},
-	{"type": "Power Relay Satellite", "radius": 1.460, "color": Color(0.70, 0.70, 1.00),
+	{"type": "Power Relay Satellite", "order": 11, "color": Color(0.70, 0.70, 1.00),
 		"mesh": "relay", "texture": "res://models/orbital_relay_sat_albedo.png"},
-	{"type": "Orbital Power Grid",    "radius": 1.500, "color": Color(0.60, 0.72, 1.00),
+	{"type": "Orbital Power Grid",    "order": 12, "color": Color(0.60, 0.72, 1.00),
 		"mesh": "grid", "texture": "res://models/orbital_power_grid_albedo.png"},
-	{"type": "Stellar Rectenna Grid", "radius": 1.540, "color": Color(0.40, 0.68, 1.00),
+	{"type": "Stellar Rectenna Grid", "order": 13, "color": Color(0.40, 0.68, 1.00),
 		"mesh": "rect_grid", "texture": "res://models/orbital_rectenna_grid_albedo.png"},
-	{"type": "Swarm Relay Network",   "radius": 1.580, "color": Color(0.78, 0.68, 1.00),
+	{"type": "Swarm Relay Network",   "order": 14, "color": Color(0.78, 0.68, 1.00),
 		"mesh": "swarm_relay", "texture": "res://models/orbital_swarm_relay_albedo.png"},
 	# Heat: the other half of any large power economy.
-	{"type": "Orbital Radiator Array","radius": 1.620, "color": Color(1.00, 0.70, 0.35),
+	{"type": "Orbital Radiator Array","order": 15, "color": Color(1.00, 0.70, 0.35),
 		"mesh": "radiator", "texture": "res://models/orbital_radiator_array_albedo.png"},
-	{"type": "Radiator Swarm",        "radius": 1.660, "color": Color(1.00, 0.62, 0.30),
+	{"type": "Radiator Swarm",        "order": 16, "color": Color(1.00, 0.62, 0.30),
 		"mesh": "rad_swarm", "texture": "res://models/orbital_radiator_swarm_albedo.png"},
 	# Storage.
-	{"type": "Superconducting Storage Ring", "radius": 1.700, "color": Color(0.62, 0.90, 0.80),
+	{"type": "Superconducting Storage Ring", "order": 17, "color": Color(0.62, 0.90, 0.80),
 		"mesh": "sc_ring", "ground": true,
 		"texture": "res://models/orbital_storage_ring_albedo.png"},
-	{"type": "Orbital Ring Store",    "radius": 1.740, "color": Color(0.55, 0.85, 0.78),
+	{"type": "Orbital Ring Store",    "order": 18, "color": Color(0.55, 0.85, 0.78),
 		"mesh": "ring_store", "texture": "res://models/orbital_ring_store_albedo.png"},
 	# People.
-	{"type": "Orbital Habitat",       "radius": 1.780, "color": Color(0.70, 0.95, 0.65),
+	{"type": "Orbital Habitat",       "order": 19, "color": Color(0.70, 0.95, 0.65),
 		"mesh": "habitat", "texture": "res://models/orbital_habitat_albedo.png"},
 	# Industry and its stores, flown out to a build site that has no ground.
-	{"type": "Orbital Construction Station", "radius": 1.180, "color": Color(0.85, 0.88, 0.95),
+	{"type": "Orbital Construction Station", "order": 4, "color": Color(0.85, 0.88, 0.95),
 		"mesh": "station", "texture": "res://models/orbital_construction_station_albedo.png"},
 	# Stellar engineering: the lifters hang closest of anything here, because they have to.
-	{"type": "Star Lifter",           "radius": 1.060, "color": Color(1.00, 0.85, 0.45),
+	{"type": "Star Lifter",           "order": 1, "color": Color(1.00, 0.85, 0.45),
 		"mesh": "lifter", "texture": "res://models/orbital_star_lifter_albedo.png"},
-	{"type": "Sunshade Constellation","radius": 1.100, "color": Color(0.70, 0.78, 0.95),
+	{"type": "Sunshade Constellation","order": 2, "color": Color(0.70, 0.78, 0.95),
 		"mesh": "sunshade", "texture": "res://models/orbital_sunshade_albedo.png"},
-	{"type": "Core Mixing Array",     "radius": 1.020, "color": Color(0.95, 0.60, 0.95),
+	{"type": "Core Mixing Array",     "order": 0, "color": Color(0.95, 0.60, 0.95),
 		"mesh": "core_mixer", "texture": "res://models/orbital_core_mixer_albedo.png"},
 	# The Shkadov Mirror has NO LANE.  There is one of it, it does not orbit, and it stands at
 	# the photosphere rather than out in the band — see "The Shkadov mirror" below.
@@ -734,14 +795,27 @@ func _update_position() -> void:
 ## local frame: the body has radius 0.5 here, so orbits a few units out read as a few
 ## body-radii and scale with the planet.  Variety is seeded from the name so it's
 ## stable across runs and doesn't disturb the global RNG.
+## What a moon leaves between itself and the outermost structure, in scale units: the largest
+## moon's own radius (0.11) and the 0.1 of jitter that can take it inward.
+const MOON_CLEARANCE: float = 0.250
+
 func _create_moons() -> void:
 	var count: int = int(MOON_COUNTS.get(name.to_lower(), 0))
 	if count <= 0:
 		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(str(name))
+	# Outside this body's own band, which is wider around a small body than a large one because
+	# the structures are capped in world size: the Sun's lanes end at 1.35 scale units and
+	# Earth's at 2.83.
+	var moon_inner: float = infra_band_outer(scale.x) + MOON_CLEARANCE
 	for i in range(count):
-		var radius: float = 1.3 + 0.55 * float(i) + rng.randf_range(-0.1, 0.1)
+		# OUTSIDE the infrastructure band, which the innermost moon used to fly through: it
+		# orbited at 1.3 +- 0.1 scale units with a radius of its own, against lanes running
+		# 1.020 to 1.590, so a moon passed through eight or nine shells of hardware twice an
+		# orbit. The first one now clears the outermost lane, the structures on it, and its own
+		# radius, with the jitter taken off the bottom.
+		var radius: float = moon_inner + 0.55 * float(i) + rng.randf_range(-0.1, 0.1)
 		var msize: float  = clampf(0.22 - 0.02 * float(i), 0.08, 0.22)
 
 		var moon := MeshInstance3D.new()
@@ -925,6 +999,35 @@ const LANE_MODELS := {
 	"uplink":  "res://models/orbital_uplink.glb",
 }
 static var _model_mesh_cache: Dictionary = {}
+static var _model_scale_cache: Dictionary = {}
+
+## How much to scale lane model `kind` by, in the body's own units, so that it is drawn
+## infra_structure_size(body_scale) world units across.
+##
+## The models are authored at whatever size suited each one in Blender and ranged over 2.5x:
+## 0.178 units for a relay satellite against 0.453 for a ring store, with the Orbital Habitat
+## alone wider than Mercury's radius. Normalising here rather than in the .glb files keeps the
+## authoring free and the band's geometry answerable to one number.
+##
+## The LONGEST dimension, not the volume or the diagonal, because the longest is what bounds the
+## radial reach of a structure however it is turned, and the lane step is set against it. Shape
+## is untouched: a flat ring stays a flat ring, it is just a flat ring the size of everything
+## else. Cached per kind beside the meshes themselves.
+static func infra_model_scale(kind: String, body_scale: float) -> float:
+	return infra_structure_size(body_scale) / maxf(body_scale, 0.0001) * infra_model_norm(kind)
+
+
+## One over lane model `kind`'s longest dimension: multiply by a size to draw it that size.
+## The belt asks for this directly — its lanes are heliocentric and far wider apart than a
+## body's, so its hardware is drawn to its own gap by the same three-quarters rule.
+static func infra_model_norm(kind: String) -> float:
+	if _model_scale_cache.has(kind):
+		return _model_scale_cache[kind]
+	var a: AABB = _model_mesh(kind).get_aabb()
+	var longest: float = maxf(a.size.x, maxf(a.size.y, a.size.z))
+	var f: float = 1.0 / maxf(longest, 0.0001)
+	_model_scale_cache[kind] = f
+	return f
 
 ## Godot imports a .glb as a PackedScene, so the ArrayMesh is lifted out of its MeshInstance3D
 ## once and cached: the lanes ask for this per body, and re-instancing the scene each time
@@ -1011,14 +1114,18 @@ func _create_infra_lanes() -> void:
 		mmi.multimesh = mm
 		mmi.material_override = _infra_material(str(spec.get("texture", "")))
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var ext: float = float(spec["radius"]) + 0.5
+		var ext: float = infra_lane_radius(int(spec["order"]), scale.x) + 0.5
 		mmi.custom_aabb = AABB(Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
 		add_child(mmi)
 		_infra.append({
 			"mm":     mm,
 			"mmi":    mmi,
 			"type":   str(spec["type"]),
-			"radius": float(spec["radius"]),
+			"radius": infra_lane_radius(int(spec["order"]), scale.x),
+			# Normalised model scale, in the body's own units: the lanes are children of the
+			# scaled body, so an instance basis of this size draws a structure INFRA_SIZE_FRAC
+			# of the body across, on every body, with nothing to cancel.
+			"mscale": infra_model_scale(str(spec["mesh"]), scale.x),
 			"phase":  rng.randf() * TAU,
 			"motion": rng.randf_range(0.15, 0.5) * (1.0 if rng.randf() < 0.5 else -1.0),
 			# Orbital planes spread over the WHOLE sphere, by the golden angle so consecutive
@@ -1125,10 +1232,15 @@ func _update_infra(delta: float) -> void:
 	# proportionally faster above it — and the lanes stop being drawn past 100x anyway, which is
 	# what bounds it.
 	var sim_delta: float = delta * SolarSystem.speed_multiplier()
-	# The lanes are children of the (scaled) planet, so cancel the planet's scale in each
-	# instance's basis — the structures render at a constant world size regardless of how
-	# big the planet is (their orbit radius still scales, so they hug each world).
-	var inv_s: float = 1.0 / maxf(scale.x, 0.0001)
+	# NOTHING cancels the body's scale here any more. The lanes are children of the scaled body,
+	# so an instance basis of lane["mscale"] draws a structure INFRA_SIZE_FRAC of the body across
+	# wherever it is — which is what keeps a lane's hardware inside the gap to the next lane,
+	# since that gap scales with the body too.
+	#
+	# It used to divide by the scale to hold every structure at one world size on every body, so
+	# that they stayed visible around the small ones. They did: around Mercury, whose radius is
+	# 0.161 world units, an orbital habitat was 0.365 across — the planet was the smaller of the
+	# two — and the lanes it crossed were 0.013 apart.
 	for lane: Dictionary in _infra:
 		var mm: MultiMesh = lane["mm"]
 		if running:
@@ -1149,9 +1261,9 @@ func _update_infra(delta: float) -> void:
 			var th: float = base + TAU * float(i) / float(count)   # evenly spaced around the ring
 			var z: float = r * sin(th)
 			var pos := Vector3(r * cos(th), z * sin(incl), z * cos(incl))
-			# Basis scaled by inv_s → constant world-space structure size on any planet.
+			var ms: float = float(lane["mscale"])
 			mm.set_instance_transform(i, Transform3D(
-				infra_orientation(pos, onormal).scaled(Vector3(inv_s, inv_s, inv_s)), pos))
+				infra_orientation(pos, onormal).scaled(Vector3(ms, ms, ms)), pos))
 
 ## World position of one slot in an orbital lane — where the `index`-th structure of `type` sits
 ## once the lane holds `total` of them.
