@@ -171,7 +171,12 @@ const FIELDS: Array[Dictionary] = [
 	# What the run is remembered for.  id -> the year it was earned, so a summary can say when.
 	# Plain: an older save has earned nothing, which is what an empty dict already means, and a
 	# loaded run goes on earning from wherever it is.
-	{"key": "achievements",       "prop": "achievements_earned", "kind": DICT_INT, "default": null},
+	# `sample` is for the other direction from `completed`: load_game deliberately DROPS entries
+	# here, namely ids that are no longer in the catalogue (`dont_go_extinct` was a slug of the
+	# old title). A generic probe id would be thrown away and the round trip would read as a field
+	# that is never loaded at all, so the table supplies a value the field can really hold.
+	{"key": "achievements",       "prop": "achievements_earned", "kind": DICT_INT, "default": null,
+	 "sample": {"kardashev": 1960}},
 	# High-water marks for the run summary.  Kept rather than derived: the stats graph is
 	# downsampled, and when a record was set is not recoverable from it afterwards.  An older
 	# save has none, and a zero peak simply starts being beaten on the next tick.

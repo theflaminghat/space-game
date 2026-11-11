@@ -1,4 +1,4 @@
-"""Core mixing array for 'Don't Go Extinct' - planet.gd's "core_mixer" lane mesh.
+"""Core mixing array for 'Kardashev' - planet.gd's "core_mixer" lane mesh.
 
 buildings.gd: "Driven circulation reaching from the Sun's envelope into its core,
 feeding it unburnt hydrogen it would never otherwise meet", and in the definition

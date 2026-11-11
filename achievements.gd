@@ -159,7 +159,7 @@ const ACHIEVEMENTS: Array[Dictionary] = [
 	{"id": "time_machine", "group": "failure", "name": "The Time Machine",
 	 "desc": "Still in this system when the Sun left the main sequence.",
 	 "note": "after H. G. Wells", "hidden": true},
-	{"id": "dont_go_extinct", "group": "failure", "name": "Don't Go Extinct",
+	{"id": "kardashev", "group": "failure", "name": "Kardashev",
 	 "desc": "Ended before anything of yours ever reached orbit.",
 	 "note": "the title, earned the wrong way", "hidden": true},
 ]

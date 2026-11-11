@@ -173,12 +173,12 @@ func _run() -> void:
 		"but an ancient one is not blamed: %s" % str(g.achievements_earned.keys()))
 	check(g.achievements_earned.has("last_man"), "the collapse still counts")
 	# Nothing ever reached orbit.
-	check(g.achievements_earned.has("dont_go_extinct"),
+	check(g.achievements_earned.has("kardashev"),
 		"a run that never launched earns the title the wrong way")
 	g.achievements_earned = {}
 	g.grant_achievement("small_step")
 	g._grant_ending_achievement("Population collapse")
-	check(not g.achievements_earned.has("dont_go_extinct"),
+	check(not g.achievements_earned.has("kardashev"),
 		"a run that did launch does not")
 	g._last_catastrophe = {}
 
@@ -192,6 +192,21 @@ func _run() -> void:
 		"the record comes back with its years: %s" % str(g.achievements_earned))
 	check(int(g.achievements_earned.get("foothold", -1)) == 2450, "both of them")
 	DirAccess.remove_absolute("user://saves/ach_verify.json")
+
+	# ── A retired id does not survive one ──
+	# `dont_go_extinct` was a slug of the old title and is `kardashev` now, so a save written
+	# before the rename carries an id nothing can display — and the "N of M" the run record
+	# prints is achievements_earned.size(), which makes a dead key a wrong number rather than a
+	# harmless leftover. Retired POLICIES are dropped on the lines above it, for the same reason.
+	g.achievements_earned = {"we_are_bob": 1987, "dont_go_extinct": 1960}
+	g.save_game("user://saves/ach_retired.json")
+	g.achievements_earned = {}
+	g.load_game("user://saves/ach_retired.json")
+	check(not g.achievements_earned.has("dont_go_extinct"),
+		"a retired id is dropped on load: %s" % str(g.achievements_earned))
+	check(int(g.achievements_earned.get("we_are_bob", -1)) == 1987,
+		"while the one still in the catalogue is kept")
+	DirAccess.remove_absolute("user://saves/ach_retired.json")
 
 
 	# ── The page ──

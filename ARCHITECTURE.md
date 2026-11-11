@@ -1,4 +1,4 @@
-# Don't Go Extinct — architecture
+# Kardashev — architecture
 
 A civilisation simulation in Godot 4.7, played from 1945 to the heat death of the universe. This
 document is for someone changing the code: what the parts are, where the rules live, which

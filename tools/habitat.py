@@ -1,4 +1,4 @@
-"""Orbital habitat for 'Don't Go Extinct' - planet.gd's "habitat" lane mesh.
+"""Orbital habitat for 'Kardashev' - planet.gd's "habitat" lane mesh.
 
 buildings.gd calls it "a spun cylinder holding its own air, gravity and farmland", so
 this is an O'Neill cylinder, NOT a torus.  That matters: it was sharing the "ring"

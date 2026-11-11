@@ -1,4 +1,4 @@
-"""Procedural orbital depot for 'Don't Go Extinct' - planet.gd's "depot" lane mesh.
+"""Procedural orbital depot for 'Kardashev' - planet.gd's "depot" lane mesh.
 
 Drawn for the Orbital Vault: a spine with storage tanks clustered around it, a
 docking collar on the outward end, and solar wings on booms.  See tools/_shared.py

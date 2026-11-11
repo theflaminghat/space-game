@@ -1,4 +1,4 @@
-"""Orbital laser for 'Don't Go Extinct' - planet.gd's "laser" lane mesh.
+"""Orbital laser for 'Kardashev' - planet.gd's "laser" lane mesh.
 
 buildings.gd calls this "a star-scale directed-energy weapon ringing the world it's
 built on": it fires light-speed pulses at other star systems and burns down inbound

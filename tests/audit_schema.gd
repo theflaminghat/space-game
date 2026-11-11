@@ -65,7 +65,10 @@ func _run() -> void:
 		i += 1
 		var target: Node = ss if str(f.get("on", "game")) == "solar" else g
 		var prop: String = SS_.prop_of(f)
-		var v: Variant = _distinctive(int(f["kind"]), i)
+		# A field carrying a `sample` validates its own contents on load and would throw a generic
+		# probe away — which is indistinguishable here from a field that is never read back. The
+		# sample is a value that field can really hold, so the round trip is asserted in full.
+		var v: Variant = f["sample"] if f.has("sample") else _distinctive(int(f["kind"]), i)
 		if v == null:
 			continue          # a kind with nothing distinctive to say
 		target.set(prop, v)

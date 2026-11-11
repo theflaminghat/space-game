@@ -1,4 +1,4 @@
-"""Orbital ring store for 'Don't Go Extinct' - planet.gd's "ring_store" lane mesh.
+"""Orbital ring store for 'Kardashev' - planet.gd's "ring_store" lane mesh.
 
 buildings.gd: "Superconducting loop of orbital diameter, holding current indefinitely.
 Stellar-scale energy storage."

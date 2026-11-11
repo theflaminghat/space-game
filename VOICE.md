@@ -1,4 +1,4 @@
-# Don't Go Extinct — Voice & Tone Guide
+# Kardashev — Voice & Tone Guide
 
 The horror in this game comes from **cosmic indifference** and **the scale of the
 infinite** — discovered by the player, never narrated to them. The text's only job

@@ -1,4 +1,4 @@
-"""Space telescope for 'Don't Go Extinct' - planet.gd's "telescope" lane mesh.
+"""Space telescope for 'Kardashev' - planet.gd's "telescope" lane mesh.
 
 buildings.gd: "Observatory in orbit, above atmospheric absorption and noise.  Adds
 signature-detection power."

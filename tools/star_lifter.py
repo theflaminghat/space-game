@@ -1,4 +1,4 @@
-"""Star lifter for 'Don't Go Extinct' - planet.gd's "lifter" lane mesh.
+"""Star lifter for 'Kardashev' - planet.gd's "lifter" lane mesh.
 
 buildings.gd: "Magnetic nozzles standing off the photosphere, driving a controlled wind
 off the Sun and collecting it as hydrogen."

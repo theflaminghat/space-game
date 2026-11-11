@@ -10077,7 +10077,7 @@ func _summary_year(y: int) -> String:
 ## The record as one block of text, for the clipboard.  Two runs are compared by someone pasting
 ## them side by side, which is the whole reason the peaks are kept.
 func run_summary_text() -> String:
-	var out: String = "Don't Go Extinct — run record\n"
+	var out: String = "%s — run record\n" % ProjectSettings.get_setting("application/config/name")
 	for r: Array in run_summary():
 		out += "%-28s %s\n" % [str(r[0]), str(r[1])]
 	var earned: Array = []
@@ -10297,7 +10297,7 @@ func _grant_ending_achievement(cause: String) -> void:
 			grant_achievement("last_man")
 	# Earned the wrong way: the title, for a run that ended without ever reaching orbit.
 	if not achievements_earned.has("small_step"):
-		grant_achievement("dont_go_extinct")
+		grant_achievement("kardashev")
 
 
 ## Traits, as a splice lands.  Takes the record rather than the world, because the caller
@@ -10887,6 +10887,13 @@ func load_game(path: String = "") -> void:
 				policies[key] = data["policies"][key]
 	_pop_cap_mult_cache = -1.0
 	politics_page.load_policies(policies)
+
+	# Same for achievements: `dont_go_extinct` was a slug of the old title and is `kardashev`
+	# now, so a save from before the rename carries an id nothing can display, which would still
+	# be counted in the "N of M" the run record prints.
+	for id: String in achievements_earned.keys():
+		if not AchievementData.exists(id):
+			achievements_earned.erase(id)
 
 	# Founding stocks, validated rather than trusted.  The schema copies the dictionaries
 	# verbatim, so a hand-edited file, a stock id that has since been renamed, or a save from

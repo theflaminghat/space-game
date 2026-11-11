@@ -1,4 +1,4 @@
-"""Superconducting storage ring for 'Don't Go Extinct' - planet.gd's "sc_ring" lane mesh.
+"""Superconducting storage ring for 'Kardashev' - planet.gd's "sc_ring" lane mesh.
 
 A superconducting magnetic energy store: current circulates in a closed cryogenic
 coil and the energy sits in its magnetic field.  So the model is a coil ring with
