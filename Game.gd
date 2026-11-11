@@ -2136,6 +2136,23 @@ func _setup_bar_backgrounds() -> void:
 	if pages:
 		pages.add_theme_constant_override("separation", int(BAR_BG_PAD.x) - 1)
 
+	# Hold the first button off the top bar's border by the same gutter the strip keeps on either
+	# side of it. The strip's top is exactly where that border ends, so the buttons began on it:
+	# six pixels of air to their left and right, none above them.
+	#
+	# A VBoxContainer has nowhere to put a margin, so the gutter is a spacer child — and the
+	# strip's own separation is already part of the gap that spacer makes, so only the
+	# difference is added. The backing paints behind it, so this is chrome rather than a hole.
+	var strip := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2/sidebar") as Control
+	if strip and strip.get_node_or_null("TopGutter") == null:
+		var gutter := Control.new()
+		gutter.name = "TopGutter"
+		gutter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		gutter.custom_minimum_size = Vector2(0,
+			maxf(0.0, BAR_BG_PAD.x - float(strip.get_theme_constant("separation"))))
+		strip.add_child(gutter)
+		strip.move_child(gutter, 0)
+
 	var top_bar := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer") as Control
 	var side_strip := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer2/sidebar") as Control
 	if top_bar:
@@ -2177,21 +2194,22 @@ func _layout_bar_backgrounds() -> void:
 		_fit_bar_bg(_side_bar_bg, Rect2(side_strip.global_position, side_strip.size), view)
 	_layout_menu_panels()
 
-## Line the sidebar's right border up with the right edge of the clock panel above it.
+## Make the sidebar buttons exactly as wide as the clock panel above them.
 ##
-## The two are the only things in the top-left corner and they were 4px apart, which is close
-## enough to read as a mistake rather than as two widths. Driven off the clock's measured rect
-## rather than a second hard-coded number: TimeBox carries its own minimum width, and two
-## constants that have to agree are two constants that will not.
+## The two are the only things in the top-left corner, they start at the same x, and anything
+## other than the same width there reads as one of them having been mis-measured. Driven off the
+## clock's measured rect rather than a second hard-coded number: TimeBox carries its own minimum
+## width, and two constants that have to agree are two constants that will not.
 ##
-## The strip is sized so its BACKING lands on that edge, because the backing is the thing with
-## the border on it.
+## It is the BUTTONS that match, not the border around them: the strip was sized so its backing
+## landed on the clock's right edge, which is the same alignment seen from the other side and
+## left every button six pixels short of the box above it. The backing now hangs a gutter past
+## them, the same gutter it keeps on their left, and the pages that meet that border follow it.
 func _match_sidebar_to_clock(side_strip: Control) -> void:
 	var clock := get_node_or_null("main_ui/VBoxContainer3/HBoxContainer/TimeBox") as Control
 	if clock == null:
 		return
-	var want: float = (clock.global_position.x + clock.size.x) \
-		- side_strip.global_position.x - BAR_BG_PAD.x
+	var want: float = clock.size.x
 	# Writing custom_minimum_size emits resized, which calls this again. Only write a real
 	# change, or the two bounce off each other every frame.
 	if want > 0.0 and absf(side_strip.custom_minimum_size.x - want) > 0.5:

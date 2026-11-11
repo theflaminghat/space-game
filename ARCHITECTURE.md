@@ -2044,11 +2044,22 @@ have to agree is a pair that will drift:
   of a 1920 window — and they stopped two fifths of the way across. Invisible while the pages
   were translucent; once they were opaque navy it read as a panel that had failed to load. The
   minimum is a floor now and both expand, like every other page.
-- **The sidebar's right border meets the clock's right edge.** They were 4px apart — close
-  enough to read as a mistake rather than as two widths. The strip is sized from `TimeBox`'s
-  measured rect so its *backing* lands on that edge, since the backing carries the border.
-  Writing `custom_minimum_size` emits `resized`, which re-enters the layout pass, so it only
-  writes a real change; otherwise the two bounce every frame.
+- **The buttons are exactly as wide as the clock above them, in a gutter the same on three
+  sides.** The clock and the button strip are the only things in the top-left corner and they
+  start at the same x, so anything other than the same width there reads as one of them having
+  been mis-measured. What used to be lined up was the sidebar's *backing* against the clock's
+  right edge — the same alignment seen from the other side, and it left every button 6px short
+  of the box above it, which is what the eye actually reads: filled rectangles, not the line
+  drawn around them. The strip is sized from `TimeBox`'s measured rect
+  (`_match_sidebar_to_clock`), the backing hangs `BAR_BG_PAD.x` past the buttons — the same
+  gutter it keeps on their left — and the pages that meet that border follow it out. Writing
+  `custom_minimum_size` emits `resized`, which re-enters the layout pass, so it only writes a
+  real change; otherwise the two bounce every frame.
+- **And that gutter is kept above the first button.** The strip's top is exactly where the top
+  bar's border ends, so the buttons started *on* that line: air to their left and right, none
+  above. A `VBoxContainer` has nowhere to put a margin, so the gap is a spacer child — sized to
+  the pad *less the strip's own separation*, which is already part of the gap a spacer makes.
+  The backing paints behind it, so what it adds is chrome rather than a hole.
 - **The planet panel keeps one margin from the chrome on both sides** (`PLANET_PANEL_GAP`). Its
   top was a hard-coded 52, from when the bar ended there; the backing now reaches 58, so the
   panel had been starting four pixels *inside* the chrome. It is measured off the backing and

@@ -104,15 +104,57 @@ func _run() -> void:
 					f.corner_radius_bottom_left, f.corner_radius_bottom_right])
 
 
-	# ── The sidebar's border lines up with the right edge of the clock above it ──
+	# ── The buttons are the clock's width, inside a gutter that is the same on three sides ──
+	#
+	# The clock and the button strip are the only things in the top-left corner and they start at
+	# the same x, so anything other than the same width there reads as one of them having been
+	# mis-measured. What used to be lined up was the sidebar's BORDER against the clock's right
+	# edge — the same alignment seen from the other side, and it left every button six pixels
+	# short of the box above it.
+	#
+	# The gutter the backing keeps on either side of the buttons is kept above the first one too.
+	# The strip's top is exactly where the top bar's border ends, so the buttons started ON that
+	# line: air on the left and right of them, none above.
 	var clock: Control = g.get_node_or_null("main_ui/VBoxContainer3/HBoxContainer/TimeBox")
 	check(clock != null, "the clock panel is there")
-	if clock != null and g._side_bar_bg != null:
-		var sb_right: float = g._side_bar_bg.global_position.x + g._side_bar_bg.size.x
-		var clock_right: float = clock.global_position.x + clock.size.x
-		check(absf(sb_right - clock_right) <= 0.5,
-			"the sidebar's border meets the clock's right edge: %f vs %f" % [
-				sb_right, clock_right])
+	if clock != null and side != null and g._side_bar_bg != null:
+		check(absf(side.size.x - clock.size.x) <= 0.5,
+			"the button strip is exactly the clock's width: %f vs %f" % [
+				side.size.x, clock.size.x])
+		check(absf(side.global_position.x - clock.global_position.x) <= 0.5,
+			"and starts at the same x as it: %f vs %f" % [
+				side.global_position.x, clock.global_position.x])
+		# Every button, not just the strip: one that did not fill its width would still leave a
+		# ragged edge under a strip that measures correctly.
+		var ragged: Array = []
+		var seen: int = 0
+		var first_btn: Button = null
+		for n: Node in side.get_children():
+			var b := n as Button
+			if b == null or not b.visible:
+				continue
+			seen += 1
+			if first_btn == null:
+				first_btn = b
+			if absf(b.size.x - clock.size.x) > 0.5:
+				ragged.append("%s at %.1f" % [str(b.name), b.size.x])
+		check(seen >= 6, "the strip's buttons are read: %d" % seen)
+		check(ragged.is_empty(), "every one of them is the clock's width of %.1f: %s" % [
+			clock.size.x, str(ragged.slice(0, 6))])
+		# Three gutters, one number. The top one is measured from the strip's own top, which is
+		# where the top bar's border ends and therefore what the eye reads it against.
+		check(first_btn != null, "the strip has a button in it")
+		if first_btn != null:
+			var bgr := Rect2(g._side_bar_bg.global_position, g._side_bar_bg.size)
+			var left_gut: float = side.global_position.x - bgr.position.x
+			var right_gut: float = bgr.end.x - (side.global_position.x + side.size.x)
+			var top_gut: float = first_btn.global_position.y - side.global_position.y
+			check(left_gut > 1.0, "the buttons sit inside the border: %f" % left_gut)
+			check(absf(right_gut - left_gut) <= 0.5,
+				"the gutter is the same on both sides: %f vs %f" % [left_gut, right_gut])
+			check(absf(top_gut - left_gut) <= 0.5,
+				"and the first button is held off the top bar's border by that same gutter: "
+				+ "%f vs %f" % [top_gut, left_gut])
 
 
 	# ── The planet panel keeps one margin from the chrome on both sides ──
