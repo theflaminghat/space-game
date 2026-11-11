@@ -403,24 +403,30 @@ columns = 2
 
 [node name="EnergyLabel" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=2014918038]
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Energy:"
 
 [node name="EnergyValue" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=1696925854]
 layout_mode = 2
+horizontal_alignment = 2
 
 [node name="PopulationLabel" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=1597267245]
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Population:"
 
 [node name="PopulationValue" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=309057453]
 layout_mode = 2
+horizontal_alignment = 2
 
 [node name="ComputeLabel" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=2033097229]
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Compute:"
 
 [node name="ComputeValue" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer/GridContainer" unique_id=137652594]
 layout_mode = 2
+horizontal_alignment = 2
 
 [node name="ResourcesTitle" type="Label" parent="main_ui/PlanetInfoPage/MarginContainer/VBoxContainer" unique_id=33976238]
 layout_mode = 2

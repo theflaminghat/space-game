@@ -392,6 +392,56 @@ func _run() -> void:
 	# this check measured nothing at all and passed.
 	check(measured >= 7, "every page with text on it was measured: %d" % measured)
 
+	# ── The stat grid's figures are pinned to the panel's right edge ──
+	#
+	# The grid is two columns: a key on the left and its figure on the right. The rows BUILT in
+	# PlanetInfoPage.gd — capacity, manufacturing, storage, the star block — all expand the key
+	# cell and right-align the figure, so the numbers line up in one column against the panel's
+	# edge. The three rows the SCENE defines — Energy, Population and Compute — did neither, so
+	# those three sat left-aligned in a cell as wide as the longest figure in the grid: adrift
+	# somewhere in the middle of the panel, at the top of a stack of numbers that were flush
+	# right. Two claims, because either one alone leaves the figures off the edge: the cell has
+	# to REACH the right edge, and the text has to be drawn against the end of the cell.
+	var info_tab: int = -1
+	for t3 in range(tabs2.get_tab_count()):
+		if tabs2.get_tab_control(t3) == g.planet_info_page:
+			info_tab = t3
+	check(info_tab >= 0, "the body's Info page is one of the tabs")
+	tabs2.current_tab = info_tab
+	for _i in range(8): await process_frame
+	var grid: GridContainer = g.planet_info_page.stats_grid
+	var grid_right: float = grid.global_position.x + grid.size.x
+	var floaters: Array = []
+	var short_cells: Array = []
+	var rows: int = 0
+	var loose: int = 0          # rows whose cell is WIDER than the figure written in it
+	for i in range(1, grid.get_child_count(), 2):
+		var lab := grid.get_child(i) as Label
+		if lab == null or not lab.visible or lab.text == "":
+			continue
+		rows += 1
+		var fw: float = lab.get_theme_font("font").get_string_size(lab.text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, lab.get_theme_font_size("font_size")).x
+		if lab.size.x - fw > 4.0:
+			loose += 1
+		if lab.horizontal_alignment != HORIZONTAL_ALIGNMENT_RIGHT:
+			floaters.append("%s: \"%s\"" % [str(lab.name), lab.text.substr(0, 20)])
+		if absf(lab.global_position.x + lab.size.x - grid_right) > 1.0:
+			short_cells.append("%s ends at %.1f" % [
+				str(lab.name), lab.global_position.x + lab.size.x])
+	check(rows >= 9, "every row of the stat grid is read: %d" % rows)
+	check(floaters.is_empty(), "every figure is right-aligned in its cell: %s" % [
+		str(floaters.slice(0, 6))])
+	check(short_cells.is_empty(),
+		"and every cell reaches the grid's right edge at %.1f: %s" % [
+			grid_right, str(short_cells.slice(0, 6))])
+	# The alignment only SHOWS where the cell has slack, so there has to be slack: in a cell
+	# exactly as wide as the figure in it, left and right align to the same pixel and the check
+	# above asserts nothing.
+	check(loose >= 3,
+		"and the cells are wider than their figures, so the alignment shows: %d of %d" % [
+			loose, rows])
+
 	print("FAILS: %d" % fails)
 	quit()
 
