@@ -143,5 +143,38 @@ func _run() -> void:
 	g._mark_prod_dirty()
 	check(g._swarm_power() > before, "the grid now carries its power")
 
+	# ── It is listed with the other generators ──
+	# Under Power in the build panel, as drawn: the array makes energy, so a player looking for
+	# the swarm looks there.  It used to be filed under Support beside the Sunshade.  Checked on
+	# the rendered list — the heading each card actually sits under — not only on the data.
+	check(str(def.get("category", "")) == "power", "it is filed under power: '%s'"
+		% str(def.get("category", "")))
+	g.current_planet = "sun"
+	g.build_panel.set_planet("sun", g._get_catalog_for_display())
+	for _i in range(2): await process_frame
+	var section: String = ""
+	var under: String = ""
+	for n: Node in g.build_panel.build_list.get_children():
+		if n.is_queued_for_deletion():
+			continue
+		if n is Label:
+			section = (n as Label).text
+		elif n is VBoxContainer and n.get_child_count() > 0:
+			var head: Node = n.get_child(0)
+			if head.get_child_count() > 0 and head.get_child(0) is Button \
+					and (head.get_child(0) as Button).text.ends_with(g.SWARM_BUILDING):
+				under = section
+	print("the array is listed under: '%s'" % under)
+	check(under.begins_with(str(BuildingData.CATEGORY_LABELS["power"])),
+		"the build panel lists it under Power: '%s'" % under)
+	# And the encyclopedia files it in the same place, from the same field.
+	var wiki: Script = load("res://wiki_data.gd")
+	var filed: String = ""
+	for e: Dictionary in wiki.build_index(g):
+		if str(e["cat"]) == "Buildings" and str(e["key"]) == g.SWARM_BUILDING:
+			filed = str(e["group"])
+	check(filed == str(BuildingData.CATEGORY_LABELS["power"]),
+		"the encyclopedia files it under Power too: '%s'" % filed)
+
 	print("FAILS: %d" % fails)
 	quit()

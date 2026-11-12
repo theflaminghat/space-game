@@ -933,8 +933,14 @@ const BUILDINGS := [
 	# the Sun's current luminosity; an "energy" entry here would be that power counted a second
 	# time, at a flat rate, with no lane and no star behind it.  The marker below is what tells
 	# the swarm this building is one of its panels.
+	#
+	# Filed under POWER, with every other generator, though nothing in `production` says so.  It
+	# sat in Support beside the Sunshade, which is where a player looking for the swarm's panels
+	# among the things that make energy never thought to look.  The category also sets the upkeep
+	# rate (Game.UPKEEP_CATEGORY_MULT), so this pays a power station's parasitic load rather than
+	# a support structure's: about 1.4 W an array instead of 0.8 W, beside some 10^21 W beamed back.
 	{"name": "Swarm Collector Array",
-		"category": "support",
+		"category": "power",
 		"allowed_types": ["star"],
 		"cost": {"SolarPanel": 8_000_000, "Al": 2_400_000, "Microchip": 200_000,
 			"Metamaterial": 1_500_000, "energy": 30_000_000},
