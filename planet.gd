@@ -303,11 +303,6 @@ var _mean_anomaly_epoch: float = 0.0
 ## Mean motion n = 2π / T  (radians per game-day).
 var _mean_motion_rad_per_day: float = 0.0
 
-## Actual visual radius at the current true anomaly (updated every frame).
-## Use this instead of orbit_radius when the satellite needs to START exactly
-## at the planet's current position rather than at the semi-major axis.
-var _current_visual_radius: float = 0.0
-
 # ──────────────────────────────────────────────────────────────────────────────
 
 func _ready() -> void:
@@ -388,7 +383,6 @@ func _init_from_planet_data(data: Dictionary) -> void:
 
 	# ── Log-scaled visual semi-major axis (constant, for satellite compat) ────
 	orbit_radius = log(_semi_major_axis_au + 1.0) * orbit_radius_mult
-	_current_visual_radius = orbit_radius  # initial value; refined on first _update_kepler_position
 
 	# ── Visual size (same log-scale as original code) ─────────────────────────
 	size_mult = log(scale.x + 1.0)
@@ -756,7 +750,6 @@ func _update_kepler_position() -> void:
 
 	# 4. Log-scale to visual game space
 	var r_vis: float = log(r_au + 1.0) * orbit_radius_mult
-	_current_visual_radius = r_vis
 
 	# 5. Ecliptic longitude in game plane:  λ = ν + ω̄
 	orbit_angle = nu + _long_periapsis_rad
@@ -766,6 +759,42 @@ func _update_kepler_position() -> void:
 		0.0,
 		r_vis * cos(orbit_angle)
 	)
+
+## Where this body will be `days` game-days from now, in WORLD space.
+##
+## Exact, and pure.  A Keplerian orbit is a function of the mean anomaly and the mean anomaly
+## advances at a constant rate per game-day, so a position any distance into the future is one
+## Kepler solve away - the same solve _update_kepler_position does for the present.
+##
+## This is what lets a launch be AIMED at where its target will be instead of steered at where
+## it is.  A craft that re-reads the live position every frame does arrive on the planet, but
+## its whole trajectory swings round behind the planet as it orbits, so the flight has no plan
+## to show: the path the player is looking at is not the path the craft will fly.
+func position_in_days(days: float) -> Vector3:
+	var local: Vector3 = position
+	if _use_kepler:
+		var m: float = _mean_anomaly_rad + _mean_motion_rad_per_day * days
+		var ecc: float = _solve_kepler(fposmod(m, TAU), _eccentricity)
+		var nu: float = 2.0 * atan2(
+			_sqrt_1pe * sin(ecc * 0.5),
+			_sqrt_1me * cos(ecc * 0.5)
+		)
+		var r_au: float = _semi_major_axis_au \
+			* (1.0 - _eccentricity * _eccentricity) \
+			/ (1.0 + _eccentricity * cos(nu))
+		var r_vis: float = log(r_au + 1.0) * orbit_radius_mult
+		var lam: float = nu + _long_periapsis_rad
+		local = Vector3(r_vis * sin(lam), 0.0, r_vis * cos(lam))
+	elif speed != 0.0:
+		# The fallback circular orbit, in the same terms: _process advances orbit_angle by
+		# angular_velocity * delta, and angular_velocity already carries 1/seconds_per_day, so
+		# per game-day it turns TAU/EARTH_ORBIT_DAYS * speed.  (The Sun has speed 0 and stays
+		# where it is, which falls out of the branch above it.)
+		var ang: float = orbit_angle + (TAU / EARTH_ORBIT_DAYS) * speed * days
+		local = Vector3(orbit_radius * sin(ang), 0.0, orbit_radius * cos(ang))
+	var parent := get_parent() as Node3D
+	return parent.to_global(local) if parent != null else local
+
 
 func _solve_kepler(M: float, e: float) -> float:
 	## Newton-Raphson solution of Kepler's equation M = E − e·sin(E).
@@ -782,7 +811,6 @@ func _solve_kepler(M: float, e: float) -> float:
 # ── Fallback circular position update ────────────────────────────────────────
 
 func _update_position() -> void:
-	_current_visual_radius = orbit_radius  # circular — radius equals semi-major axis
 	position = Vector3(
 		orbit_radius * sin(orbit_angle),
 		0.0,
@@ -1472,14 +1500,6 @@ func _update_star_mirror() -> void:
 		return
 	_mirror.mesh = mirror_cap_mesh(mirror_half_angle(cov))
 	_mirror.visible = true
-
-## Returns the planet's current visual distance from the orbit centre.
-## For Keplerian orbits this varies with true anomaly; for circular fallback
-## it equals orbit_radius (the semi-major axis).
-## Satellite spawner should use this instead of orbit_radius so the craft
-## starts exactly at the planet's position.
-func get_visual_radius() -> float:
-	return _current_visual_radius
 
 # ── Stellar evolution ─────────────────────────────────────────────────────────
 

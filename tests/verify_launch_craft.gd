@@ -106,13 +106,53 @@ func _run() -> void:
 	var depart: Vector3 = sat.get("_start_pos")
 	check(plan[0].distance_to(depart) < 0.05,
 		"it starts where the craft left: %.4f away" % plan[0].distance_to(depart))
-	# The far end is on the parking orbit, which is where the flight itself ends: the arc's own
-	# end point is the target's centre, plus an insertion offset exactly _park_radius long.
+	# The far end is the parking orbit around where Mars WILL BE on arrival - not where it is
+	# now, which over a 300-day flight is most of the way round the Sun from it.
 	var mars: Node3D = g.get_node("WorldRoot/Planets/mars")
 	var park: float = float(sat.get("_park_radius"))
-	var miss: float = plan[plan.size() - 1].distance_to(mars.global_position)
-	check(absf(miss - park) < 0.15,
-		"and ends on the parking orbit: %.3f from Mars, radius %.3f" % [miss, park])
+	var lead0: float = float(sat.get("_flight_days")) - float(sat.get("_elapsed_days"))
+	var miss: float = plan[plan.size() - 1].distance_to(mars.position_in_days(lead0))
+	check(absf(miss - park) < 0.02,
+		"and ends on the parking orbit it is aimed at: %.3f, radius %.3f" % [miss, park])
+	check(plan[plan.size() - 1].distance_to(mars.global_position) > park * 2.0,
+		"which is nowhere near where Mars is today")
+
+	# A long flight goes ROUND, not straight out.  The bearing to the arrival point fixes the
+	# sweep only to within whole revolutions, and the nearest one to what a body out there
+	# actually covers in the time is what stops a 300-day transfer creeping outward in a hook
+	# twenty pixels long.
+	var sweep: float = float(sat.get("_sweep"))
+	print("300-day transfer sweeps %.2f rad (%.2f revolutions)" % [sweep, sweep / TAU])
+	check(sweep > PI, "a 300-day transfer goes most of the way round: %.2f rad" % sweep)
+	# And a whole revolution is ALL that is added: it still ends on the arrival bearing.
+	var arel: Vector3 = sat.get("_arrive_rel")
+	var ends: float = angle_difference(float(sat.get("_depart_angle")) + sweep,
+		atan2(arel.x, arel.z))
+	check(absf(ends) < 1.0e-4, "and still ends on the arrival bearing: off by %.6f rad" % ends)
+
+	# Both halves of that rule, on flights long and short enough to show it.  300 days happens
+	# to land inside the first revolution, so it pins neither on its own.
+	var mars_n: Node3D = g.get_node("WorldRoot/Planets/mars")
+	var earth_n: Node3D = g.get_node("WorldRoot/Planets/earth")
+	g._spawn_satellite(earth_n, mars_n, "orbit", 9050, 1000.0)
+	g._spawn_satellite(earth_n, mars_n, "orbit", 9051, 20.0)
+	var slow: Node = _craft_of(g, 9050)
+	var quick: Node = _craft_of(g, 9051)
+	check(slow != null and quick != null, "two probes to measure the sweep with")
+	if slow != null and quick != null:
+		var s_long: float = float(slow.get("_sweep"))
+		var s_short: float = float(quick.get("_sweep"))
+		print("1000 days sweeps %.2f rad, 20 days sweeps %.2f rad" % [s_long, s_short])
+		check(s_long > TAU, "a 1000-day transfer goes round more than once: %.2f rad" % s_long)
+		var larel: Vector3 = slow.get("_arrive_rel")
+		var lends: float = angle_difference(float(slow.get("_depart_angle")) + s_long,
+			atan2(larel.x, larel.z))
+		check(absf(lends) < 1.0e-4,
+			"and whole revolutions are all that was added: off by %.6f rad" % lends)
+		check(s_short < TAU, "a 20-day hop gets none of them: %.2f rad" % s_short)
+	g._free_launch_craft(9050)
+	g._free_launch_craft(9051)
+	for _i in range(2): await process_frame
 
 	# THE invariant the refactor exists for: the sweep and the elapsed clock belong to the
 	# flight, and a query must not touch either.
@@ -132,23 +172,72 @@ func _run() -> void:
 		"and the insertion it has not reached yet")
 	check(sat.craft_position().distance_to(where0) < 1.0e-5, "and the craft where it was")
 
-	# A lane delivery's plan is sampled off ONE reading of its berth, not one per sample: that
-	# reading is a round trip into the lane renderer, and there are PATH_SAMPLES of them a
-	# rebuild, five times a second, per craft in the air.
+	# ── THE point of the arc being struck once: it does not follow the planet ──
+	# The far end used to be re-read from the target's live position every frame, so the whole
+	# trajectory swung round behind Mars as it orbited and the line drawn along it was a picture
+	# of this frame rather than a plan.
+	var plan0: PackedVector3Array = sat.path_points(48)
+	var mars0: Vector3 = mars.global_position
+	var planets: Node = g.get_node("WorldRoot/Planets")
+	var slot0: Vector3 = planets.swarm_slot_world_pos(0)
+	ss.paused = false
+	g.set_speed_tier(6)
+	for _i in range(120): await process_frame
+	ss.paused = true
+	for _i in range(2): await process_frame
+	var moved: float = mars.global_position.distance_to(mars0)
+	check(moved > 0.05, "Mars has moved: %.3f" % moved)
+
+	# The lead is EXACT, which is what lets the arc be struck once and left alone.  Measured by
+	# running the clock and then predicting backwards over the days the craft logged: the craft
+	# and the planet advance off the same delta, so if the two rates disagreed at all this is
+	# where it would show.
+	var flown_days: float = float(sat.get("_elapsed_days")) - flown0
+	var rewound: float = mars.position_in_days(-flown_days).distance_to(mars0)
+	print("%.3f days of travel, planet prediction off by %.6f" % [flown_days, rewound])
+	# Absolute, not a fraction of the distance travelled: a rate that is wrong by one per cent
+	# is wrong by one per cent OF that distance, which such a tolerance would wave through.
+	check(rewound < 1.0e-4,
+		"predicting %.3f days lands on the planet's own figure: off by %.6f" % [flown_days, rewound])
+
+	# The lane the carriers fly to is led the same way, off its own constant turn per game-day.
+	var lane_back: float = planets.swarm_slot_world_pos(0, -flown_days).distance_to(slot0)
+	print("lane prediction off by %.6f over the same %.3f days" % [lane_back, flown_days])
+	check(lane_back < 1.0e-3, "and the same for a swarm berth: off by %.6f" % lane_back)
+	var plan1: PackedVector3Array = sat.path_points(48)
+	var drift: float = 0.0
+	for i in range(mini(plan0.size(), plan1.size())):
+		drift = maxf(drift, plan0[i].distance_to(plan1[i]))
+	check(drift < 1.0e-4, "and the flight plan has not: %.5f drift over %.3f of travel"
+		% [drift, moved])
+
+	# Fixed and still right: the far end is where the target WILL BE, one parking radius off,
+	# so the craft arrives on the planet rather than where the planet used to be.
+	var lead: float = float(sat.get("_flight_days")) - float(sat.get("_elapsed_days"))
+	var will_be: Vector3 = mars.position_in_days(lead)
+	var reach: float = plan1[plan1.size() - 1].distance_to(will_be)
+	check(absf(reach - float(sat.get("_park_radius"))) < 0.02,
+		"the plan ends on the parking orbit it will find: %.3f vs %.3f"
+			% [reach, float(sat.get("_park_radius"))])
+
+	# A lane delivery is aimed the same way, and its plan is fixed too.
 	var earth_p: Node3D = g.get_node("WorldRoot/Planets/earth")
 	g._spawn_swarm_satellite(earth_p, earth_p.global_position + Vector3(1.0, 0.0, 0.0),
 		9001, 120.0, 0)
 	var lane_craft: Node = _craft_of(g, 9001)
 	check(lane_craft != null, "a lane delivery is in the air")
 	if lane_craft != null:
-		var asked: Array = [0]
-		lane_craft.slot_provider = func() -> Vector3:
-			asked[0] += 1
-			return Vector3(2.0, 0.1, 0.0)
-		asked[0] = 0
 		var lane: PackedVector3Array = lane_craft.path_points(64)
 		check(lane.size() == 65, "its lane-entry arc comes back: %d points" % lane.size())
-		check(asked[0] == 1, "off one reading of the berth, not %d" % asked[0])
+		var berth: Vector3 = planets.swarm_slot_world_pos(0, 120.0)
+		check(lane[lane.size() - 1].distance_to(berth) < 0.05,
+			"ending at the berth the lane will have turned to: %.3f away"
+				% lane[lane.size() - 1].distance_to(berth))
+		# And that is a different place from where the berth is now - a swarm lane goes round
+		# in a week and a half, so over a 120-day flight the lead is the whole point.
+		check(berth.distance_to(planets.swarm_slot_world_pos(0)) > 0.1,
+			"which is not where it is today: %.3f"
+				% berth.distance_to(planets.swarm_slot_world_pos(0)))
 		g._free_launch_craft(9001)
 		for _i in range(2): await process_frame
 
@@ -352,6 +441,37 @@ func _run() -> void:
 				worst = maxf(worst, absf(pt.distance_to(earth.global_position) - r))
 			check(worst < 0.01, "every point of it is on the parking orbit: off by %.4f" % worst)
 			check(ring[0].distance_to(ring[ring.size() - 1]) < 0.01, "and the ring closes")
+
+
+	# ── 11. It lands on the planet, not on where the planet used to be ────────
+	# The end-to-end of everything above: drive a whole flight and see where the craft ends up.
+	# Aimed at a stale position it would finish tens of units from Mars; aimed at the lead it
+	# finishes on the parking orbit.
+	g.active_launches.clear()
+	g._clear_launch_craft()
+	var mars_p: Node3D = g.get_node("WorldRoot/Planets/mars")
+	g._spawn_satellite(g.get_node("WorldRoot/Planets/earth") as Node3D, mars_p, "orbit",
+		9100, 30.0)
+	var probe: Node = _craft_of(g, 9100)
+	check(probe != null, "a probe to drive to the end")
+	if probe != null:
+		var aimed: Vector3 = probe.path_points(2)[2]
+		var guard: int = 0
+		while float(probe.get("_elapsed_days")) < 30.0 and guard < 40000:
+			guard += 1
+			ss.paused = false
+			ss.ui_paused = false
+			paused = false   # the SceneTree is us
+			await process_frame
+		ss.paused = true
+		var off: float = probe.craft_position().distance_to(mars_p.global_position)
+		var park2: float = float(probe.get("_park_radius"))
+		print("flew %d frames; craft %.3f from Mars, parking radius %.3f, aim %.3f off"
+			% [guard, off, park2, aimed.distance_to(mars_p.global_position)])
+		check(float(probe.get("_elapsed_days")) >= 30.0, "the flight finished: %.1f days"
+			% float(probe.get("_elapsed_days")))
+		check(off < park2 * 1.15, "and the craft is on Mars: %.3f off a %.3f parking orbit"
+			% [off, park2])
 
 	print("FAILS: %d" % fails)
 	quit()

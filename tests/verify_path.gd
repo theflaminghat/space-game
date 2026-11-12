@@ -62,7 +62,13 @@ func _run() -> void:
 	if sat == null:
 		print("FAILS: ", fails); quit(); return
 	check(sat.arrival_mode == "swarm", "it flies to a berth, not into orbit: '%s'" % sat.arrival_mode)
-	check(sat.slot_provider.is_valid(), "and tracks the berth as the lane turns")
+	# Aimed at a berth, once, and left alone: the whole flight plan is struck at launch now
+	# (see satellite.gd), so what the craft carries is a point on the lane rather than a way of
+	# asking where the lane has got to.  By RADIUS, because the lane keeps turning under it.
+	var aim_r: float = (sat.swarm_target_pos - sun.global_position).length()
+	check(absf(aim_r - from_centre) < 0.01,
+		"and is aimed at a fixed point on that lane: %.3f from the centre, lane at %.3f"
+			% [aim_r, from_centre])
 	# Fly it and watch how close it comes to the star.
 	#
 	# The craft is moved by the satellite node's OWN _process, so the tree has to really process

@@ -641,9 +641,9 @@ ever wanted again, it has to compress what it produces.
 
 ### A craft belongs to the launch board
 
-`satellite.gd` is the dot that flies a mission: a Hohmann-style arc whose far end is re-read from
-the target's live position every frame, so it homes onto a planet that keeps orbiting during the
-flight. Three things about it are deliberate.
+`satellite.gd` is the dot that flies a mission: a Hohmann-style arc **struck once, at launch**,
+between where the origin is and where the target will be on arrival. Four things about it are
+deliberate.
 
 **It is drawn only while the Launches panel is open.** A civilisation running standing launch
 orders has craft in the air permanently; drawn whenever the solar system was, they were a dozen
@@ -652,20 +652,47 @@ wandering dots saying nothing to a player who was not looking at the launch boar
 it with the frozen-system rule the planets use. A scene template craft that lived under Earth and
 un-hid itself on the first visibility sync is gone with it.
 
+**The flight is aimed, not steered.** The far end of the arc used to be re-read from the target's
+live position every frame. The craft did land on the planet, but the whole trajectory went round
+*with* the planet, trailing along behind it for the length of the flight — so there was no plan to
+show: the path on screen was where the craft happened to be pointing this frame, not where it was
+going. `Planet.position_in_days` answers where a body will be instead. A Keplerian orbit is a
+function of the mean anomaly and the mean anomaly advances at a constant rate per game-day, so the
+lead is one Kepler solve and it is **exact** — the test runs the clock and predicts backwards over
+the days the craft logged, and the two agree to the last digit. `begin_transfer` takes the lead
+over the flight's *remaining* days (so a flight restored from a save leads correctly too), fixes
+the arrival point, the prograde sweep and the insertion hook, and never touches them again.
+
+**How far round it goes** is the other half of the arc, and the bearing to the arrival point
+fixes it only to within whole revolutions. Aimed at the bearing alone, a four-hundred-day flight
+can creep almost straight outward while the planets whirl past it — a stub, not a transfer. So
+`begin_transfer` takes the revolution count that puts the sweep nearest what a body orbiting out
+there actually covers in the time (the mean of the origin's and the target's own angular rates,
+measured a day apart off `position_in_days`), which for a short hop is none at all. This was
+invisible while the arc was re-struck every frame: the sweep was a bearing to wherever the target
+had got to, and it wandered through long arcs on its way to the short one it would have ended on.
+
+A swarm berth is led the same way: a lane turns by a constant angle per game-day, and it goes
+round in about eleven, so over a long flight the lead is most of the point. The one destination
+that cannot be led is a **planet's** orbital lane berth — those turn on a wall-clock delta scaled
+by the speed tier (`Planet._update_infra`), not on the calendar, so there is no answer to "where
+will it be in ninety days". A structure carrier is aimed at a snapshot and the structure appears
+wherever the ring has turned to, which costs nothing to look at: a lane's structures are identical
+and evenly spaced, so one berth is not distinguishable from another.
+
 **Clicking a flight in the list draws its whole plan**, as a dashed line from the launch site to
-the parking orbit at the far end. The arc is the same one the craft flies, sampled — which is why
-the one stateful step of it, the unwrapped prograde sweep, is split into `_track_sweep` and the
-point functions (`_arc_point`, `_lane_point`) are pure. Asking a craft where it is going must not
-move it, and a lane delivery's berth is read once per rebuild rather than once per sample, since
-that read is a round trip into the lane renderer.
+the parking orbit at the far end. The arc is the same one the craft flies, sampled — `_arc_point`
+and `_lane_point` are pure functions of `p`, so the line *is* the path, and asking for it two
+hundred times costs the flight nothing.
 
 The dashes are spaced by **arc length**, not by flight fraction: the arc's geometric speed varies
 along itself, so cutting by fraction piles them up at the slow end. Each dash is a tube of
 triangles for the same reason the orbit ribbons are — a 1-px Vulkan line vanishes at distance,
 which is most of where this one is drawn — and the cross-section frame is built from the
 segment's own direction rather than the world radial, because a parking orbit runs across that
-radial and would come out edge-on. The line is re-cut five times a second, not sixty: it is a
-plan, and the target moves slowly.
+radial and would come out edge-on. Because the arc is fixed, the line is cut once and left; the
+only plan that moves is a local insertion's, which is a parking orbit around a body that is itself
+in orbit, and that one is re-cut on a 5 Hz clock.
 
 **Nothing is left behind.** An `"orbit"` arrival used to settle into a parking orbit and follow
 its target for the rest of the run, so every mission ever flown left a dot circling the world it
@@ -2684,13 +2711,13 @@ These are not style preferences; each was a bug.
 	`compute_mult` never read it. `verify_policy_effects` measures every promise and pins every
 	policy's whole reach.
 
-15. **Asking a craft where it is going does not move it.** The transfer arc carries one piece of
-	state — the unwrapped prograde sweep, which keeps the arc continuous as the target orbits
-	past the departure angle — and drawing a flight plan samples that arc a couple of hundred
-	times a rebuild. `_track_sweep` holds the state and `_arc_point` / `_lane_point` are pure, so
-	the line and the dot are cut from the same geometry without the line nudging the dot. The
-	same split is what stops a berth delivery's plan making 180 round trips into the lane
-	renderer for a slot position that has not changed between samples.
+15. **A flight plan does not change between striking it and flying it.** The transfer arc's far
+	end used to be re-read from the target's live position every frame, so the trajectory swung
+	round behind the planet as it orbited — the craft arrived, but there was never a path to
+	show, only a bearing. It is aimed once instead, at where the target *will be*
+	(`Planet.position_in_days`, exact for a Keplerian orbit), which makes `_arc_point` and
+	`_lane_point` pure functions of `p`: the line drawn along them is the path, and sampling it
+	two hundred times to draw that line costs the flight nothing.
 
 16. **A launch's craft lives exactly as long as the launch.** It is freed when the launch
 	completes, when it frees itself at the far end, and when a run is replaced — and a loaded

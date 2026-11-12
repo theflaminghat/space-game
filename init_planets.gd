@@ -297,13 +297,18 @@ func _lane_of_index(index: int) -> int:
 ## World position of collector `index` at its base phase — the spot a rocket flies to
 ## before it transforms into a deployed panel.  Unrevealed slots hold this static
 ## position (they don't orbit until they become visible).
-func swarm_slot_world_pos(index: int) -> Vector3:
+## `days` looks that many game-days ahead instead of at now.  A lane turns by a constant angle
+## per game-day, so where a slot WILL be is one multiplication away - which is what a carrier
+## needs to be aimed at the berth it will find rather than steered at the one it can see.  (The
+## Sun's swelling is not predicted: over a flight it is nothing, and over the millennia where it
+## is not, the lane radius is the least of what has changed.)
+func swarm_slot_world_pos(index: int, days: float = 0.0) -> Vector3:
 	if index < 0 or index >= _swarm_max:
 		return global_position
 	var lane: int = _lane_of_index(index)
 	var fill: int = index - _lane_start[lane]
 	var rv: float = _lane_rvis[lane] * _sun_visual_mult()   # track the growing Sun
-	var th: float = _slot_phase(lane, fill) + _lane_angle[lane]   # current (rotated) slot spot
+	var th: float = _slot_phase(lane, fill) + _lane_angle[lane] + _lane_motion[lane] * days
 	return to_global(_lane_basis[lane] * Vector3(rv * cos(th), 0.0, rv * sin(th)))
 
 ## Reposition every visible collector at its current orbital phase, oriented so the

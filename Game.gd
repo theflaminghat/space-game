@@ -2368,13 +2368,20 @@ func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: Str
 
 ## A Solar Deployment craft: flies straight to its reserved swarm slot and removes
 ## itself on arrival (the swarm collector takes its place — see init_planets).
+##
+## Aimed at where that slot WILL BE when it gets there.  A swarm lane goes round in a week and a
+## half, so a craft steered at the live slot spent its whole flight on an arc that swung round
+## behind the lane; the lane turns by a constant angle per game-day, so leading it is exact.
 func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id: int,
 		flight_days: float, slot_index: int = -1, flown_days: float = 0.0) -> void:
 	var sat := Satellite.new()
 	sat.name            = "Satellite_%d" % launch_id
 	sat.arrival_mode    = "swarm"
 	sat.swarm_target_pos = slot_pos
-	sat.swarm_slot_index = slot_index   # lets it home on the slot as the lane turns
+	var planets := get_node_or_null("WorldRoot/Planets")
+	if slot_index >= 0 and planets != null and planets.has_method("swarm_slot_world_pos"):
+		sat.swarm_target_pos = planets.swarm_slot_world_pos(slot_index,
+			maxf(0.0, flight_days - flown_days))
 	$WorldRoot.add_child(sat)
 	sat.begin_transfer(
 		$WorldRoot/Planets/sun as Node3D,
@@ -2390,17 +2397,23 @@ func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id:
 ## craft aims at the body's CENTRE — which, for the Sun, means flying into the star and climbing
 ## back out to park.
 ##
-## The berth is reserved before the launch and tracked live, so the craft follows it as the lane
-## turns.  A lane spreads its structures evenly, so reserving means asking where the new one will
-## sit once it is there: index `reserved` of `reserved + 1`.
+## A lane spreads its structures evenly, so reserving a berth means asking where the new one
+## will sit once it is there: index `reserved` of `reserved + 1`.
+##
+## Taken ONCE, at launch, like every other arrival point.  This berth is the one destination in
+## the game that cannot be led: a body's orbital lanes turn on a wall-clock delta scaled by the
+## speed tier (Planet._update_infra), not on the calendar, so there is no answer to "where will
+## it be in ninety days".  The craft therefore arrives at a point on the lane ring and the
+## structure appears whereever the ring has turned to — which costs nothing to look at, because
+## a lane's structures are identical and evenly spaced, so one berth is not distinguishable
+## from another.  The alternative was a trajectory that visibly swung round for the whole
+## flight, which is not a plan.
 func _spawn_structure_carrier(origin_planet: Planet, target_planet: Planet, structure: String,
 		launch_id: int, flight_days: float, reserved: int, flown_days: float = 0.0) -> void:
 	var sat := Satellite.new()
 	sat.name             = "Satellite_%d" % launch_id
 	sat.arrival_mode     = "swarm"        # fly to a point, then make way for what was carried
 	sat.swarm_target_pos = target_planet.infra_slot_world_pos(structure, reserved, reserved + 1)
-	sat.slot_provider = func() -> Vector3:
-		return target_planet.infra_slot_world_pos(structure, reserved, reserved + 1)
 	$WorldRoot.add_child(sat)
 	sat.begin_transfer($WorldRoot/Planets/sun as Node3D, origin_planet, target_planet,
 		flight_days, flown_days)
@@ -2514,11 +2527,10 @@ func _respawn_launch_craft() -> void:
 		var payload: int = int(launch.get("payload", 0))
 		var structure: String = str(launch.get("structure", ""))
 		if payload > 0:
-			var planets := get_node_or_null("WorldRoot/Planets")
-			var slot_pos: Vector3 = origin_planet.global_position
-			if planets and planets.has_method("swarm_slot_world_pos"):
-				slot_pos = planets.swarm_slot_world_pos(swarm_next)
-			_spawn_swarm_satellite(origin_planet, slot_pos, lid, total, swarm_next, flown)
+			# The spawner leads the slot by the flight's remaining days itself; this is only
+			# the fallback for a swarm renderer that is not up yet.
+			_spawn_swarm_satellite(origin_planet, origin_planet.global_position, lid, total,
+				swarm_next, flown)
 			swarm_next += maxi(1, payload)
 		elif structure != "":
 			var key: String = target_name + "/" + structure
@@ -7052,11 +7064,10 @@ func _on_launch_requested(params: Dictionary) -> void:
 				# arrival, becomes the deployed collector there.
 				var reserved: int = swarm_panels() + _pending_swarm
 				_pending_swarm += 1
-				var planets := get_node_or_null("WorldRoot/Planets")
-				var slot_pos: Vector3 = origin_planet.global_position
-				if planets and planets.has_method("swarm_slot_world_pos"):
-					slot_pos = planets.swarm_slot_world_pos(reserved)
-				_spawn_swarm_satellite(origin_planet, slot_pos, launch["id"], float(duration), reserved)
+				# The spawner leads the slot by the flight time itself; this is only the
+				# fallback for a swarm renderer that is not up yet.
+				_spawn_swarm_satellite(origin_planet, origin_planet.global_position,
+					launch["id"], float(duration), reserved)
 			elif structure != "":
 				# The berth is reserved counting what is already there and what is still in
 				# flight, so two carriers in the air do not aim at the same spot.  This launch is

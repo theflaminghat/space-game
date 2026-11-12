@@ -6,10 +6,9 @@ extends Node3D
 ## Runs on the same game-day clock the planets use (delta / seconds_per_day), so
 ## it respects pause and every timescale.  Three phases:
 ##
-##   TRANSFER – follows a Hohmann-style ellipse whose endpoints are re-evaluated
-##              every frame against the target planet's *live* position, so the
-##              craft homes onto the planet even though it keeps orbiting during
-##              the flight.  Flight time equals the mission's duration in days.
+##   TRANSFER – follows a Hohmann-style ellipse STRUCK ONCE, at launch, between where the
+##              origin is and where the target WILL BE on arrival.  Flight time equals the
+##              mission's duration in days.
 ##   ORBIT    – ("orbit" arrival) settles into a tilted parking orbit around the
 ##              target and follows it indefinitely.
 ##   LANDING  – ("land" arrival) spirals down to the surface, then frees itself.
@@ -40,8 +39,9 @@ const PATH_DUTY:      float = 0.58    # fraction of each dash period that is ink
 const PATH_TUBE_R:    float = 0.035   # dash cross-section radius (game units)
 const PATH_RING_SEGS: int   = 4       # sides of that cross-section
 const PATH_COLOR := Color(0.62, 0.85, 1.00, 0.70)
-## The arc is live — it homes on a target that keeps orbiting — but a plan does not need
-## re-striking sixty times a second.
+## A transfer arc never moves, so its line is cut once.  The one plan that does move is a local
+## insertion's — a parking orbit around a body that is itself in orbit — and that is re-cut on
+## this clock rather than every frame.
 const PATH_REBUILD_SEC: float = 0.2
 
 enum State { TRANSFER, ORBIT, LANDING, DONE }
@@ -49,15 +49,10 @@ enum State { TRANSFER, ORBIT, LANDING, DONE }
 # ── Public config (set by spawner before begin_transfer) ─────────────────────────
 var arrival_mode: String = "orbit"
 var orbit_center: Node3D = null
-## For arrival_mode == "swarm": the fixed swarm-slot world position the craft flies to,
-## then removes itself (the deployed collector takes its place).
+## For arrival_mode == "swarm": the world position the craft flies to, where it removes itself
+## and what it carried takes its place.  WHERE THE BERTH WILL BE on arrival, not where it is:
+## the spawner looks it up for the flight's remaining days (see Game._spawn_swarm_satellite).
 var swarm_target_pos: Vector3 = Vector3.ZERO
-## Reserved slot index, so the craft can home on the slot's LIVE position as the lane rotates
-## rather than on where it was when the launch was ordered.  -1 falls back to the snapshot.
-var swarm_slot_index: int = -1
-## Where the reserved slot is NOW, for craft flying to something other than a swarm slot (an
-## orbital-lane berth, say).  Takes precedence over swarm_slot_index when set; returns a Vector3.
-var slot_provider: Callable = Callable()
 var _is_swarm:  bool    = false
 var _start_pos: Vector3 = Vector3.ZERO   # departure position, captured at launch
 ## Set when the target IS the origin: there is no interplanetary cruise, so the plan to draw is
@@ -83,15 +78,21 @@ var _depart_angle:  float = 0.0
 var _depart_radius: float = 0.0
 var _outward:       bool  = true
 ## Sun position cached at launch — the star is static, so re-reading its transform
-## every frame in _transfer_point() is pure overhead.
+## every frame is pure overhead.
 var _sun_pos:       Vector3 = Vector3.ZERO
 
-# ── Continuously-unwrapped heliocentric sweep to the (moving) target ──────────────
-## Prograde angular distance from departure to the target's live angle.  Kept
-## continuous frame-to-frame so the arc never snaps by a full revolution when the
-## target crosses the departure angle (the 0/TAU branch point of a wrapped sweep).
-var _sweep:      float = 0.0
-var _sweep_init: bool  = false
+# ── Where the flight ENDS, fixed at launch ───────────────────────────────────────
+## The arrival point relative to the Sun, and the prograde angle swept to reach it.  Both are
+## struck once in begin_transfer and never touched again: that is the whole difference between
+## a flight that has a plan and one that merely has a destination.
+##
+## This used to be re-read from the target's live position every frame.  The craft still landed
+## on the planet, but the arc's far end went round with it, so the trajectory swung along behind
+## the planet for the length of the flight — and a line drawn along it was not a plan, it was a
+## picture of where the craft happened to be pointing this frame.
+var _arrive_rel:    Vector3 = Vector3.ZERO
+var _arrive_radius: float   = 1.0
+var _sweep:         float   = 0.0
 
 # ── Game-day timing ──────────────────────────────────────────────────────────────
 var _flight_days:  float = DEFAULT_FLIGHT_DAYS
@@ -139,7 +140,6 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 	var rel: Vector3 = origin.global_position - _sun_pos
 	_depart_radius = rel.length()
 	_depart_angle  = atan2(rel.x, rel.z)
-	_outward       = target.get_visual_radius() >= _depart_radius
 
 	_park_radius = maxf(target.scale.x * PARKING_SCALE, PARKING_MIN)
 	_orbit_tilt  = deg_to_rad(ORBIT_TILT_DEG)
@@ -148,7 +148,6 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 
 	_elapsed_days = clampf(elapsed_days, 0.0, _flight_days)
 	_started      = true
-	_sweep_init   = false   # seeded on the first _transfer_point() call below
 	_local        = origin == target
 
 	# Swarm deployment: fly straight to the reserved slot, then vanish (the collector
@@ -156,9 +155,46 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 	_is_swarm  = arrival_mode == "swarm"
 	_start_pos = origin.global_position
 	var p0: float = _elapsed_days / _flight_days
+
+	# ── The arc, struck once ──
+	# Aimed at where the destination will be when the craft gets there, which for a Keplerian
+	# orbit is exact, so nothing has to be steered afterwards.  A restored flight has only its
+	# REMAINING days to lead by, which is why this reads the clock rather than flight_days.
+	var lead: float = _flight_days - _elapsed_days
+	var arrive: Vector3 = swarm_target_pos if _is_swarm else target.position_in_days(lead)
+	_arrive_rel    = arrive - _sun_pos
+	_arrive_radius = _arrive_rel.length()
+	# Which end of the half-ellipse the flight starts at.  Off the arrival radius the craft is
+	# actually aimed at, now that there is one: this used to take the target's orbit radius as
+	# a stand-in, which is a different number on an eccentric orbit and, when the two fall on
+	# opposite sides of the departure radius, puts the arc's start at the wrong end of itself.
+	_outward = _arrive_radius >= _depart_radius
+
+	# How far ROUND the Sun the flight goes.  The bearing to the arrival point only fixes that
+	# to within whole revolutions, and over a long flight the difference is the entire shape of
+	# the path: aimed at the bearing alone, a craft can spend four hundred days creeping almost
+	# straight outward while the planets whirl past it, which is not a transfer anybody would
+	# recognise.  So take the revolution count that puts the sweep nearest what something
+	# actually orbiting out there covers in the time, which for a short hop is none at all.
+	#
+	# It did not show before only because the arc was re-struck every frame: the sweep was a
+	# bearing to wherever the target had got to, and it wandered through long arcs on its way
+	# to the short one it would have ended on.
+	var base: float = _prograde_sweep(_depart_angle, atan2(_arrive_rel.x, _arrive_rel.z))
+	_sweep = base
+	if not _is_swarm:
+		var rate: float = 0.5 * (_angular_rate(origin) + _angular_rate(target))
+		var revs: float = floor((rate * _flight_days - base) / TAU + 0.5)
+		_sweep = base + maxf(0.0, revs) * TAU
+	# The insertion hook is a function of where the arc ends, and the arc's end no longer moves,
+	# so it is settled here instead of being recomputed on the approach.
+	var ins: Vector2 = _insertion_entry(_depart_angle + _sweep)
+	_orbit_dir         = ins.x
+	_orbit_entry_angle = ins.y
+
 	if _is_swarm:
 		_state = State.TRANSFER
-		_set_craft_pos(_swarm_point(p0))
+		_set_craft_pos(_lane_point(p0))
 		return
 
 	# Local orbit insertion: the target *is* the origin planet, so there's no
@@ -172,7 +208,7 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 		return
 
 	_state = State.TRANSFER
-	_set_craft_pos(_transfer_point(p0))
+	_set_craft_pos(_arc_point(p0))
 
 func _process(delta: float) -> void:
 	if not _started:
@@ -197,8 +233,10 @@ func _process(delta: float) -> void:
 		State.ORBIT:    _process_orbit(delta_days)
 		State.LANDING:  _process_landing(delta_days)
 
-	# After the state pass, so the line is cut from the same sweep the dot was placed with.
-	if _path_shown and visible and _state != State.DONE:
+	# The transfer and lane arcs do not move, so their line is cut once when it is asked for and
+	# never again.  A local insertion's plan is the parking orbit around a body that DOES move,
+	# so that one is re-cut, on its own slow clock.
+	if _path_shown and _local and visible and _state != State.DONE:
 		_path_accum += delta
 		if _path_accum >= PATH_REBUILD_SEC:
 			_path_accum = 0.0
@@ -212,18 +250,18 @@ func _process_transfer(delta_days: float) -> void:
 
 	# Swarm deployment: glide to the slot, then disappear as the collector materialises.
 	if _is_swarm:
-		_set_craft_pos(_swarm_point(p))
+		_set_craft_pos(_lane_point(p))
 		if p >= 1.0:
 			arrived.emit("swarm")
 			_state = State.DONE
 			queue_free()
 		return
 
-	_set_craft_pos(_transfer_point(p))
+	_set_craft_pos(_arc_point(p))
 
 	if p >= 1.0:
 		arrived.emit(arrival_mode)
-		# _orbit_dir and _orbit_entry_angle are already current from _transfer_point.
+		# _orbit_dir and _orbit_entry_angle were settled at launch, with the arc.
 		if arrival_mode == "land":
 			_state     = State.LANDING
 			_land_days = 0.0
@@ -231,7 +269,8 @@ func _process_transfer(delta_days: float) -> void:
 			_state       = State.ORBIT
 			_orbit_angle = _orbit_entry_angle
 
-## Heliocentric transfer down to a swarm slot.
+## Heliocentric transfer down to a berth in an orbital lane, from the departure point to the
+## berth the craft was aimed at.
 ##
 ## This used to be a straight lerp from the departure planet to the slot.  A swarm lane sits
 ## inside Mercury's orbit, so that chord passes THROUGH THE SUN whenever the slot is on the far
@@ -242,23 +281,8 @@ func _process_transfer(delta_days: float) -> void:
 ## to the other, so the path can never pass inside the destination lane — and therefore never
 ## through the Sun.  Arriving at periapsis means arriving with velocity purely along-track,
 ## which is the condition for entering the lane rather than crossing it.
-func _swarm_point(p: float) -> Vector3:
-	# Track the LIVE slot: the lane keeps rotating during the flight, so homing on a snapshot
-	# would arrive where the slot used to be and jump on hand-off to the collector.
-	var slot: Vector3 = _live_swarm_slot()
-	var srel: Vector3 = slot - _sun_pos
-	# Unwrap the prograde sweep so a rotating lane does not snap the path by +-TAU.
-	_track_sweep(atan2(srel.x, srel.z))
-	return _lane_point(p, slot)
-
-## The lane-entry arc at fraction p, off the sweep as it currently stands.
-##
-## Pure, and the slot is passed in rather than re-read: drawing the plan samples this a couple
-## of hundred times, and every one of those would otherwise be a round trip to the swarm
-## renderer -- and would carry the flight's own sweep along with it.
-func _lane_point(p: float, slot: Vector3) -> Vector3:
-	var srel: Vector3 = slot - _sun_pos
-	var r2: float = maxf(srel.length(), 0.01)
+func _lane_point(p: float) -> Vector3:
+	var r2: float = maxf(_arrive_radius, 0.01)
 	var r1: float = maxf(_depart_radius, r2)   # the swarm is always inside a launch site
 
 	# Ellipse from apoapsis (r1) to periapsis (r2).  theta runs pi -> 2pi, so r decreases
@@ -271,53 +295,23 @@ func _lane_point(p: float, slot: Vector3) -> Vector3:
 	var ang: float = _depart_angle + _sweep * p
 	# Out-of-plane: lanes are inclined, so lift the craft onto the slot's plane over the
 	# flight instead of dropping onto it at the end.
-	var plane_y: float = srel.y * smoothstep(0.0, 1.0, p)
+	var plane_y: float = _arrive_rel.y * smoothstep(0.0, 1.0, p)
 	return _sun_pos + Vector3(sin(ang) * r, plane_y, cos(ang) * r)
 
-## Current world position of the reserved slot, falling back to the snapshot taken at launch
-## if the swarm renderer is not reachable (loading, or a save restored mid-flight).
-func _live_swarm_slot() -> Vector3:
-	if slot_provider.is_valid():
-		var p: Variant = slot_provider.call()
-		if p is Vector3:
-			return p
-	if swarm_slot_index >= 0 and orbit_center != null:
-		var planets: Node = orbit_center.get_parent()
-		if planets != null and planets.has_method("swarm_slot_world_pos"):
-			return planets.swarm_slot_world_pos(swarm_slot_index)
-	return swarm_target_pos
-
-## Hohmann half-ellipse whose far end is recomputed every frame from the target's
-## current radius & angle, so the craft homes onto the moving planet.
-func _transfer_point(p: float) -> Vector3:
-	var trel: Vector3 = _target.global_position - _sun_pos
-	# Unwrap the prograde sweep so it varies continuously as the target orbits,
-	# instead of snapping by +-TAU when the target passes the departure angle.
-	_track_sweep(atan2(trel.x, trel.z))
-	# Latched for the ORBIT and LANDING phases, which carry on from where the arc ends.
-	# Only from three-quarters of the way out, where the blend in _arc_point can first
-	# move the craft: before that this is trig nothing reads.
-	if p >= 0.75:
-		var ins: Vector2 = _insertion_entry(_depart_angle + _sweep)
-		_orbit_dir         = ins.x
-		_orbit_entry_angle = ins.y
-	return _arc_point(p)
-
-## The transfer arc at fraction p, off the sweep as it currently stands.
+## Hohmann half-ellipse from the departure point to the arrival point, both fixed at launch.
 ##
-## Pure, so that asking for the plan cannot disturb the flight following it: the sweep is
-## carried by _track_sweep above, and the insertion hook by _insertion_entry, both of which
-## depend on the target's live position and neither of which depends on p.
+## Pure, and constant for the whole flight: the same p always gives the same place, so the line
+## drawn along it IS the path the craft will fly, and sampling it two hundred times to draw that
+## line costs the arc nothing.
 func _arc_point(p: float) -> Vector3:
-	var trel: Vector3 = _target.global_position - _sun_pos
-	# Floor the target radius so a Sun-targeted transfer (target at the centre)
-	# can't drive the transfer eccentricity to exactly 1.0 → 0/0 → NaN position.
-	var r2: float = maxf(trel.length(), 0.5)
+	# Floor the arrival radius so a Sun-targeted transfer (arriving at the centre) can't drive
+	# the transfer eccentricity to exactly 1.0 -> 0/0 -> NaN position.
+	var r2: float = maxf(_arrive_radius, 0.5)
 	var r1: float = _depart_radius
 
 	var a: float = (r1 + r2) * 0.5
 	var e: float = absf(r2 - r1) / maxf(r1 + r2, 1.0e-4)
-	# theta runs 0→π (outward: periapsis→apoapsis) or π→2π (inward), so the
+	# theta runs 0->pi (outward: periapsis->apoapsis) or pi->2pi (inward), so the
 	# radius starts at r1 and ends exactly at r2 in either direction.
 	var theta: float = (0.0 if _outward else PI) + p * PI
 	var r: float = a * (1.0 - e * e) / (1.0 + e * cos(theta))
@@ -325,12 +319,10 @@ func _arc_point(p: float) -> Vector3:
 	var ang: float = _depart_angle + _sweep * p
 	var pos: Vector3 = _sun_pos + Vector3(sin(ang) * r, 0.0, cos(ang) * r)
 
-	# The velocity-aligned insertion offset is blended in by smoothstep(0.75, 1.0, p),
-	# which is zero for the first three-quarters of the flight — so skip the atan2 /
-	# trig that compute it until it can actually affect the position.
+	# Hook onto the parking orbit over the last quarter, so the craft arrives moving the way it
+	# will be moving once it is in orbit rather than turning on the spot at the end.
 	if p >= 0.75:
-		var ins: Vector2 = _insertion_entry(_depart_angle + _sweep)
-		pos += _orbit_offset(_park_radius, ins.y) * smoothstep(0.75, 1.0, p)
+		pos += _orbit_offset(_park_radius, _orbit_entry_angle) * smoothstep(0.75, 1.0, p)
 	return pos
 
 # ── Phase: orbit ─────────────────────────────────────────────────────────────────
@@ -422,9 +414,8 @@ func path_points(samples: int = PATH_SAMPLES) -> PackedVector3Array:
 		return out
 	var n: int = maxi(samples, 2)
 	if _is_swarm:
-		var slot: Vector3 = _live_swarm_slot()
 		for i in range(n + 1):
-			out.append(_lane_point(float(i) / float(n), slot))
+			out.append(_lane_point(float(i) / float(n)))
 		return out
 	if _local:
 		for i in range(n + 1):
@@ -541,26 +532,23 @@ func _unlit_mat(color: Color, transparent: bool) -> StandardMaterial3D:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────
 
+## How fast a body sweeps round the Sun, in radians per game-day.
+##
+## Measured off the body's own prediction, one day apart, rather than read out of its orbital
+## elements: that way it is right for the Keplerian planets and for the fallback circular ones
+## without either having to expose its working, and it is right at the body's CURRENT point on
+## an eccentric orbit rather than on average.
+func _angular_rate(body: Planet) -> float:
+	var a: Vector3 = body.position_in_days(0.0) - _sun_pos
+	var b: Vector3 = body.position_in_days(1.0) - _sun_pos
+	return _prograde_sweep(atan2(a.x, a.z), atan2(b.x, b.z))
+
 ## Positive (prograde) angular distance from a to b in [0, TAU).
 func _prograde_sweep(a: float, b: float) -> float:
 	var d: float = fmod(b - a, TAU)
 	if d < 0.0:
 		d += TAU
 	return d
-
-## Carry the unwrapped prograde sweep to the target's current angle.
-##
-## THE one stateful step of the arc, kept apart from the point functions so that drawing the
-## plan - which samples them a couple of hundred times a go - cannot nudge the flight.
-func _track_sweep(a2: float) -> void:
-	var raw: float = _prograde_sweep(_depart_angle, a2)
-	if not _sweep_init:
-		_sweep      = raw
-		_sweep_init = true
-		return
-	while raw - _sweep >  PI: raw -= TAU
-	while raw - _sweep < -PI: raw += TAU
-	_sweep = raw
 
 ## The orbit-ring angle whose velocity is already tangent to the heliocentric arrival velocity,
 ## so there is no direction flip at insertion, and the direction that goes with it: (dir, angle).
