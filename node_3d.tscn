@@ -15,7 +15,6 @@
 [ext_resource type="Texture2D" uid="uid://bm03pekhfpd1l" path="res://jupiter.svg" id="7_tuemg"]
 [ext_resource type="Texture2D" uid="uid://by84sd5rhgvfs" path="res://saturn.svg" id="8_saturn"]
 [ext_resource type="Texture2D" uid="uid://bbsl4ga35kfen" path="res://neptune.svg" id="9_i0g27"]
-[ext_resource type="Script" uid="uid://dhcbbcs25wqx8" path="res://satellite.gd" id="11_dhlwf"]
 [ext_resource type="Script" uid="uid://8edrkrwy636o" path="res://sidebar_control.gd" id="15_vxd74"]
 [ext_resource type="Script" uid="uid://ckt8md7fnecwq" path="res://EvolutionTreeUI.gd" id="17_jsnrv"]
 [ext_resource type="Script" uid="uid://p0tptchfpdya" path="res://EvolutionTreeControl.gd" id="18_lggff"]
@@ -69,8 +68,6 @@ albedo_texture = ExtResource("6_ealrb")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wc5p8"]
 albedo_color = Color(0, 0, 1, 1)
-
-[sub_resource type="SphereMesh" id="SphereMesh_dhlwf"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_s0gvp"]
 albedo_texture = ExtResource("7_ealrb")
@@ -160,13 +157,6 @@ script = ExtResource("5_cdqbm")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1)
 fov = 48.1
 script = ExtResource("2_6iypd")
-
-[node name="Node3D" type="Node3D" parent="WorldRoot/Planets/earth" unique_id=1388968638]
-script = ExtResource("11_dhlwf")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="WorldRoot/Planets/earth/Node3D" unique_id=1001580809]
-transform = Transform3D(0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 0, 0, 0)
-mesh = SubResource("SphereMesh_dhlwf")
 
 [node name="mars" type="MeshInstance3D" parent="WorldRoot/Planets" unique_id=891556420]
 transform = Transform3D(0.094182566, 0, -0.5215646, 0, 0.53, 0, 0.5215646, 0, 0.094182566, -0.0816691, 0, -3.48319)

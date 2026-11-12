@@ -130,6 +130,18 @@ var _target_picker: LaunchBodyPicker = null
 @onready var launch_button:   Button        = $MarginContainer/VBoxContainer/LaunchButton
 @onready var launch_list:     VBoxContainer = $MarginContainer/VBoxContainer/ScrollContainer/LaunchList
 
+# ── Which flight is being looked at ────────────────────────────────────────────
+## Emitted with the launch id the player has picked out of the list, or -1 when they have put
+## it down again.  Game answers by drawing that craft's planned path across the solar system.
+signal launch_selected(launch_id: int)
+
+## The picked launch, and the rows the list is currently showing.  Kept by ID rather than by
+## row: the list is rebuilt whenever what is in the air changes, and a selection that meant
+## "the third row" would wander onto another mission the moment one landed.
+var _selected_id: int   = -1
+var _rows:        Array = []   # Button, one per launch, in list order
+var _row_ids:     Array = []   # the launch ids those rows were built for
+
 # ── Fuel & acceleration ────────────────────────────────────────────────────────
 # The chosen FUEL fixes the transfer acceleration: faster fuels (fusion, antimatter)
 # are gated by propulsion research and cost far more to manufacture, so speed is paid
@@ -1057,41 +1069,142 @@ func _on_launch_pressed() -> void:
 
 # ── Launch list ──────────────────────────────────────────────────────────────
 
+## The in-flight list, pushed several times a second while the board is open.
+##
+## PATCHED in place while the same launches are still in the air, and only rebuilt when that
+## set changes.  A row is a button the player clicks now, and throwing the node under their
+## cursor away four times a second took its hover, its focus and any click that happened to
+## land across the seam with it.
 func refresh_launches(launches: Array) -> void:
-	for child in launch_list.get_children():
-		child.queue_free()
-	for launch in launches:
-		_add_launch_row(launch)
+	var ids: Array = []
+	for launch: Dictionary in launches:
+		ids.append(int(launch.get("id", -1)))
+
+	if ids != _row_ids:
+		for child in launch_list.get_children():
+			child.queue_free()
+		_rows  = []
+		_row_ids = ids
+		for launch: Dictionary in launches:
+			_add_launch_row(launch)
+	else:
+		for i in range(launches.size()):
+			_fill_launch_row(_rows[i], launches[i])
+
+	# A flight that has arrived takes the selection - and the line it was drawing - with it.
+	if _selected_id != -1 and not ids.has(_selected_id):
+		_select_launch(-1)
+	else:
+		_paint_selection()
+
+## The picked launch, or -1.
+func selected_launch() -> int:
+	return _selected_id
+
+## Game puts the selection down when the board shuts: a line drawn across the solar system
+## belongs to an open board.
+func clear_launch_selection() -> void:
+	_select_launch(-1)
+
+## Clicking the row whose path is drawn puts the line away again, so the player never has to
+## hunt for a way to turn it off.
+func _on_row_pressed(launch_id: int) -> void:
+	_select_launch(-1 if launch_id == _selected_id else launch_id)
+
+func _select_launch(launch_id: int) -> void:
+	if launch_id == _selected_id:
+		return
+	_selected_id = launch_id
+	_paint_selection()
+	launch_selected.emit(launch_id)
+
+## Mark the picked row. One step up from the page with the chrome's own line down its leading
+## edge, which is how a row being acted on is marked everywhere else in this UI.
+##
+## Only the rows whose state actually changed are touched.  This runs on every push - several
+## times a second, over every flight in the air - and a stylebox override written again is a
+## minimum-size recalculation and a redraw for a row that already looked like that.
+func _paint_selection() -> void:
+	for row: Button in _rows:
+		var on: bool = int(row.get_meta("launch_id", -1)) == _selected_id
+		if bool(row.get_meta("picked", false)) == on:
+			continue
+		row.set_meta("picked", on)
+		row.flat = not on
+		if on:
+			var s := UIPalette.inset()
+			s.border_width_left = 2
+			s.border_color = UIPalette.BORDER
+			row.add_theme_stylebox_override("normal", s)
+		else:
+			row.remove_theme_stylebox_override("normal")
 
 func _add_launch_row(launch: Dictionary) -> void:
-	var row := HBoxContainer.new()
+	var id: int = int(launch.get("id", -1))
+	var row := Button.new()
+	row.flat = true
+	row.focus_mode = Control.FOCUS_NONE
+	row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	row.tooltip_text = "Show this flight's path"
+	row.set_meta("launch_id", id)
+	launch_list.add_child(row)
+
+	# A Button is not a container, so the three columns are an HBox anchored across it, inset
+	# by the couple of pixels the row's own backing would otherwise eat.  Every control in it
+	# is transparent to the mouse, so the whole row is one click target.
+	var box := HBoxContainer.new()
+	box.name = "Row"
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(box)
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.offset_left  = 4.0
+	box.offset_right = -4.0
 
 	var info := Label.new()
+	info.name = "Info"
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(info)
+
+	var dates := Label.new()
+	dates.name = "Dates"
+	box.add_child(dates)
+
+	var status := Label.new()
+	status.name = "Status"
+	box.add_child(status)
+
+	_fill_launch_row(row, launch)
+	# The button has no text of its own to size itself by, so it takes its height from what is
+	# anchored across it.
+	row.custom_minimum_size.y = maxf(20.0, box.get_combined_minimum_size().y)
+	row.pressed.connect(func() -> void: _on_row_pressed(id))
+	_rows.append(row)
+
+## Write one launch into a row that already exists.
+func _fill_launch_row(row: Button, launch: Dictionary) -> void:
+	var info   := row.get_node_or_null("Row/Info")   as Label
+	var dates  := row.get_node_or_null("Row/Dates")  as Label
+	var status := row.get_node_or_null("Row/Status") as Label
+	if info == null or dates == null or status == null:
+		return
+
 	var origin: String = (launch.get("origin", "") as String).capitalize()
 	var target: String = (launch.get("target", "") as String).capitalize()
 	var arrival: String = launch.get("arrival", "orbit")
 
 	if origin == target:
-		# Local orbit — show clearly instead of "Mars → Mars"
+		# Local orbit - show clearly instead of "Mars -> Mars"
 		info.text = "%s: %s orbit" % [launch["mission"], target]
 	else:
 		var arrival_tag: String = " [land]" if arrival == "land" else ""
 		info.text = "%s  %s → %s%s" % [launch["mission"], origin, target, arrival_tag]
 
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(info)
-
-	var dates := Label.new()
 	dates.text = "%d/%02d" % [launch["start_year"], launch["start_month"] + 1]
-	row.add_child(dates)
 
-	var status := Label.new()
 	if launch["status"] == "completed":
 		status.text = "Done"
 		status.modulate = Color.GREEN
 	else:
 		var days_left: int = launch.get("days_remaining", 0)
 		status.text = _format_days(days_left) + " left"
-	row.add_child(status)
-
-	launch_list.add_child(row)
+		status.modulate = Color.WHITE

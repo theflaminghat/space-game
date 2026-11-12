@@ -639,6 +639,49 @@ With the imports at 4096 that swap was producing 8192×4096 **uncompressed** tex
 click, more than every map in the game costs together — so it was removed. If a per-body LOD is
 ever wanted again, it has to compress what it produces.
 
+### A craft belongs to the launch board
+
+`satellite.gd` is the dot that flies a mission: a Hohmann-style arc whose far end is re-read from
+the target's live position every frame, so it homes onto a planet that keeps orbiting during the
+flight. Three things about it are deliberate.
+
+**It is drawn only while the Launches panel is open.** A civilisation running standing launch
+orders has craft in the air permanently; drawn whenever the solar system was, they were a dozen
+wandering dots saying nothing to a player who was not looking at the launch board. Game pushes
+`set_board_visible` at spawn and on the panel's `visibility_changed`, and `_sync_visibility` ANDs
+it with the frozen-system rule the planets use. A scene template craft that lived under Earth and
+un-hid itself on the first visibility sync is gone with it.
+
+**Clicking a flight in the list draws its whole plan**, as a dashed line from the launch site to
+the parking orbit at the far end. The arc is the same one the craft flies, sampled — which is why
+the one stateful step of it, the unwrapped prograde sweep, is split into `_track_sweep` and the
+point functions (`_arc_point`, `_lane_point`) are pure. Asking a craft where it is going must not
+move it, and a lane delivery's berth is read once per rebuild rather than once per sample, since
+that read is a round trip into the lane renderer.
+
+The dashes are spaced by **arc length**, not by flight fraction: the arc's geometric speed varies
+along itself, so cutting by fraction piles them up at the slow end. Each dash is a tube of
+triangles for the same reason the orbit ribbons are — a 1-px Vulkan line vanishes at distance,
+which is most of where this one is drawn — and the cross-section frame is built from the
+segment's own direction rather than the world radial, because a parking orbit runs across that
+radial and would come out edge-on. The line is re-cut five times a second, not sixty: it is a
+plan, and the target moves slowly.
+
+**Nothing is left behind.** An `"orbit"` arrival used to settle into a parking orbit and follow
+its target for the rest of the run, so every mission ever flown left a dot circling the world it
+arrived at, and `_launch_satellites` — written and never read — kept a dead reference per mission
+too. The craft is freed when its launch completes, when it frees itself at the far end (a landing,
+or a carrier handing over to what it carried), and when a run is replaced. What a mission leaves
+behind is in the roster and on the planet: a delivered structure, a colony, a hold unloaded into a
+stockpile. The vehicle is not.
+
+**A load puts the craft back in the air.** Nothing was respawned before, so a reloaded game showed
+empty space where a dozen missions were in transit. The save records the schedule, not the sky:
+where the origin *was* on the departure date is not in it, so the arc is re-struck from where that
+body is now, and the craft is placed at the fraction of the flight the calendar says has been
+flown (`begin_transfer`'s `elapsed_days`) so it still arrives on the day the record says. Reserved
+swarm slots and orbital berths are re-walked in launch order, exactly as they were handed out.
+
 ---
 
 ## 5. Stellar engineering
@@ -2640,6 +2683,20 @@ These are not style preferences; each was a bug.
 	disagree with it. Tax Rate claimed to stifle compute from the day it was written and
 	`compute_mult` never read it. `verify_policy_effects` measures every promise and pins every
 	policy's whole reach.
+
+15. **Asking a craft where it is going does not move it.** The transfer arc carries one piece of
+	state — the unwrapped prograde sweep, which keeps the arc continuous as the target orbits
+	past the departure angle — and drawing a flight plan samples that arc a couple of hundred
+	times a rebuild. `_track_sweep` holds the state and `_arc_point` / `_lane_point` are pure, so
+	the line and the dot are cut from the same geometry without the line nudging the dot. The
+	same split is what stops a berth delivery's plan making 180 round trips into the lane
+	renderer for a slot position that has not changed between samples.
+
+16. **A launch's craft lives exactly as long as the launch.** It is freed when the launch
+	completes, when it frees itself at the far end, and when a run is replaced — and a loaded
+	save puts one back for every flight still in transit. An `"orbit"` arrival used to park and
+	stay, so every mission ever flown left a dot circling its target, and the dictionary that
+	tracked them was written and never read.
 
 ---
 

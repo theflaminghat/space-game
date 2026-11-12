@@ -162,7 +162,13 @@ var science_multiplier: float = 1.0   # science produced per compute per second
 var policies: Dictionary = {}         # policy_id -> bool or float
 var active_launches: Array = []
 var _next_launch_id: int = 1
+## Craft in the air, by launch id.  Every entry is dropped when its launch arrives or the run
+## is replaced, which it was not: the dictionary used to be written and never read, so it
+## collected a dead reference per mission for the length of a run.
 var _launch_satellites: Dictionary = {}
+## The launch whose planned path is drawn across the solar system, or -1.  The player picks it
+## by clicking the flight in the launch list.
+var _path_launch: int = -1
 ## Solar Satellites that have arrived at the Sun and joined the Dyson swarm.  The
 ## swarm renderer (init_planets.gd) reads this to light up one collector each.
 var solar_satellites_deployed: int = 0
@@ -1274,9 +1280,6 @@ var _manufacturing_tab_index: int = -1   # index of the Manufacturing tab within
 @onready var timeline_panel: Control    = $main_ui/VBoxContainer3/HBoxContainer2/TimelinePanel
 @onready var politics_page: Control     = $main_ui/VBoxContainer3/HBoxContainer2/PoliticsPage
 @onready var evolution_ui: Control      = $main_ui/VBoxContainer3/HBoxContainer2/EvolutionTreeUI
-## Template satellite node kept in the scene but hidden; arc satellites are
-## created via Satellite.new() so this is only used to keep the scene valid.
-@onready var sattelite: Satellite = $WorldRoot/Planets/earth/Node3D
 @onready var game_over_screen = $GameOverScreen
 @onready var settings_menu = $SettingsMenu
 @onready var production_panel: PanelContainer = $main_ui/ProductionPanel
@@ -1354,6 +1357,7 @@ func start_new_game() -> void:
 	_disassembled     = {}                          # and nothing taken apart
 	time_accum = 0.0
 	active_launches = []
+	_clear_launch_craft()
 	_next_launch_id = 1
 	solar_satellites_deployed = 0
 	left_sol_cell = false
@@ -1583,6 +1587,10 @@ func _ready() -> void:
 	build_panel.active_changed.connect(_on_active_changed)
 	launch_panel.launch_requested.connect(_on_launch_requested)
 	launch_panel.colony_stock_changed.connect(_on_colony_stock_changed)
+	# A craft is part of the launch board's readout, so it is drawn with the board and put away
+	# with it, and the one flight the player has picked out draws its whole plan.
+	launch_panel.launch_selected.connect(_on_launch_selected)
+	launch_panel.visibility_changed.connect(_on_launch_board_toggled)
 	# Give the panel the real endpoint list: planets AND every buildable moon, with the Sun
 	# available as a target only.  Before this, moons could be built on but never flown to.
 	var eps: Array = launch_endpoints()
@@ -1644,10 +1652,6 @@ func _ready() -> void:
 	_refresh_automation_access()   # hide Automation until Industrial AI is researched
 	_refresh_stats()
 	_update_hud()
-	_setup_satellite()
-
-func _setup_satellite() -> void:
-	sattelite.visible = false
 
 # ── Planet-bar gating ─────────────────────────────────────────────────────────
 
@@ -2347,7 +2351,8 @@ func _refresh_automation_access() -> void:
 	if sidebar:
 		sidebar.set_automation_locked(not ResearchTree.is_unlocked(AUTOMATION_UNLOCK_RESEARCH))
 
-func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: String, launch_id: int, flight_days: float = 60.0) -> void:
+func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: String,
+		launch_id: int, flight_days: float = 60.0, flown_days: float = 0.0) -> void:
 	var sat := Satellite.new()
 	sat.name         = "Satellite_%d" % launch_id
 	sat.arrival_mode = arrival
@@ -2356,14 +2361,15 @@ func _spawn_satellite(origin_planet: Planet, target_planet: Planet, arrival: Str
 		$WorldRoot/Planets/sun as Node3D,
 		origin_planet,
 		target_planet,
-		flight_days
+		flight_days,
+		flown_days
 	)
-	_launch_satellites[launch_id] = sat
+	_register_craft(launch_id, sat)
 
 ## A Solar Deployment craft: flies straight to its reserved swarm slot and removes
 ## itself on arrival (the swarm collector takes its place — see init_planets).
 func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id: int,
-		flight_days: float, slot_index: int = -1) -> void:
+		flight_days: float, slot_index: int = -1, flown_days: float = 0.0) -> void:
 	var sat := Satellite.new()
 	sat.name            = "Satellite_%d" % launch_id
 	sat.arrival_mode    = "swarm"
@@ -2374,9 +2380,10 @@ func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id:
 		$WorldRoot/Planets/sun as Node3D,
 		origin_planet,
 		origin_planet,   # target planet unused in swarm mode; pass origin to stay valid
-		flight_days
+		flight_days,
+		flown_days
 	)
-	_launch_satellites[launch_id] = sat
+	_register_craft(launch_id, sat)
 
 ## A structure carrier: flies to the berth its cargo will occupy in the target's orbital lane and
 ## removes itself there, exactly as a Solar Deployment does at its swarm slot.  Without this the
@@ -2387,7 +2394,7 @@ func _spawn_swarm_satellite(origin_planet: Planet, slot_pos: Vector3, launch_id:
 ## turns.  A lane spreads its structures evenly, so reserving means asking where the new one will
 ## sit once it is there: index `reserved` of `reserved + 1`.
 func _spawn_structure_carrier(origin_planet: Planet, target_planet: Planet, structure: String,
-		launch_id: int, flight_days: float, reserved: int) -> void:
+		launch_id: int, flight_days: float, reserved: int, flown_days: float = 0.0) -> void:
 	var sat := Satellite.new()
 	sat.name             = "Satellite_%d" % launch_id
 	sat.arrival_mode     = "swarm"        # fly to a point, then make way for what was carried
@@ -2395,8 +2402,143 @@ func _spawn_structure_carrier(origin_planet: Planet, target_planet: Planet, stru
 	sat.slot_provider = func() -> Vector3:
 		return target_planet.infra_slot_world_pos(structure, reserved, reserved + 1)
 	$WorldRoot.add_child(sat)
-	sat.begin_transfer($WorldRoot/Planets/sun as Node3D, origin_planet, target_planet, flight_days)
+	sat.begin_transfer($WorldRoot/Planets/sun as Node3D, origin_planet, target_planet,
+		flight_days, flown_days)
+	_register_craft(launch_id, sat)
+
+
+## Track a craft against its launch, and set it drawing (or not) the way the board currently is.
+func _register_craft(launch_id: int, sat: Satellite) -> void:
 	_launch_satellites[launch_id] = sat
+	sat.set_board_visible(launch_panel != null and launch_panel.visible)
+	sat.set_path_shown(launch_panel != null and launch_panel.visible
+		and launch_id == _path_launch)
+	# A lander and a swarm carrier free themselves at the far end, so the entry has to come out
+	# on the craft's own say-so as well as on the launch's.
+	sat.tree_exited.connect(func() -> void:
+		if _launch_satellites.get(launch_id) == sat:
+			_launch_satellites.erase(launch_id))
+
+
+## The craft for a finished launch is gone, not parked.
+##
+## An "orbit" arrival used to settle into a tilted parking orbit and follow its target for the
+## rest of the run, so every mission ever flown left a dot circling the world it arrived at -
+## hundreds of them, by the time a civilisation is flying swarm collectors.  What a mission
+## leaves behind is in the roster and on the planet: a delivered structure, a colony, a hold
+## unloaded into a stockpile.  The vehicle is not.
+func _free_launch_craft(launch_id: int) -> void:
+	var sat: Variant = _launch_satellites.get(launch_id)
+	_launch_satellites.erase(launch_id)
+	if sat is Node and is_instance_valid(sat):
+		(sat as Node).queue_free()
+	if _path_launch == launch_id:
+		_path_launch = -1
+
+
+## Clear the sky: a new run, or a save loaded over this one.
+func _clear_launch_craft() -> void:
+	for id: int in _launch_satellites.keys():
+		var sat: Variant = _launch_satellites[id]
+		if sat is Node and is_instance_valid(sat):
+			(sat as Node).queue_free()
+	_launch_satellites.clear()
+	_path_launch = -1
+
+
+## The launch board opening and shutting.  Craft are drawn only while it is open: a mission in
+## transit is something the player went to the board to look at, not scenery the solar system
+## wears the rest of the time.
+func _on_launch_board_toggled() -> void:
+	if launch_panel != null and not launch_panel.visible:
+		launch_panel.clear_launch_selection()   # which clears _path_launch through the signal
+	_refresh_launch_craft()
+
+
+## The flight the player has clicked in the list, or -1 when they have put it down.
+func _on_launch_selected(launch_id: int) -> void:
+	_path_launch = launch_id
+	_refresh_launch_craft()
+
+
+## Push the board's state onto every craft: drawn or not, and which one draws its plan.
+func _refresh_launch_craft() -> void:
+	var open: bool = launch_panel != null and launch_panel.visible
+	for id: int in _launch_satellites:
+		var sat := _launch_satellites[id] as Satellite
+		if sat == null or not is_instance_valid(sat):
+			continue
+		sat.set_board_visible(open)
+		sat.set_path_shown(open and id == _path_launch)
+
+
+## Put a craft back in the air for every flight the save was written part-way through.
+##
+## Nothing was respawned before, so a reloaded game showed empty space where a dozen missions
+## were in transit - and now that clicking a flight draws its path, there was nothing for the
+## click to draw.
+##
+## What the save records is the schedule, not the sky: where the origin WAS on the departure
+## date is not in it, so the arc is re-struck from where that body is now.  What that buys is
+## the part that matters - the craft sits at the fraction of the flight the calendar says has
+## been flown, and still arrives on the day the launch record says it does.
+##
+## The reserved slots are re-walked in launch order, exactly as they were handed out: two
+## carriers in the air must not come back aiming at the same berth.
+func _respawn_launch_craft() -> void:
+	_clear_launch_craft()
+	var today_abs: int = _to_abs_day(year, month, day)
+	var swarm_next: int = swarm_panels()
+	var berth_next: Dictionary = {}
+	for l in active_launches:
+		var launch: Dictionary = l
+		if str(launch.get("status", "")) != "active":
+			continue
+		var origin_name: String = str(launch.get("origin", ""))
+		var target_name: String = str(launch.get("target", ""))
+		if origin_name == "" or target_name == "":
+			continue
+		var origin_planet := get_node_or_null("WorldRoot/Planets/" + origin_name) as Planet
+		var target_planet := get_node_or_null("WorldRoot/Planets/" + target_name) as Planet
+		if origin_planet == null or target_planet == null:
+			continue   # a body the Sun has since swallowed, or a save from another layout
+
+		var start_abs: int = _to_abs_day(int(launch.get("start_year", year)),
+			int(launch.get("start_month", 0)), int(launch.get("start_day", 0)))
+		var end_abs: int = _to_abs_day(int(launch.get("end_year", year)),
+			int(launch.get("end_month", 0)), int(launch.get("end_day", 0)))
+		var total: float = maxf(1.0, float(end_abs - start_abs))
+		var flown: float = clampf(float(today_abs - start_abs), 0.0, total)
+
+		var lid: int = int(launch.get("id", 0))
+		var payload: int = int(launch.get("payload", 0))
+		var structure: String = str(launch.get("structure", ""))
+		if payload > 0:
+			var planets := get_node_or_null("WorldRoot/Planets")
+			var slot_pos: Vector3 = origin_planet.global_position
+			if planets and planets.has_method("swarm_slot_world_pos"):
+				slot_pos = planets.swarm_slot_world_pos(swarm_next)
+			_spawn_swarm_satellite(origin_planet, slot_pos, lid, total, swarm_next, flown)
+			swarm_next += maxi(1, payload)
+		elif structure != "":
+			var key: String = target_name + "/" + structure
+			var berth: int = int(berth_next.get(key, _standing_count(target_name, structure)))
+			_spawn_structure_carrier(origin_planet, target_planet, structure, lid, total,
+				berth, flown)
+			berth_next[key] = berth + 1
+		else:
+			_spawn_satellite(origin_planet, target_planet, str(launch.get("arrival", "orbit")),
+				lid, total, flown)
+
+
+## How many of `structure` are standing at `body` right now - not counting what is still on
+## its way there, which is what _reserved_structure_slot adds on top.
+func _standing_count(body: String, structure: String) -> int:
+	var n: int = 0
+	for b in planet_buildings.get(body, []):
+		if str(b) == structure:
+			n += 1
+	return n
 
 
 ## How many of `structure` are already standing at `body` or on their way there — the index the
@@ -2666,6 +2808,7 @@ func _process_launch_arrivals() -> void:
 			)
 			if today_abs >= end_abs:
 				launch["status"] = "completed"
+				_free_launch_craft(int(launch.get("id", -1)))
 				# Not at the press of the button: a launch that never arrives is not a step.
 				grant_achievement("small_step")
 				any_completed = true
@@ -11059,6 +11202,7 @@ func load_game(path: String = "") -> void:
 	# the star's shade and mirror coverage among them, which left a loaded thruster inert and its
 	# aiming button hidden.
 	_recompute_production_cache()
+	_respawn_launch_craft()
 	# Pre-compute storage caps from loaded buildings so the first _process tick
 	# doesn't clamp resources below what the player's infrastructure supports.
 	_cached_storage_caps = _compute_storage_caps()
