@@ -106,10 +106,9 @@ civilisation can say what is coming, and `forecast_events()` is what it sees. Ga
 
 **The player divides the compute, one budget at a time.** `ComputePanel` (sidebar, "compute")
 writes `compute_alloc`: `track -> {human, ai}`. There is one track per catastrophe the forecast
-models (`FORECAST_TRACKS` — asteroid, pandemic, nuclear), one for the standing medicine that
-answers a plague once it is loose, and `science`. Looking for rocks and looking for plagues are
-not the same calculation, and neither is curing one: a civilisation can be excellent at any of
-them and helpless at the rest.
+models (`FORECAST_TRACKS` — asteroid, pandemic, nuclear) plus `science`, because looking for
+rocks and looking for plagues are not the same calculation and a civilisation can be excellent
+at one and blind to the other.
 
 The two pools (`COMPUTE_POOLS`) are the population's own thinking and everything built for it —
 `_cached_compute_human` and `_cached_compute_ai`, split in `_combine_production()`. They are
@@ -119,9 +118,8 @@ people stay on the tree.
 
 The sliders are **weights, not shares**: raising one does not require hunting down another to
 pay for it, and `compute_shares()` divides each pool in proportion to what is pointed at it. Two
-rules sit on top — a track gets nothing before its own research is known (`TRACK_RESEARCH`, so a
-budget can never tax science in exchange for nothing; per track rather than one gate over all of
-them, because medicine arrives somewhere else in the tree entirely), and science keeps at least
+rules sit on top — the forecast tracks get nothing before `predictive_modeling` is known (so a
+budget can never tax science in exchange for nothing), and science keeps at least
 `1 - FORECAST_MAX_SHARE` (10%) of every pool, so a civilisation cannot think itself into being
 unable to build what the forecast warned it about. Both the allocation and the frontiers below
 are saved, and an older save carrying only the single `compute_forecast_share` is spread across
@@ -1614,42 +1612,6 @@ nothing about it. It saturates, so pointing everything at it never reaches zero.
 standard-diversity civilisation, so holding the old base would have doubled the rate as a side
 effect of a rewrite that was not supposed to change how often this happens. 0.017 puts that
 civilisation back where it was; everything above it is the player's own doing.
-
-### And what is done about the one that got out
-
-Both of the levers above are about the outbreak **not happening**. Nothing anywhere touched the
-toll: a civilisation could see the plague coming, cut its chances by two thirds, and then lose
-four fifths of everyone alive with no move available. The asteroid has a laser, the war has a
-treaty, the machines have alignment — the plague had a date. So there is a second track out of
-the same two pools, against the same science floor, gated on `bioinformatics`.
-
-`_cure_capacity` is **a stock, not a slider position**, for the same reason foresight is. Nobody
-answers an engineered pathogen in the week it arrives; what answers one is standing capability —
-assays, libraries, platforms — built over decades and gone stale if it is not maintained. And
-the schedule is visible: an effect bought on the spot could be bought the year before a forecast
-outbreak and sold the year after it. It moves towards `cure_capacity_at(track_compute())`
-exponentially with an e-folding time of `MEDICINE_TAU_YEARS` (25), so a deep fast-forward slice
-lands *on* the equilibrium instead of shooting past it.
-
-The curve is `c / (c + MEDICINE_HALF_FLOPS)` — the same saturating shape as `surveillance`, and
-for the same reason: a run's compute spans five orders of magnitude, so anything linear in it is
-either nothing at the start or everything by the middle. A million times the half-point is still
-short of a cure.
-
-What it buys is two things, and neither of them is reachable any other way:
-
-- **It is the only term in the toll that anybody paid for.** `_trigger_pandemic` multiplies the
-  kill fraction by `1 - cure_toll_cut()`, up to `MEDICINE_TOLL_MAX` (70%). Never all of it: a
-  pathogen designed against you is not a solved problem, and a catastrophe that can be reduced to
-  nothing is not one. The plague card says where this stands as well as what the odds are —
-  whether it happens and what it costs are two different decisions out of two different budgets,
-  and a warning that gave only the first was half a warning.
-- **Between outbreaks it delivers a share of what the tree knows**: `MEDICINE_LE_SHARE` (15%) of
-  the unlocked medical nodes' years, as life expectancy. A multiplier on the research rather than
-  a bonus beside it — compute searches the space the tree opened, so a full commitment is worth
-  +3 years in 1945 and twenty times that with the whole medical branch in hand, and it can never
-  be a way around learning any of it. `post_biological_transition` is left out: an uploaded mind
-  is not a disease anybody cures, and its 5000 years would swamp every other term on the page.
 
 ### Alignment, and the fourth way a run ends
 

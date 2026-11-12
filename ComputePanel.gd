@@ -9,11 +9,10 @@ extends PanelContainer
 ## what has been built for it.  Each can be pointed somewhere different, so the machines can be
 ## put on the future while the people stay on the tree, or the reverse.
 ##
-## There are five places to point them: one simulation per catastrophe the forecast models, the
-## standing medicine that answers the plague once it is loose, and the tree.  Looking for rocks
-## and looking for plagues are not the same calculation, and neither is curing one — a
-## civilisation can be excellent at any of them and helpless at the rest, which is the whole
-## point of budgeting them separately.
+## There are four places to point them: one simulation per catastrophe the forecast models, plus
+## the tree.  Looking for rocks and looking for plagues are not the same calculation, and a
+## civilisation can be excellent at one and blind to the other — which is the whole point of
+## budgeting them separately.
 ##
 ## The sliders are WEIGHTS, not shares.  Raising one does not require hunting down another to pay
 ## for it; each pool is divided in proportion to what is pointed at it, and the row readouts show
@@ -21,9 +20,7 @@ extends PanelContainer
 ## civilisation cannot think itself into being unable to build what the forecast warned it about.
 ##
 ## Each simulation's foresight is a STOCK that its budget fills and the passing years drain, so a
-## row shows both where its sight reaches now and where that budget is working towards.  Medicine
-## is a stock for the same reason and reads the same way: nobody answers a pathogen in the week
-## it arrives, so what matters is what was already standing when it did.
+## row shows both where its sight reaches now and where that budget is working towards.
 ##
 ## Emits alloc_changed(track, pool, weight); Game owns the allocation and reads it back.
 
@@ -92,6 +89,8 @@ func _build_ui() -> void:
 	_locked_lbl = Label.new()
 	_locked_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_locked_lbl.add_theme_color_override("font_color", UIPalette.WARN)
+	_locked_lbl.text = "Forecasting needs Predictive Modeling. Until it is researched every " \
+		+ "FLOP goes to the tree, whatever these are set to."
 	vb.add_child(_locked_lbl)
 
 	vb.add_child(HSeparator.new())
@@ -180,6 +179,7 @@ func set_state(state: Dictionary) -> void:
 	if _rows_box == null:
 		return
 	var unlocked: bool = bool(state.get("unlocked", false))
+	_locked_lbl.visible = not unlocked
 	# Each pool's size AND what a unit of it is worth as research.  A machine starts at a
 	# quarter of a person and ends at better than twice one, so the totals on their own do not
 	# say which pool is the better place to put the tree.
@@ -189,19 +189,6 @@ func set_state(state: Dictionary) -> void:
 	_ai_lbl.text = "Machine thinking: %s  (research x%.2f)" % [
 		Units.format_si(float(state.get("ai", 0.0)), "FLOP/s"),
 		float(state.get("ai_efficiency", 1.0))]
-
-	# What cannot be budgeted yet, named rather than described. The tracks no longer unlock
-	# together — forecasting and medicine sit in different parts of the tree — so one sentence
-	# about one of them was going to be wrong about the other.
-	var waiting: Array = []
-	for row: Dictionary in (state.get("tracks", []) as Array):
-		if not bool(row.get("available", true)):
-			waiting.append(str(row.get("label", row.get("track", ""))))
-	_locked_lbl.visible = not waiting.is_empty()
-	if not waiting.is_empty():
-		_locked_lbl.text = "Not researched yet: %s. Every FLOP pointed at one of those goes " \
-			% ", ".join(PackedStringArray(waiting)) \
-			+ "to the tree instead, whatever its sliders are set to."
 
 	var lyap: float = float(state.get("lyapunov", 0.0))
 	for row: Dictionary in (state.get("tracks", []) as Array):
@@ -216,10 +203,8 @@ func set_state(state: Dictionary) -> void:
 		for pool: String in ["human", "ai"]:
 			var sl: HSlider = ui[pool]
 			sl.value = clampf(float(weights.get(pool, 0.0)) * WEIGHT_MAX, 0.0, WEIGHT_MAX)
-			# A track's sliders are dead weight until there is machinery to run it, and the
-			# tracks do not all unlock together — so this is the row's own flag, not one gate
-			# over the whole page.
-			sl.editable = bool(row.get("available", true))
+			# A simulation's sliders are dead weight until there is machinery to run it.
+			sl.editable = unlocked or not forecast
 		_quiet = false
 
 		var shares: Dictionary = row.get("shares", {})
@@ -229,30 +214,6 @@ func set_state(state: Dictionary) -> void:
 			Units.format_si(float(row.get("flops", 0.0)), "FLOP/s")]
 
 		var sight: Label = ui["sight"]
-		if track == "medicine":
-			if not bool(row.get("available", true)):
-				sight.text = "locked"
-				sight.add_theme_color_override("font_color", UIPalette.DISABLED)
-				continue
-			var cut: float = float(row.get("toll_cut", 0.0))
-			var cut_to: float = float(row.get("toll_cut_settles", 0.0))
-			var gain: float = float(row.get("life_gain", 0.0))
-			if cut <= 0.0005 and cut_to <= 0.0005:
-				sight.text = "nothing standing"
-				sight.add_theme_color_override("font_color", UIPalette.WARN)
-				continue
-			# What it takes off a toll now and where this budget is taking that, in the same
-			# shape as a forecast row — a stock that is still filling cannot be read from one
-			# number. The years are what it is worth in the meantime.
-			var trend: String = "holding"
-			if cut_to > cut * 1.02:
-				trend = "rising towards %d%%" % int(round(cut_to * 100.0))
-			elif cut_to < cut * 0.98:
-				trend = "falling towards %d%%" % int(round(cut_to * 100.0))
-			sight.text = "answers %d%% of a toll — %s  ·  +%.1f yr" % [
-				int(round(cut * 100.0)), trend, gain]
-			sight.add_theme_color_override("font_color", UIPalette.GOOD)
-			continue
 		if not forecast:
 			sight.text = "%s of science" % Units.format_si(
 				float(row.get("science_rate", 0.0)), "FLOP/s")

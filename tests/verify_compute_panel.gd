@@ -50,27 +50,6 @@ func _run() -> void:
 			"%s reads locked" % t)
 	check((_row(p, "science")["human"] as HSlider).editable,
 		"but the tree can always be budgeted")
-	check(not (_row(p, "medicine")["human"] as HSlider).editable,
-		"and medicine cannot be budgeted yet either")
-	# The notice NAMES what is waiting. The tracks no longer unlock together, so a sentence
-	# about predictive modelling alone was going to be wrong about the other one.
-	for want: String in [str(g.COMPUTE_TRACK_LABELS["pandemic"]),
-			str(g.COMPUTE_TRACK_LABELS["medicine"])]:
-		check(p._locked_lbl.text.contains(want),
-			"the notice names %s: %s" % [want, p._locked_lbl.text])
-
-	# ── Medicine unlocks on its own node, and alone ──
-	rt.force_unlock(g.MEDICINE_RESEARCH)
-	g.refresh_compute_panel()
-	for _i in range(10): await process_frame
-	check((_row(p, "medicine")["human"] as HSlider).editable,
-		"medicine budgets as soon as its own research is in")
-	for t: String in g.FORECAST_TRACKS:
-		check(not (_row(p, t)["human"] as HSlider).editable,
-			"%s is still waiting on its own" % t)
-	check(p._locked_lbl.visible, "and the notice stays for the ones that are")
-	check(not p._locked_lbl.text.contains(str(g.COMPUTE_TRACK_LABELS["medicine"])),
-		"without naming the one that landed: %s" % p._locked_lbl.text)
 
 	for n: ResearchNode in load("res://ResearchTreeData.gd").build():
 		rt.force_unlock(str(n.id))

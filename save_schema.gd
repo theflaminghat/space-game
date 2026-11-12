@@ -244,9 +244,6 @@ const FIELDS: Array[Dictionary] = [
 	# were a threat: that run never pushed capability, so it has none to be exposed by.
 	{"key": "ai_capability",      "prop": "_ai_capability", "kind": FLOAT, "default": 0.0},
 	{"key": "ai_understood",      "prop": "_ai_understood", "kind": FLOAT, "default": 0.0},
-	# Standing medical capability, likewise: a file written before there was a medicine track
-	# was never paying for one, so it loads with nothing standing.
-	{"key": "cure_capacity",      "prop": "_cure_capacity", "kind": FLOAT, "default": 0.0},
 
 	# ── Panels that keep their own state ──
 	{"key": "stats_history", "custom": true},
