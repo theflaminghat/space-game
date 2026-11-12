@@ -59,6 +59,7 @@ func _ready() -> void:
 	_reset.add_theme_font_size_override("font_size", 11)
 	_reset.tooltip_text = "Clear the allocation and take whatever the ground gives, by natural abundance"
 	_reset.pressed.connect(_on_reset_pressed)
+	UISound.mark(_reset, UISound.SELECT)
 	title_row.add_child(_reset)
 	vbox.add_child(title_row)
 

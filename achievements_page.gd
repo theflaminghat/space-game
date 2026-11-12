@@ -72,6 +72,7 @@ func _ready() -> void:
 	_copy.add_theme_font_size_override("font_size", 10)
 	_copy.custom_minimum_size = Vector2(128, 22)
 	_copy.pressed.connect(_on_copy)
+	UISound.mark(_copy, UISound.SELECT)
 	var copy_row := HBoxContainer.new()
 	copy_row.add_child(_copy)
 	col.add_child(copy_row)

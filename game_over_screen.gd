@@ -138,6 +138,7 @@ func _build_ui() -> void:
 	_copy_button.add_theme_font_size_override("font_size", 12)
 	_copy_button.custom_minimum_size = Vector2(150, 28)
 	_copy_button.pressed.connect(_on_copy_record)
+	UISound.mark(_copy_button, UISound.SELECT)
 	var copy_holder := CenterContainer.new()
 	copy_holder.add_child(_copy_button)
 	vbox.add_child(copy_holder)
@@ -171,6 +172,7 @@ func _build_ui() -> void:
 	btn_new.custom_minimum_size = Vector2(260, 46)
 	btn_new.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_new.pressed.connect(_on_restart_pressed)
+	UISound.mark(btn_new, UISound.SELECT)
 	btn_box.add_child(btn_new)
 
 	var btn_menu := Button.new()
@@ -179,6 +181,7 @@ func _build_ui() -> void:
 	btn_menu.custom_minimum_size = Vector2(260, 46)
 	btn_menu.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_menu.pressed.connect(_on_quit_to_menu_pressed)
+	UISound.mark(btn_menu, UISound.BACK)
 	btn_box.add_child(btn_menu)
 
 	var btn_desktop := Button.new()
@@ -187,6 +190,7 @@ func _build_ui() -> void:
 	btn_desktop.custom_minimum_size = Vector2(260, 46)
 	btn_desktop.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_desktop.pressed.connect(_on_quit_to_desktop_pressed)
+	UISound.mark(btn_desktop, UISound.BACK)
 	btn_box.add_child(btn_desktop)
 
 	_build_epilogue()

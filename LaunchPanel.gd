@@ -261,6 +261,7 @@ func _ready() -> void:
 		_refresh_cargo(); _refresh_stock_ui(); _refresh_validity(); _update_cost())
 	arrival_option.item_selected.connect(func(_i): _update_duration(); _update_cost())
 	launch_button.pressed.connect(_on_launch_pressed)
+	UISound.mark(launch_button, UISound.SELECT)
 	_update_arrival_options()
 	_refresh_stock_ui()
 	_update_duration()
@@ -593,6 +594,7 @@ func _build_cargo_ui(parent: Control) -> void:
 	var add := Button.new()
 	add.text = "Add"
 	add.pressed.connect(_on_cargo_add)
+	UISound.mark(add, UISound.SELECT)
 	row.add_child(add)
 	_cargo_box.add_child(row)
 
@@ -706,6 +708,7 @@ func _refresh_cargo() -> void:
 		x.flat = true
 		x.custom_minimum_size = Vector2(24, 0)
 		x.pressed.connect(_on_cargo_remove.bind(res))
+		UISound.mark(x, UISound.SELECT)
 		r.add_child(x)
 		_cargo_list.add_child(r)
 	# The hold costs rockets in proportion to its mass, so say how many before it is ordered.

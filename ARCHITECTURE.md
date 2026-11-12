@@ -2110,6 +2110,55 @@ what is ticked, the sequences are behind it, and `hide_on_checkable_item_selecti
 picking three traits is three clicks rather than three trips. A sequence nobody holds is
 **greyed** rather than silently snapping back, which would read as a bug.
 
+### The menus make a noise
+
+`models/freesound_community-menu-select-sound-100466.mp3` is one take of somebody using a menu:
+a blip at 0.045 s, a second of silence, five more between 0.907 and 1.549 s, and a different,
+lower one at 1.624 s. **That is two sounds, not seven.** The six are the same 523 Hz waveform —
+they correlate at 0.99–1.00 against the first once the lag between them is taken out, and share
+their four strongest partials — and only the last is another, an octave below at 262 Hz, which
+correlates at 0.07. The right channel carries the same hits a shade quieter with nothing hidden
+in it. `tools/cut_ui_sounds.py` measured that and cut the two samples (`sounds/ui_move.wav`,
+`sounds/ui_select.wav`), normalising from the take's −26 dBFS up to −3 with a 1 ms fade in and an
+8 ms fade out so each starts and ends on silence rather than on a click. Re-running it prints the
+table again and writes the same bytes; the .wav files are committed, so nobody needs ffmpeg.
+
+Three roles come out of those two, because `BACK` is the `SELECT` sample a fourth lower: a click
+that closes something should fall away rather than land. There is no third sample, because there
+was no third sound in the file to cut one from.
+
+| role | what it is | where |
+|---|---|---|
+| `MOVE` | going somewhere | sidebar pages, tabs, speeds, rows, pickers — **the default** |
+| `SELECT` | doing something | build, demolish, launch, research, trade, automate, save, confirm |
+| `BACK` | leaving | cancel, close, back, dismiss, quit |
+
+A control says which it is with `UISound.mark()`, and the mark is read **up the ancestor chain**,
+so marking a panel marks everything in it and a button's own mark wins over the panel's. Anything
+unmarked moves, which is why there are forty-odd marks rather than two hundred and fifty.
+
+**Controls are connected through `SceneTree.node_added`, not at the places they are built.** Half
+the buttons in this game are made in a rebuild — every recipe row, research node, cargo line and
+star-map entry is thrown away and made again when its panel refreshes — so a list of call sites
+would have been a list to keep up to date for ever. Three kinds answer a click: `BaseButton`
+(`pressed`), a `TabContainer`'s `TabBar` (`tab_clicked`, **not** `tab_changed` — the game switches
+tabs itself and that is not a click), and the `PopupMenu` a dropdown opens (`index_pressed`,
+which settles a choice). A slider is deliberately none of them: a sound per step of a drag is a
+machine gun.
+
+Two things the wiring has to get right, both of them asserted in `verify_ui_sound.gd`:
+
+- **Nothing is connected to `mouse_entered` or `focus_entered`.** A menu that sounds when the
+  pointer crosses it is a menu that sounds continuously.
+- **A control that re-enters the tree is not wired twice.** A button is safe either way, since
+  Godot refuses a second identical connection — but the tab strip and the popup are connected
+  through a lambda, and a fresh lambda is never equal to the last one, so without the
+  `ui_sound_wired` mark those two would sound twice per click for ever.
+
+The players are `PROCESS_MODE_ALWAYS`: the pause menu is a menu too, and the game is paused
+behind it. Levels are set in one table (`VOICES`) — `MOVE` lowest, at −14 dB, because it fires on
+nearly everything and is the one that would wear first.
+
 ### Colonies have an economy, and can be shipped to
 
 Interstellar colonies could not be traded with at all: the star map's Trade button was greyed

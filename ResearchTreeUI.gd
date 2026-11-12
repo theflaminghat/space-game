@@ -229,10 +229,12 @@ func _build_scene() -> void:
 	_research_btn = Button.new()
 	_research_btn.text = "Add to Queue"
 	_research_btn.pressed.connect(_on_research_button_pressed)
+	UISound.mark(_research_btn, UISound.SELECT)
 
 	_pause_btn = Button.new()
 	_pause_btn.text = "Pause Research"
 	_pause_btn.pressed.connect(_on_pause_button_pressed)
+	UISound.mark(_pause_btn, UISound.SELECT)
 	_pause_btn.hide()
 
 	_info_unlocks = _make_label("", false, true)

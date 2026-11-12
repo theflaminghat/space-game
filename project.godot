@@ -23,6 +23,7 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 ResearchTree="*uid://df6vsk2ajtu2s"
 SolarSystem="*uid://ch1ll0v8ong2q"
 GameSession="*uid://b14ca4f4hl664"
+UISound="*uid://dpse360ei3atq"
 
 [display]
 

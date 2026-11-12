@@ -73,6 +73,7 @@ func _build() -> void:
 	begin.text = "Begin"
 	begin.custom_minimum_size = Vector2(140, 34)
 	begin.pressed.connect(_on_begin)
+	UISound.mark(begin, UISound.SELECT)
 	row.add_child(begin)
 	box.add_child(row)
 

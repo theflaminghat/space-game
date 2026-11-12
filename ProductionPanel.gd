@@ -310,6 +310,7 @@ func _build_ui() -> void:
 	_add_button.text = "+ Add Production"
 	_add_button.custom_minimum_size = Vector2(0, 36)
 	_add_button.pressed.connect(_on_add_pressed)
+	UISound.mark(_add_button, UISound.SELECT)
 	vbox.add_child(_add_button)
 
 	vbox.add_child(HSeparator.new())
@@ -592,6 +593,7 @@ func _add_job_row(job: Dictionary) -> void:
 	rm.flat = true
 	rm.custom_minimum_size = Vector2(28, 28)
 	rm.pressed.connect(_on_remove_pressed.bind(job_id))
+	UISound.mark(rm, UISound.SELECT)
 	rm.mouse_default_cursor_shape = Control.CURSOR_ARROW
 	header_row.add_child(rm)
 

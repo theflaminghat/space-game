@@ -255,6 +255,7 @@ func _build_ui() -> void:
 	_back.text = "◀ Back"
 	_back.disabled = true
 	_back.pressed.connect(_on_back)
+	UISound.mark(_back, UISound.BACK)
 	head.add_child(_back)
 	var home := Button.new()
 	home.text = "Overview"
@@ -264,6 +265,7 @@ func _build_ui() -> void:
 	close_btn.text = "×"
 	close_btn.custom_minimum_size = Vector2(36, 0)
 	close_btn.pressed.connect(close)
+	UISound.mark(close_btn, UISound.BACK)
 	head.add_child(close_btn)
 
 	var split := HSplitContainer.new()

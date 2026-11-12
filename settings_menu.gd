@@ -168,6 +168,7 @@ func _build_ui() -> void:
 	close_btn.custom_minimum_size = Vector2(220, 46)
 	close_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close_btn.pressed.connect(_on_close_pressed)
+	UISound.mark(close_btn, UISound.BACK)
 	vbox.add_child(close_btn)
 
 # ── Builder helpers ───────────────────────────────────────────────────────────

@@ -249,6 +249,7 @@ func _refresh() -> void:
 			rm.text = "×"
 			rm.flat = true
 			rm.pressed.connect(_remove.bind(side, k))
+			UISound.mark(rm, UISound.SELECT)
 			row.add_child(rm)
 			list.add_child(row)
 		(w["total"] as Label).text = "Value: %s" % Units.format_si(TradeData.bundle_value(bundle, _values), "J")
@@ -377,11 +378,13 @@ func _build_ui() -> void:
 	cancel.text = "Cancel"
 	cancel.custom_minimum_size = Vector2(110, 34)
 	cancel.pressed.connect(close)
+	UISound.mark(cancel, UISound.BACK)
 	buttons.add_child(cancel)
 	_send = Button.new()
 	_send.text = "Send proposal"
 	_send.custom_minimum_size = Vector2(160, 34)
 	_send.pressed.connect(_send_proposal)
+	UISound.mark(_send, UISound.SELECT)
 	buttons.add_child(_send)
 	col.add_child(buttons)
 
@@ -416,10 +419,12 @@ func _build_side(parent: Control, heading: String, side: String) -> Dictionary:
 		all.text = "All"
 		all.tooltip_text = "Everything of this kind still available to offer."
 		all.pressed.connect(_fill_all.bind(side))
+		UISound.mark(all, UISound.SELECT)
 		row.add_child(all)
 	var add := Button.new()
 	add.text = "Add"
 	add.pressed.connect(_add.bind(side))
+	UISound.mark(add, UISound.SELECT)
 	row.add_child(add)
 	box.add_child(row)
 

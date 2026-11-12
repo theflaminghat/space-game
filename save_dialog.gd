@@ -131,11 +131,13 @@ func _ready() -> void:
 	cancel.text = "Cancel"
 	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cancel.pressed.connect(close)
+	UISound.mark(cancel, UISound.BACK)
 	row.add_child(cancel)
 	_save_btn = Button.new()
 	_save_btn.text = "Save"
 	_save_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_save_btn.pressed.connect(_on_save)
+	UISound.mark(_save_btn, UISound.SELECT)
 	row.add_child(_save_btn)
 
 

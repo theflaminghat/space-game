@@ -2607,11 +2607,13 @@ func _build_action_dialog() -> void:
 	_dlg_confirm.text = "Confirm"
 	_dlg_confirm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_dlg_confirm.pressed.connect(_on_dialog_confirm)
+	UISound.mark(_dlg_confirm, UISound.SELECT)
 	btn_row.add_child(_dlg_confirm)
 	var cancel := Button.new()
 	cancel.text = "Cancel"
 	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cancel.pressed.connect(_close_action_dialog)
+	UISound.mark(cancel, UISound.BACK)
 	btn_row.add_child(cancel)
 	vb.add_child(btn_row)
 

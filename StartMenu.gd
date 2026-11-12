@@ -11,6 +11,14 @@ const SETUP_SCENE := "res://game_setup.tscn"
 
 
 func _ready() -> void:
+	# Starting a run and loading one commit to something; quitting and backing out of the load
+	# panel leave. The other two open a panel, which is navigation like any other.
+	const MAIN := "CenterContainer/MainPanel/MarginContainer/VBoxContainer/"
+	UISound.mark(get_node(MAIN + "NewGameButton"), UISound.SELECT)
+	UISound.mark(get_node(MAIN + "QuitButton"), UISound.BACK)
+	UISound.mark($"LoadPanel/MarginContainer/VBoxContainer/ButtonRow/LoadConfirmButton",
+		UISound.SELECT)
+	UISound.mark($"LoadPanel/MarginContainer/VBoxContainer/ButtonRow/CancelButton", UISound.BACK)
 	_ensure_save_dir()
 	# Regenerate the god-mode sandbox slot every launch so it always reflects the current
 	# research tree + building set (e.g. newly-added nodes like Radio Astronomy / Thermal

@@ -220,6 +220,8 @@ func _ensure_keep_dialog() -> void:
 	_keep_dialog = ConfirmationDialog.new()
 	_keep_dialog.title = "Storage limit"
 	_keep_dialog.ok_button_text = "Set limit"
+	UISound.mark(_keep_dialog.get_ok_button(), UISound.SELECT)
+	UISound.mark(_keep_dialog.get_cancel_button(), UISound.BACK)
 	_keep_dialog.wrap_controls = false
 	_keep_dialog.min_size = DUMP_DIALOG_SIZE
 	_keep_dialog.max_size = DUMP_DIALOG_SIZE
@@ -304,6 +306,8 @@ func _ensure_dump_dialog() -> void:
 	_dump_dialog = ConfirmationDialog.new()
 	_dump_dialog.title = "Discard material"
 	_dump_dialog.ok_button_text = "Dump"
+	UISound.mark(_dump_dialog.get_ok_button(), UISound.SELECT)
+	UISound.mark(_dump_dialog.get_cancel_button(), UISound.BACK)
 	_dump_dialog.get_ok_button().modulate = UIPalette.BAD
 	# Keep the window at the size we ask for instead of resizing itself around its contents.
 	_dump_dialog.wrap_controls = false

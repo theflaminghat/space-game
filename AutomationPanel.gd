@@ -388,6 +388,7 @@ func _build_build_form(vbox: VBoxContainer) -> void:
 	add.text = "+ Add build rule"
 	add.custom_minimum_size = Vector2(0, 32)
 	add.pressed.connect(_on_add_build)
+	UISound.mark(add, UISound.SELECT)
 	vbox.add_child(add)
 
 func _build_launch_form(vbox: VBoxContainer) -> void:
@@ -454,6 +455,7 @@ func _build_launch_form(vbox: VBoxContainer) -> void:
 	add.text = "+ Add launch rule"
 	add.custom_minimum_size = Vector2(0, 32)
 	add.pressed.connect(_on_add_launch)
+	UISound.mark(add, UISound.SELECT)
 	vbox.add_child(add)
 
 ## The manifest editor, shown only for a mission that has a hold.
@@ -483,6 +485,7 @@ func _build_cargo_ui(parent: Control) -> void:
 	var add := Button.new()
 	add.text = "Add"
 	add.pressed.connect(_on_cargo_add)
+	UISound.mark(add, UISound.SELECT)
 	row.add_child(add)
 	_l_cargo_box.add_child(row)
 
@@ -551,6 +554,7 @@ func _refresh_cargo_list() -> void:
 		row.add_child(l)
 		var x := Button.new()
 		x.text = "x"
+		UISound.mark(x, UISound.SELECT)
 		x.pressed.connect(func() -> void:
 			_l_cargo.erase(k)
 			_refresh_cargo_list())
@@ -607,6 +611,7 @@ func _build_defend_form(vbox: VBoxContainer) -> void:
 	add.text = "+ Add defence rule"
 	add.custom_minimum_size = Vector2(0, 32)
 	add.pressed.connect(_on_add_defend)
+	UISound.mark(add, UISound.SELECT)
 	vbox.add_child(add)
 
 
@@ -756,6 +761,7 @@ func _make_rule_row(rule: Dictionary) -> HBoxContainer:
 	rm.text = "✕"
 	rm.add_theme_font_size_override("font_size", 11)
 	rm.pressed.connect(func(): _remove_rule(rid))
+	UISound.mark(rm, UISound.SELECT)
 	row.add_child(rm)
 
 	return row

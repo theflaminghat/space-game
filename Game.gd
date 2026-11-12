@@ -12497,6 +12497,7 @@ func _show_event_card(ev: Dictionary) -> void:
 	dismiss.add_theme_color_override("font_color", UIPalette.DISABLED)
 	dismiss.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	dismiss.pressed.connect(card.queue_free)
+	UISound.mark(dismiss, UISound.BACK)
 	hbox.add_child(dismiss)
 
 	_event_notif_vbox.add_child(card)

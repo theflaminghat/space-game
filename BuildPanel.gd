@@ -491,6 +491,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		b.custom_minimum_size = Vector2(44, 24)
 		b.disabled = not available or not buildable or n > room
 		b.pressed.connect(_on_build_pressed.bind(bname, n))
+		UISound.mark(b, UISound.SELECT)
 		build_row.add_child(b)
 		build_btns.append(b)
 	parent.add_child(build_row)
@@ -509,6 +510,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 		b.custom_minimum_size = Vector2(44, 24)
 		b.disabled = count - n < min_count
 		b.pressed.connect(_on_demolish_pressed.bind(bname, n))
+		UISound.mark(b, UISound.SELECT)
 		dem_row.add_child(b)
 		demolish_btns.append(b)
 	parent.add_child(dem_row)
@@ -535,6 +537,7 @@ func _add_tier_block(parent: VBoxContainer, building: Dictionary, show_level: bo
 			b.disabled = not bool(building.get("can_upgrade", false)) or count < n
 			b.tooltip_text = tip
 			b.pressed.connect(_on_upgrade_pressed.bind(bname, n))
+			UISound.mark(b, UISound.SELECT)
 			up_row.add_child(b)
 			upgrade_btns.append(b)
 		parent.add_child(up_row)
