@@ -938,7 +938,8 @@ const BUILDINGS := [
 	# sat in Support beside the Sunshade, which is where a player looking for the swarm's panels
 	# among the things that make energy never thought to look.  The category also sets the upkeep
 	# rate (Game.UPKEEP_CATEGORY_MULT), so this pays a power station's parasitic load rather than
-	# a support structure's: about 1.4 W an array instead of 0.8 W, beside some 10^21 W beamed back.
+	# a support structure's: about 1.75 MW an array instead of 1.05 MW, beside some 10^21 W beamed
+	# back.  (Upkeep is on the bill of materials AFTER the UNITS scaling above, not as authored.)
 	{"name": "Swarm Collector Array",
 		"category": "power",
 		"allowed_types": ["star"],
