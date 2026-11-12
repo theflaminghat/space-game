@@ -69,7 +69,8 @@ var _l_count:   SpinBox      = null
 ## Offered from what the ORIGIN actually holds, pushed by Game: a rule that names something the
 ## world has never dug would simply never fire.
 var _l_cargo_box:  VBoxContainer = null
-var _l_cargo_pick: OptionButton  = null
+var _l_cargo_pick: OptionButton  = null   # the selection model, hidden — see CargoPicker
+var _l_cargo_picker: CargoPicker = null   # what the player actually clicks
 var _l_cargo_amt:  LineEdit      = null
 var _l_cargo_list: VBoxContainer = null
 var _l_cargo:      Dictionary    = {}      # compound → grams, for the rule being composed
@@ -477,7 +478,11 @@ func _build_cargo_ui(parent: Control) -> void:
 	_l_cargo_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_l_cargo_pick.fit_to_longest_item = false
 	_l_cargo_pick.clip_text = true
+	_l_cargo_pick.visible = false
 	row.add_child(_l_cargo_pick)
+	# The same menu the launch panel's Supply Run has: one hold, one way of filling it.
+	_l_cargo_picker = CargoPicker.new(_l_cargo_pick)
+	row.add_child(_l_cargo_picker)
 	_l_cargo_amt = LineEdit.new()
 	_l_cargo_amt.placeholder_text = "grams"
 	_l_cargo_amt.custom_minimum_size = Vector2(96, 0)
@@ -526,6 +531,8 @@ func _refresh_cargo_choices() -> void:
 		_l_cargo_pick.add_item(str(k))
 		if str(k) == prev:
 			_l_cargo_pick.selected = _l_cargo_pick.item_count - 1
+	if _l_cargo_picker:
+		_l_cargo_picker.set_held(held)
 
 
 func _on_cargo_add() -> void:
@@ -548,7 +555,7 @@ func _refresh_cargo_list() -> void:
 	for k: String in _l_cargo:
 		var row := HBoxContainer.new()
 		var l := Label.new()
-		l.text = "%s  %s" % [Units.format_si(float(_l_cargo[k]), "g"), k]
+		l.text = "%s  %s" % [Units.format_si(float(_l_cargo[k]), "g"), CargoPicker.display_name(k)]
 		l.add_theme_font_size_override("font_size", 11)
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(l)

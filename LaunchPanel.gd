@@ -565,7 +565,8 @@ func _refresh_stock_ui() -> void:
 ## the editor, and the hold is charged and delivered by Game — this is purely the picker.
 var _manifest: Dictionary = {}
 var _cargo_box:   VBoxContainer = null
-var _cargo_pick:  OptionButton  = null
+var _cargo_pick:  OptionButton  = null   # the selection model, hidden — see CargoPicker
+var _cargo_picker: CargoPicker  = null   # what the player actually clicks
 var _cargo_amt:   LineEdit      = null
 var _cargo_list:  VBoxContainer = null
 var _cargo_total: Label         = null
@@ -598,7 +599,11 @@ func _build_cargo_ui(parent: Control) -> void:
 	# row in a fixed-width column ends up deciding how wide the column is.
 	_cargo_pick.fit_to_longest_item = false
 	_cargo_pick.clip_text = true
+	_cargo_pick.visible = false
 	row.add_child(_cargo_pick)
+	# Shown in its place: the same goods, filed under the Inventory tab's headings.
+	_cargo_picker = CargoPicker.new(_cargo_pick)
+	row.add_child(_cargo_picker)
 	_cargo_amt = LineEdit.new()
 	_cargo_amt.placeholder_text = "grams"
 	_cargo_amt.custom_minimum_size = Vector2(110, 0)
@@ -639,6 +644,8 @@ func _refresh_cargo_choices() -> void:
 	for k: String in names:
 		if float(held[k]) > 0.0 and MissionData.can_hold(k):
 			_cargo_pick.add_item(k)
+	if _cargo_picker:
+		_cargo_picker.set_held(held)
 	for i in range(_cargo_pick.item_count):
 		if _cargo_pick.get_item_text(i) == keep:
 			_cargo_pick.selected = i
@@ -711,7 +718,7 @@ func _refresh_cargo() -> void:
 		var r := HBoxContainer.new()
 		r.add_theme_constant_override("separation", 6)
 		var l := Label.new()
-		l.text = "%s  %s" % [Units.format_si(float(_manifest[res]), "g"), res]
+		l.text = "%s  %s" % [Units.format_si(float(_manifest[res]), "g"), CargoPicker.display_name(res)]
 		l.add_theme_font_size_override("font_size", 11)
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		r.add_child(l)

@@ -2229,6 +2229,33 @@ The players are `PROCESS_MODE_ALWAYS`: the pause menu is a menu too, and the gam
 behind it. Levels are set in one table (`VOICES`) — `MOVE` lowest, at −14 dB, because it fires on
 nearly everything and is the one that would wear first.
 
+**A `Tree` is none of those three**, and the two pickers built on one (`LaunchBodyPicker`,
+`CargoPicker`) sound for themselves: `SELECT` on a pick, `MOVE` on a fold — from `item_collapsed`,
+because the fold arrow is handled inside the Tree and reports nothing else.
+
+### Pickers that drive a hidden OptionButton
+
+The launch panel's origin and target, and the Supply Run's hold — in both the launch panel and
+a standing automation rule — are chosen from a `Tree` in a popup rather than a flat dropdown:
+bodies with each moon folded under its planet (`launch_body_picker.gd`), and cargo filed under
+the Inventory tab's headings, by name, with what the origin holds of each (`cargo_picker.gd`).
+The hold used to be one list of the origin's whole inventory sorted by **formula**, so "Al" sat
+between "Aerogel" and "Algae" and the thing worth sending was somewhere in a scroll of sixty.
+
+Both **drive** the OptionButton they replace rather than replacing it. The option stays, hidden,
+holding the selection by its original item text, so every reader of `get_item_text(selected)` and
+every listener on `item_selected` is untouched; a pick is `option.select(i)` plus the
+`item_selected` the option would have sent itself. The cargo picker looks the option up by key at
+pick time rather than by a stored index, because the panel can repopulate it under an open menu.
+
+**Picks hang off clicks and Enter — `item_mouse_selected` and `item_activated` — not
+`item_selected`.** That one fires when the highlight *moves*: on every arrow key, so the menu
+picked and shut on the first press of one, and not at all for a click on the row already
+highlighted — which is the current pick, so choosing what was already chosen left the menu open
+and silent where every OptionButton closes and clicks. `verify_cargo_picker.gd` drives both with
+real mouse and key events pushed into the popup; a programmatic `select()` would not have shown
+either fault.
+
 ### Colonies have an economy, and can be shipped to
 
 Interstellar colonies could not be traded with at all: the star map's Trade button was greyed

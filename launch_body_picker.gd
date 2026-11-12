@@ -35,7 +35,10 @@ func _ready() -> void:
 	_tree = Tree.new()
 	_tree.hide_root = true
 	_tree.custom_minimum_size = Vector2(POPUP_SIZE)
-	_tree.item_selected.connect(_on_tree_selected)
+	_tree.item_mouse_selected.connect(func(_at: Vector2, button: int) -> void:
+		if button == MOUSE_BUTTON_LEFT:
+			_choose())
+	_tree.item_activated.connect(_choose)
 	_popup.add_child(_tree)
 
 
@@ -99,8 +102,7 @@ func _open() -> void:
 		it.set_metadata(0, i)
 		_mark_validity(it, id)
 		by_id[id] = it
-	# Highlight the current pick.  This fires item_selected, but the popup is not open yet, which
-	# is how _on_tree_selected tells it from a real pick.
+	# Highlight the current pick.  Only a highlight: picks come from clicks and Enter.
 	if sel >= 0 and sel < _ids.size() and by_id.has(str(_ids[sel])):
 		(by_id[str(_ids[sel])] as TreeItem).select(0)
 	var at: Vector2 = get_screen_position() + Vector2(0.0, size.y)
@@ -116,12 +118,21 @@ func _mark_validity(item: TreeItem, id: String) -> void:
 	item.set_tooltip_text(0, "This mission cannot fly here")
 
 
-func _on_tree_selected() -> void:
+## A click on a row, or Enter on it — and NOT `item_selected`, which is what this used to hang off.
+## That signal fires when the highlight MOVES: on every arrow key, so the menu picked and shut on
+## the first press of one, and not at all for a click on the row already highlighted, which is
+## the current pick — so choosing what was already chosen left the menu open and silent, where
+## every OptionButton in the game closes and clicks.
+func _choose() -> void:
 	var it: TreeItem = _tree.get_selected()
 	if it == null or not _popup.visible:
 		return
 	var idx: int = int(it.get_metadata(0))
 	_popup.hide()
+	# What the OptionButton this stands in for plays on a pick.  UISound wires buttons, tab
+	# strips and popup menus, and a Tree is none of those, so choosing a body was silent while
+	# every other dropdown in the panel clicked.
+	UISound.play(UISound.SELECT)
 	if idx == option.selected:
 		return
 	option.select(idx)
