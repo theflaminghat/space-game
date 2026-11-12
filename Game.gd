@@ -1533,6 +1533,7 @@ func start_new_game() -> void:
 	_impact_cooldown_ms    = 0
 	_next_pandemic_year    = year + _roll_int("pandemic_schedule", PANDEMIC_GAP_MIN, PANDEMIC_GAP_MAX, year)
 	_pandemic_cooldown_ms  = 0
+	_cure_capacity         = 0.0
 	_next_nuclear_year     = year + _roll_int("nuclear_schedule", NUCLEAR_GAP_MIN, NUCLEAR_GAP_MAX, year)
 	_nuclear_cooldown_ms   = 0
 	_arms_strain           = 0.0
@@ -2489,6 +2490,7 @@ func _process(delta: float) -> void:
 		_process_automation()
 		_accumulate_entropy(delta_days)   # heat shed to the cooling universe, dS = Q/T
 		_advance_foresight(delta_days)    # each simulation's frontier, pushed by its own budget
+		_advance_cure_capacity(delta_days)  # what is ready for a pathogen, pushed by its own
 		_check_thermal_labor_alerts()     # one-shot overheating / labour-shortage notices
 		# Clamp minerals and energy to their storage caps; science is never capped.
 		for resource: String in _cached_storage_caps:
@@ -2848,7 +2850,10 @@ func _cluster_lose_aliens(cluster_name: String, frac: float) -> float:
 ## tree.  Each is budgeted separately, because looking for rocks and looking for plagues are not
 ## the same calculation and a civilisation can be good at one and blind to the other.
 const FORECAST_TRACKS: Array = ["asteroid", "pandemic", "nuclear"]
-const COMPUTE_TRACKS:  Array = ["asteroid", "pandemic", "nuclear", "science"]
+## Every track, forecasts and medicine and the tree, in the order the panel lists them. Medicine
+## sits under the epidemiology it answers: one of those two is the outbreak not happening and
+## the other is what is left to do about the one that did.
+const COMPUTE_TRACKS:  Array = ["asteroid", "pandemic", "medicine", "nuclear", "science"]
 
 # ── Research efficiency ──────────────────────────────────────────────────────
 #
@@ -2895,12 +2900,14 @@ const COMPUTE_POOLS: Array = ["human", "ai"]
 const COMPUTE_TRACK_LABELS: Dictionary = {
 	"asteroid": "Impact prediction",
 	"pandemic": "Epidemiological modelling",
+	"medicine": "Therapeutic design",
 	"nuclear":  "Strategic modelling",
 	"science":  "Research",
 }
 const COMPUTE_TRACK_NOTES: Dictionary = {
 	"asteroid": "Orbits of everything that crosses ours. Certain once seen — time enough to build a laser, or to move.",
-	"pandemic": "Outbreak modelling. Gives the year and today's odds; less bioengineering, less AI autonomy or more worlds held move them.",
+	"pandemic": "Outbreak modelling, and the surveillance that comes with it: gives the year and today's odds, and holds those odds down by up to two thirds. What it cannot do is anything about the one that gets out anyway.",
+	"medicine": "Assays, libraries, platforms — what is ready when a pathogen arrives. The only thing that takes anything off a plague's toll, and between outbreaks it turns what the tree KNOWS about medicine into years people actually get.",
 	"nuclear":  "Crisis modelling. Gives the year and today's odds; military spending, the reactor fleet and standing tension move them.",
 	"science":  "The tree. Every FLOP pointed at a simulation is one not advancing it.",
 }
@@ -2913,6 +2920,11 @@ var compute_alloc: Dictionary = {}
 ## Legacy: the single forecast/research split this replaced.  Kept only so an old save can be
 ## migrated into compute_alloc on load — nothing reads it to decide anything.
 var compute_forecast_share: float = 0.0
+
+## Standing capability to answer a pathogen, [0,1).  Filled by the medicine track and drained by
+## not paying for it — assays go stale, platforms are not maintained, and the thing they were
+## built against keeps changing.  Saved: it is decades of work, not a slider position.
+var _cure_capacity: float = 0.0
 
 ## forecast track -> the absolute YEAR its foresight reaches.
 ##
@@ -2944,37 +2956,39 @@ func pool_compute(pool: String) -> float:
 
 ## How each pool is actually divided, as track -> {human, ai} fractions summing to 1 per pool.
 ##
-## Weights are normalised, with two rules on top.  Before FORECAST_RESEARCH the forecast tracks
-## get nothing at all — there is no machinery to look ahead with, and charging for it would be
-## taking science away in exchange for nothing.  And science keeps at least
-## (1 - FORECAST_MAX_SHARE) of every pool, so a civilisation that has pointed everything at the
-## future still has enough left to build what answering it needs.
+## Weights are normalised, with two rules on top.  A track whose research is not in yet gets
+## nothing at all whatever its slider says — there is no machinery to run it with, and charging
+## for it would be taking science away in exchange for nothing.  That is per TRACK rather than
+## one gate over all of them: medicine and the forecasts arrive at different points in the tree.
+## And science keeps at least (1 - FORECAST_MAX_SHARE) of every pool, so a civilisation that has
+## pointed everything at what is coming still has enough left to build what answering it needs.
 func compute_shares() -> Dictionary:
 	var out: Dictionary = {}
-	var forecasting: bool = ResearchTree.is_unlocked(FORECAST_RESEARCH)
 	for t: String in COMPUTE_TRACKS:
 		out[t] = {}
 	for pool: String in COMPUTE_POOLS:
-		var fsum: float = 0.0
+		var divert: float = 0.0
 		var sci: float = 0.0
 		for t: String in COMPUTE_TRACKS:
 			var w: float = maxf(float((compute_alloc.get(t, {}) as Dictionary).get(pool, 0.0)), 0.0)
 			if t == "science":
 				sci = w
-			else:
-				fsum += w
-		if not forecasting or fsum <= 0.0:
+			elif track_available(t):
+				divert += w
+		if divert <= 0.0:
 			for t: String in COMPUTE_TRACKS:
 				(out[t] as Dictionary)[pool] = 1.0 if t == "science" else 0.0
 			continue
-		var total: float = fsum + sci
-		# Science's floor, then whatever is left is split between the simulations by weight.
+		var total: float = divert + sci
+		# Science's floor, then whatever is left is split between the rest by weight.
 		var sci_share: float = maxf(sci / total, 1.0 - FORECAST_MAX_SHARE)
 		var rest: float = 1.0 - sci_share
 		(out["science"] as Dictionary)[pool] = sci_share
-		for t: String in FORECAST_TRACKS:
+		for t: String in COMPUTE_TRACKS:
+			if t == "science":
+				continue
 			var w: float = maxf(float((compute_alloc.get(t, {}) as Dictionary).get(pool, 0.0)), 0.0)
-			(out[t] as Dictionary)[pool] = rest * w / fsum
+			(out[t] as Dictionary)[pool] = (rest * w / divert) if track_available(t) else 0.0
 	return out
 
 ## Compute pointed at one track, in FLOP/s, summed across both pools.
@@ -2993,13 +3007,102 @@ func forecast_compute() -> float:
 	return t
 
 
-## The most that may be diverted.  Not all of it: a civilisation that stopped thinking about
-## anything but what is coming would never build what it needs to answer it.
+## The most that may be diverted away from the tree, over every track together.  Not all of it:
+## a civilisation that stopped thinking about anything but what is coming, and what to do about
+## it, would never build what either of those answers needs.
 const FORECAST_MAX_SHARE: float = 0.90
 
 ## What the civilisation has to know before it can forecast anything.  An existing node, not a
 ## new one: rigorous forecasting of complex systems is exactly what it describes.
 const FORECAST_RESEARCH: String = "predictive_modeling"
+
+# ── Medicine: what is done about the plague that got out ─────────────────────
+#
+# The epidemiology track buys two things and both of them are about the outbreak NOT happening:
+# the year it is due, and surveillance that holds the odds down by up to two thirds.  Nothing
+# anywhere touched the TOLL.  A civilisation could see the plague coming, cut its chances, and
+# then lose four fifths of everyone alive with no move available — the only catastrophe in the
+# game with a forecast and no answer.  The asteroid has a laser, the war has a treaty, the
+# machines have alignment; the plague had a date.
+#
+# So: a second track out of the same two pools, against the same science floor.  Prevention and
+# cure are not the same calculation and they compete for the same thinking, which is the whole
+# reason for budgeting them apart rather than letting one slider be the answer to everything.
+#
+# It is a STOCK rather than a readout of this year's budget, for the same reason foresight is.
+# Nobody answers an engineered pathogen in the week it arrives; what answers one is standing
+# capability built over decades.  And the schedule is visible — an effect bought on the spot
+# could be bought the year before the forecast outbreak and sold the year after it.
+## The node that makes biology something compute can be pointed at.  An existing one: it is
+## "computational analysis of genomes, proteins, and biological networks" already.
+const MEDICINE_RESEARCH: String = "bioinformatics"
+## Compute at which capacity settles halfway to its ceiling.  The same reference as surveillance,
+## so a serious share of a 1945 civilisation's thinking is what it takes to matter.
+const MEDICINE_HALF_FLOPS: float = 2.0e26
+## The most of a toll medicine can ever take off.  Never all of it: a pathogen designed against
+## you is not a solved problem, and a catastrophe that can be reduced to nothing is not one.
+const MEDICINE_TOLL_MAX: float = 0.70
+## How long capacity takes to answer a change in its budget, as an e-folding time in years.  A
+## decade of a new budget gets a third of the way there; a century, all but the last 2%.
+const MEDICINE_TAU_YEARS: float = 25.0
+## Share of what medicine KNOWS that capacity delivers as years of life.  A multiplier on the
+## tree rather than a bonus beside it: compute searches the space the research opened, so a full
+## commitment is worth +3 years in 1945, on the 22 that modern medicine knows, and twenty times
+## that once the whole medical branch is in hand.
+const MEDICINE_LE_SHARE: float = 0.15
+
+## What a track needs researched before anything may be pointed at it.  A track that is not
+## available gets nothing whatever its slider says — charging for it would be taking science
+## away in exchange for nothing.  Science is not here because science is always available: it is
+## the tree, and a civilisation that has researched nothing is exactly the one that needs it.
+const TRACK_RESEARCH: Dictionary = {
+	"asteroid": FORECAST_RESEARCH,
+	"pandemic": FORECAST_RESEARCH,
+	"nuclear":  FORECAST_RESEARCH,
+	"medicine": MEDICINE_RESEARCH,
+}
+
+## Whether compute pointed at `track` does anything yet.
+func track_available(track: String) -> bool:
+	var need: String = str(TRACK_RESEARCH.get(track, ""))
+	return need == "" or ResearchTree.is_unlocked(need)
+
+## What a given budget settles at.  Saturating, so there is no budget that buys a cure: ten times
+## the half-point stands at 91% of the ceiling, a hundred times at 99%, and the last tenth always
+## costs more than the first half did.  The same shape as the surveillance term it works beside,
+## and for the same reason — a civilisation's compute runs over five orders of magnitude across a
+## run, and anything linear in it is either nothing at the start or everything by the middle.
+static func cure_capacity_at(flops: float) -> float:
+	return flops / (flops + MEDICINE_HALF_FLOPS) if flops > 0.0 else 0.0
+
+## What the medicine budget settles at if it is held where it is.
+func cure_equilibrium() -> float:
+	if not track_available("medicine"):
+		return 0.0
+	return cure_capacity_at(track_compute("medicine"))
+
+## Move the stock towards what its budget settles at.  Exponential rather than a fixed step, so
+## a fast-forward slice a million years wide lands ON the equilibrium instead of shooting past
+## it and oscillating.
+func _advance_cure_capacity(delta_days: float) -> void:
+	if delta_days <= 0.0:
+		return
+	var k: float = 1.0 - exp(-(delta_days / 365.25) / MEDICINE_TAU_YEARS)
+	_cure_capacity = clampf(_cure_capacity + (cure_equilibrium() - _cure_capacity) * k, 0.0, 1.0)
+
+## The share of a plague's toll that standing medicine answers, [0, MEDICINE_TOLL_MAX].
+func cure_toll_cut() -> float:
+	return MEDICINE_TOLL_MAX * _cure_capacity
+
+## The years of life the tree's medicine KNOWS how to give, which is what the medicine track
+## multiplies.  Uploaded minds are left out of it: post-biological life is not a disease anybody
+## cures, and its 5000 years would swamp every other term on the page.
+func _curable_years() -> float:
+	var y: float = 0.0
+	for node_id: String in MEDICAL_RESEARCH:
+		if node_id != "post_biological_transition" and ResearchTree.is_unlocked(node_id):
+			y += float(MEDICAL_RESEARCH[node_id])
+	return y
 ## Compute at which the horizon is FORECAST_REF_YEARS — about what a 1945 civilisation thinks.
 const FORECAST_REF_FLOPS: float = 3.0e26
 ## Horizon at that reference compute.  Enough to see the next nuclear crisis and nothing else.
@@ -3153,13 +3256,22 @@ func forecast_events() -> Array:
 		while py <= puntil and pguard < FORECAST_MAX_EVENTS:
 			pguard += 1
 			if prob > 0.0 and _roll(str(spec[1]), py) < prob:
+				var pdesc: String = str(spec[8]) % [TimelineCanvas.fmt_year(float(py)),
+					Units.format_si(float(py - year), "yr"), int(round(prob * 100.0))]
+				# A plague warning that only gave the odds was half a warning: whether it
+				# happens and what it costs are two different decisions, paid for out of two
+				# different budgets, so the card says where both of them stand.
+				if str(spec[0]) == "pandemic":
+					pdesc += (" Nothing is standing against it."
+						if cure_toll_cut() < 0.005
+						else " Standing medicine would answer %d%% of the toll." % int(
+							round(cure_toll_cut() * 100.0)))
 				out.append({
 					"year": py, "kind": str(spec[0]), "certain": false,
 					"id": "forecast_%s_%d" % [str(spec[0]), py],
 					"forecast": true, "category": "warning", "probability": prob,
 					"title": str(spec[7]),
-					"desc": str(spec[8]) % [TimelineCanvas.fmt_year(float(py)),
-						Units.format_si(float(py - year), "yr"), int(round(prob * 100.0))],
+					"desc": pdesc,
 				})
 			py += _roll_int(str(spec[2]), int(spec[3]), int(spec[4]), py)
 
@@ -6033,6 +6145,9 @@ func _life_expectancy() -> float:
 			le += float(MEDICAL_RESEARCH[node_id])
 	le -= _dirty_power_fraction() * POLLUTION_LE_PENALTY
 	le += PoliticsData.life_expectancy_bonus(policies)   # healthcare vs pollution
+	# What the medicine budget has actually turned into cures.  A share of what the TREE knows,
+	# so it can never be a way around researching any of it.
+	le += _cure_capacity * MEDICINE_LE_SHARE * _curable_years()
 	# What medicine and politics reach, the population's own life history scales.  One figure
 	# rather than one per world, because every consumer of this — the stats line, the quality
 	# index, people-ever-lived — is civilisation-wide, and a population-weighted average is the
@@ -10462,7 +10577,14 @@ func _migrate_compute_alloc() -> void:
 		var fore: float = clampf(compute_forecast_share, 0.0, FORECAST_MAX_SHARE)
 		compute_alloc = {}
 		for t: String in COMPUTE_TRACKS:
-			var w: float = (1.0 - fore) if t == "science" else (fore / float(FORECAST_TRACKS.size()))
+			# The share it replaces was a FORECAST share, so it is divided between the forecast
+			# tracks alone. Medicine was not part of that split and starts where a new track
+			# starts, at nothing.
+			var w: float = 0.0
+			if t == "science":
+				w = 1.0 - fore
+			elif FORECAST_TRACKS.has(t):
+				w = fore / float(FORECAST_TRACKS.size())
 			compute_alloc[t] = {"human": w, "ai": w}
 	for t: String in COMPUTE_TRACKS:
 		if not compute_alloc.has(t):
@@ -10501,10 +10623,21 @@ func compute_panel_state() -> Dictionary:
 			"shares": {"human": float(sh.get("human", 0.0)), "ai": float(sh.get("ai", 0.0))},
 			"flops": flops,
 			"forecast": FORECAST_TRACKS.has(t),
+			# Per track, because they unlock at different points in the tree.
+			"available": track_available(t),
 		}
 		if FORECAST_TRACKS.has(t):
 			row["horizon"] = forecast_horizon_years(t)
 			row["settles"] = forecast_equilibrium_years(t)
+		elif t == "medicine":
+			# Both numbers, as the forecast rows show both: what is standing now, and what this
+			# budget is working towards. And what each is worth, since a capacity figure on its
+			# own says nothing about what it buys.
+			row["capacity"] = _cure_capacity
+			row["settles_capacity"] = cure_equilibrium()
+			row["toll_cut"] = cure_toll_cut()
+			row["toll_cut_settles"] = MEDICINE_TOLL_MAX * cure_equilibrium()
+			row["life_gain"] = _cure_capacity * MEDICINE_LE_SHARE * _curable_years()
 		else:
 			row["science_rate"] = float(_get_total_production().get("science", 0.0))
 		tracks.append(row)
@@ -12151,7 +12284,11 @@ func _trigger_pandemic() -> void:
 			pop += float(world_pop[str(w)])
 	if pop <= 0.0:
 		return
-	var kill_frac: float = _roll_range("pandemic_kill", 0.70, 0.95, year) / float(inhabited)
+	# What was standing when it arrived. The roll and the division by worlds are the plague;
+	# this is the only term in it that anybody chose to pay for.
+	var answered: float = cure_toll_cut()
+	var kill_frac: float = _roll_range("pandemic_kill", 0.70, 0.95, year) \
+		/ float(inhabited) * (1.0 - answered)
 	# Same MIN_POPULATION floor as before, applied to the affected population as a whole.
 	var keep: float = clampf(maxf(1.0 - kill_frac, MIN_POPULATION / pop), 0.0, 1.0)
 	var after: float = 0.0
@@ -12166,8 +12303,10 @@ func _trigger_pandemic() -> void:
 		"id":       "pandemic_%d" % year,
 		"year":     year,
 		"title":    "Engineered Pandemic",
-		"desc":     "Engineered-pathogen outbreak recorded. Population change: −%s (−%d%%)." % [
-			Units.format_si_verbose(lost, ""), int(round(lost / pop * 100.0))],
+		"desc":     "Engineered-pathogen outbreak recorded. Population change: −%s (−%d%%).%s" % [
+			Units.format_si_verbose(lost, ""), int(round(lost / pop * 100.0)),
+			"" if answered <= 0.005 else
+				" Standing countermeasures answered %d%% of it." % int(round(answered * 100.0))],
 		"category": "warning",
 	}
 	_pending_event_notifications.append(notif)
