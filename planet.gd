@@ -28,7 +28,7 @@ var _body_visual_radius: float = 0.0    # apparent radius (game units); sizes th
 var _intact_scale: Vector3 = Vector3.ONE
 ## Last pushed state, so a body that has not moved is not re-set every frame.
 var _strip_remaining: float = 1.0
-var _strip_depth: float = -1.0
+var _strip_look: Dictionary = {}
 
 ## Cosmetic moons orbiting this body in its local (scaled) frame, so they track and
 ## size with the planet automatically.  Each entry: { node, radius, speed, angle, incl }.
@@ -394,9 +394,14 @@ func _init_from_planet_data(data: Dictionary) -> void:
 ## Surface shader that softens a texture map's poles (see planet_polar_blur.gdshader).
 const POLAR_BLUR_SHADER: Shader = preload("res://planet_polar_blur.gdshader")
 
-## Swap the body's textured StandardMaterial3D for the polar-blur shader, carrying over its map
-## and tint.  The material in effect is the first of: material_override, the surface override,
-## the mesh's own.  A body with no texture map is left alone — a flat colour has no poles to blur.
+## Swap the body's StandardMaterial3D for the polar-blur shader, carrying over its map and tint.
+## The material in effect is the first of: material_override, the surface override, the mesh's
+## own.
+##
+## A body with no map gets the shader too, on a single white texel, which times its colour is
+## exactly the colour it had.  It has no poles to blur, but the disassembly look lives on this
+## shader: Uranus, the one plain-coloured planet, used to be left on its StandardMaterial3D and
+## shrank as it was taken apart without ever stopping looking like itself.
 func _apply_polar_blur() -> void:
 	var src: Material = material_override
 	if src == null:
@@ -404,13 +409,27 @@ func _apply_polar_blur() -> void:
 	if src == null and mesh != null and mesh.get_surface_count() > 0:
 		src = mesh.surface_get_material(0)
 	var base := src as StandardMaterial3D
-	if base == null or base.albedo_texture == null:
+	if base == null:
 		return
+	var tex: Texture2D = base.albedo_texture
+	if tex == null:
+		tex = _white_texel()
 	var mat := ShaderMaterial.new()
 	mat.shader = POLAR_BLUR_SHADER
-	mat.set_shader_parameter("albedo_tex", base.albedo_texture)
+	mat.set_shader_parameter("albedo_tex", tex)
 	mat.set_shader_parameter("albedo_color", base.albedo_color)
 	material_override = mat
+
+
+static var _white: ImageTexture = null
+
+## One white texel, shared: the map for a body that has none.
+static func _white_texel() -> ImageTexture:
+	if _white == null:
+		var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+		img.fill(Color.WHITE)
+		_white = ImageTexture.create_from_image(img)
+	return _white
 
 
 ## Sample the orbit centreline as `segments`+1 points (closed: last == first).
@@ -568,28 +587,36 @@ var _engulfed: bool = false
 ## Two things change, and both of them are the point.  The body SHRINKS, by the cube root of what
 ## is left (mass goes as the cube of the radius, so the first tenth off a planet is barely
 ## visible and that is correct — a crust is a skin).  And its surface stops being a surface: the
-## shader blends the map toward hot silicate and then iron, keeping the map's own light and dark
-## as the exposed material's relief so the body still reads as itself with the top taken off.
-func set_disassembly(remaining: float, depth: float) -> void:
+## map is taken away and what is under it shows — DisassemblyData.look, which Game works out from
+## the ledger and hands over whole, so the layer rules live in one place and not here.
+func set_disassembly(remaining: float, look: Dictionary) -> void:
 	var rem: float = clampf(remaining, 0.0, 1.0)
-	var dep: float = clampf(depth, 0.0, 1.0)
-	if absf(rem - _strip_remaining) < 0.0005 and absf(dep - _strip_depth) < 0.0005:
+	if absf(rem - _strip_remaining) < 0.0005 and _same_look(look, _strip_look):
 		return
 	_strip_remaining = rem
-	_strip_depth = dep
+	_strip_look = look
 	# A floor, not zero: a body still being worked on has to stay clickable, and the world is
 	# removed outright by Game the moment the last layer goes (see _finish_disassembly).
 	var f: float = maxf(DisassemblyData.radius_frac(rem), 0.03)
 	scale = _intact_scale * f
 	if mesh != null:
 		_body_visual_radius = mesh.get_aabb().size.x * 0.5 * scale.x
-	var look: Dictionary = DisassemblyData.look(dep)
 	var mat := material_override as ShaderMaterial
 	if mat != null:
 		mat.set_shader_parameter("strip_mix", float(look["mix"]))
 		mat.set_shader_parameter("strip_color", look["color"] as Color)
 		mat.set_shader_parameter("strip_glow", float(look["glow"]))
 		mat.set_shader_parameter("strip_metallic", float(look["metallic"]))
+
+
+## Close enough not to push again: this is asked on every tick of a disassembly.
+static func _same_look(a: Dictionary, b: Dictionary) -> bool:
+	if a.is_empty() or b.is_empty():
+		return a.is_empty() and b.is_empty()
+	for k: String in ["mix", "glow", "metallic"]:
+		if absf(float(a.get(k, 0.0)) - float(b.get(k, 0.0))) >= 0.0005:
+			return false
+	return (a.get("color", Color()) as Color).is_equal_approx(b.get("color", Color()) as Color)
 
 
 func engulf() -> void:

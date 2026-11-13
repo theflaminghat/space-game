@@ -5919,23 +5919,49 @@ func _body_remaining_fraction(body: String) -> float:
 	return clampf(left / base, 0.0, 1.0)
 
 
+## The layers that make up what a body LOOKS like, outside in: every layer it has, except the air
+## over a solid crust.
+##
+## Only the layers this body HAS: a gas giant has no crust, and counting one would stall its depth
+## a quarter of the way down a layer that was never there.
+##
+## And not the air over a crust.  A world with a crust shows its crust; its atmosphere, however
+## much of the sky it fills, is not its surface and taking it away uncovers nothing.  Counted as a
+## layer of the look it was a quarter of the way down: Mercury's eight tonnes of exosphere went in
+## a Disassembler's first day and left the planet half molten with its crust untouched.  A giant
+## has no crust, and there the cloud tops ARE the surface, so its envelope counts.
+func _look_layers(body: String) -> Array:
+	var comp: Dictionary = _body_composition(body)
+	var solid: bool = _has_crust(body)
+	var out: Array = []
+	for layer: String in DisassemblyData.LAYER_ORDER:
+		if (comp.get(layer, {}) as Dictionary).is_empty():
+			continue
+		if layer == "atmosphere" and solid:
+			continue
+		out.append(layer)
+	return out
+
+
+## Whether a body has a solid surface: a crust.  Everything without one is a giant, whose map is
+## cloud tops over fluid all the way down to its core — see DisassemblyData.look.
+func _has_crust(body: String) -> bool:
+	return not ((_body_composition(body) as Dictionary).get("crust", {}) as Dictionary).is_empty()
+
+
 ## How far through the layers the excavation has reached: 0 at an untouched world, 1 at the last
 ## of the core.  What the body's appearance is driven from — see DisassemblyData.look.
 ##
 ## Measured in LAYERS, not in mass.  A core is most of a planet by mass, so a mass fraction would
 ## leave a world looking untouched long after its crust was gone and then race through the
 ## interesting part.  Layers are what the player is actually watching, and they are what the
-## simulation removes one at a time.
+## simulation removes one at a time.  The layers of the LOOK (_look_layers), so a rocky world's
+## air is no part of it.
 func _disassembly_depth(body: String) -> float:
 	var comp: Dictionary = _body_composition(body)
 	if comp.is_empty():
 		return 0.0
-	# Only the layers this body HAS: a gas giant has no crust, and counting one would stall its
-	# depth a quarter of the way down a layer that was never there.
-	var present: Array = []
-	for layer: String in DisassemblyData.LAYER_ORDER:
-		if not (comp.get(layer, {}) as Dictionary).is_empty():
-			present.append(layer)
+	var present: Array = _look_layers(body)
 	if present.is_empty():
 		return 0.0
 	var done: int = 0
@@ -5964,7 +5990,41 @@ func _sync_disassembly_visual(body: String) -> void:
 	var node := planets.get_node_or_null(body)
 	if node == null or not node.has_method("set_disassembly"):
 		return
-	node.set_disassembly(_body_remaining_fraction(body), _disassembly_depth(body))
+	node.set_disassembly(_body_remaining_fraction(body), _disassembly_look(body))
+
+
+## How the body should be shaded now, from the ledger: DisassemblyData.look with this body's
+## depth, how much of its map is gone, and whether it is a giant.
+func _disassembly_look(body: String) -> Dictionary:
+	return DisassemblyData.look(_disassembly_depth(body), _disassembly_surface_gone(body),
+		not _has_crust(body))
+
+
+## How much of the surface map has been taken away, 0 to 1.
+##
+## A world with a crust: the map IS the crust, so it is taken away exactly as fast as the crust is
+## and is gone when the crust is.  That is the depth times the layer count — inside the first layer
+## of the look it is the share of it removed, and past it one or more.
+##
+## A giant: none of it while the envelope (and an ice giant's mantle) goes — under cloud there is
+## only more cloud, and the planet just gets smaller — and then all of it over the first
+## CORE_BREACH of the core, which is the first thing under it that is not.
+func _disassembly_surface_gone(body: String) -> float:
+	if _has_crust(body):
+		var n: int = _look_layers(body).size()
+		if n == 0:
+			return 0.0
+		return clampf(_disassembly_depth(body) * float(n), 0.0, 1.0)
+	# Layers come off strictly outside in (_next_layer), so a core with anything taken out of it
+	# has nothing left over it: its own share taken is the whole question.
+	var core: Dictionary = (_body_composition(body) as Dictionary).get("core", {})
+	if core.is_empty():
+		return 0.0
+	var base: float = 0.0
+	for compound: String in core:
+		base += float(core[compound])
+	var taken: float = 1.0 - clampf(_layer_mass_left(body, "core") / maxf(base, 1.0), 0.0, 1.0)
+	return clampf(taken / DisassemblyData.CORE_BREACH, 0.0, 1.0)
 
 
 ## Push the look of every body anything has been taken out of.  For the cases that are not a

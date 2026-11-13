@@ -31,14 +31,16 @@ uniform float self_light : hint_range(0.0, 1.0) = 0.0;
 
 // ── A world being taken apart ────────────────────────────────────────────────
 //
-// Past the crust there is no surface left to show: hot silicate, then iron.  Rather than swap in
-// another map — there is none to swap in, and a flat colour would read as a billiard ball — the
-// surface map stays in play as the body's STRUCTURE.  Its own light and dark modulate the
-// exposed material, so a half-eaten Mars still reads as Mars with its crust off: the maria and
-// the highlands are still there, as brighter and darker exposed rock.
+// The surface map is the body's outermost layer — its crust, or a giant's cloud tops — and it goes
+// with that layer.  strip_mix is how much of the layer has been taken: the map is eaten away in
+// patches that spread as it climbs, and at 1 nothing of it is left.  Nothing of it is carried
+// down either.  The exposed material, hot silicate and then iron, takes its structure from a noise
+// field on the body itself (object space, so it turns with the planet) rather than a flat colour,
+// which would read as a billiard ball: cooling plates with hot seams between them while the mantle
+// is open, and grain in the metal once the core comes up.
 //
-// Driven from disassembly.gd's look(), off one excavation depth.  All zero on an untouched
-// world, which is every world in a run that never does this.
+// Driven from disassembly.gd's look().  All zero on an untouched world, which is every world in
+// a run that never does this.
 uniform float strip_mix : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 strip_color : source_color = vec4(1.0);
 uniform float strip_glow : hint_range(0.0, 1.0) = 0.0;
@@ -48,6 +50,37 @@ const int TAPS_U = 8;
 const int TAPS_V = 3;
 
 varying vec3 local_pos;
+
+// Value noise and a few octaves of it, for the exposed material.  Only ever evaluated on a body
+// being taken apart: the strip branch below is skipped outright on every other.
+float hash13(vec3 p) {
+	p = fract(p * 0.1031);
+	p += dot(p, p.zyx + 31.32);
+	return fract((p.x + p.y) * p.z);
+}
+
+float vnoise(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	vec3 u = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(mix(hash13(i), hash13(i + vec3(1.0, 0.0, 0.0)), u.x),
+			mix(hash13(i + vec3(0.0, 1.0, 0.0)), hash13(i + vec3(1.0, 1.0, 0.0)), u.x), u.y),
+		mix(mix(hash13(i + vec3(0.0, 0.0, 1.0)), hash13(i + vec3(1.0, 0.0, 1.0)), u.x),
+			mix(hash13(i + vec3(0.0, 1.0, 1.0)), hash13(i + vec3(1.0, 1.0, 1.0)), u.x), u.y),
+		u.z);
+}
+
+float fbm(vec3 p) {
+	float sum = 0.0;
+	float amp = 0.5;
+	for (int o = 0; o < 4; o++) {
+		sum += amp * vnoise(p);
+		p = p * 2.03 + vec3(17.1, 5.3, 9.7);
+		amp *= 0.5;
+	}
+	return sum / 0.9375;           // the four amplitudes' sum, so it spans 0..1
+}
 
 void vertex() {
 	local_pos = VERTEX;          // object space, so the map turns with the planet
@@ -110,19 +143,23 @@ void fragment() {
 		ROUGHNESS = 1.0;
 		METALLIC = 0.0;
 	} else {
-		// The map's luminance, re-centred on 1.0, is the only thing carried across: it keeps the
-		// body's features as variation in the exposed material instead of discarding them.
-		// Clamped well away from zero so a dark sea does not become a black hole in the mantle.
-		float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
-		float relief = clamp(0.55 + 0.9 * lum, 0.35, 1.6);
-		vec3 exposed = strip_color.rgb * relief;
-		ALBEDO = mix(surf, exposed, strip_mix);
-		// Incandescence follows the relief too, so the low ground glows hottest — which is where
-		// an excavation would actually have reached.
-		float heat = strip_glow * strip_mix * clamp(1.5 - lum, 0.2, 1.5);
+		// Where the surface has been taken yet.  A threshold on a noise field, so it goes in
+		// patches that spread and join; offset so that none of it is gone at 0 and all of it at 1.
+		float patches = fbm(n * 3.0 + vec3(11.0));
+		float gone = smoothstep(patches - 0.06, patches + 0.06, strip_mix * 1.12 - 0.06);
+		// What is under it, from the noise and not from the map: plates, the seams between
+		// them, and a finer grain over both.
+		float plates = fbm(n * 5.0);
+		float seam = 1.0 - smoothstep(0.0, 0.07, abs(plates - 0.5));
+		float grain = fbm(n * 24.0 + vec3(3.7));
+		vec3 exposed = strip_color.rgb * (0.70 + 0.55 * grain);
+		ALBEDO = mix(surf, exposed, gone);
+		// The seams glow hottest and the plates between them have crusted over.  strip_glow is
+		// zero by the time the core is up, so the metal does not glow at all.
+		float heat = strip_glow * gone * (0.35 + 1.6 * seam);
 		EMISSION = ALBEDO * max(self_light, heat);
 		// Exposed rock is rough; exposed iron is not.
-		ROUGHNESS = mix(1.0, 0.35, strip_metallic * strip_mix);
-		METALLIC = strip_metallic * strip_mix;
+		ROUGHNESS = mix(1.0, 0.35, strip_metallic * gone);
+		METALLIC = strip_metallic * gone;
 	}
 }

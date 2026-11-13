@@ -908,20 +908,57 @@ radius and the first tenth off it is barely visible. That is correct: a crust is
 **Appearance follows the LAYERS reached, not the mass** (`_disassembly_depth`, 0 at an untouched
 world and 1 at the last of the core). A core is most of a planet by mass, so a mass-driven look
 would leave a world apparently untouched long after its crust was gone and then race through the
-interesting part — measured on Mercury, a mass ramp sits at 0.00 with the atmosphere gone and
-0.09 with the whole crust gone, against 0.25 and 0.50 for the layer ramp. The depth counts only
-the layers a body *has*, so losing Jupiter's envelope is half of Jupiter rather than a quarter.
+interesting part — measured on Mercury, the whole crust is 0.09 of its mass and a third of its
+look. The depth counts only the layers a body *has*, so losing Jupiter's envelope is half of
+Jupiter rather than a quarter.
 
-`DisassemblyData.look(depth)` turns that into `mix` / `color` / `glow` / `metallic`: the surface
-map gives way to incandescent silicate, which cools into iron as the core comes up.
+**A rocky world's air is not one of them** (`_look_layers`). A world with a crust shows its
+crust, and taking its atmosphere uncovers nothing. Counted, the air was a quarter of the look:
+Mercury's eight tonnes of exosphere went in a Disassembler's first day and left the planet half
+molten with its crust untouched, and Earth went the same way over the millennia its air took.
 
-**No new art, because the surface map stays in play as the body's relief.**
-`planet_polar_blur.gdshader` takes four `strip_*` uniforms and modulates the exposed material by
-the map's own luminance, so a half-eaten Mars reads as Mars with its crust off rather than as a
-billiard ball — and the low ground glows hottest, which is where an excavation would have
-reached. All four are zero on an untouched world, which is every world in a run that never does
-this. `Planet.set_disassembly()` works in both directions, or a reloaded save would show the
+**The map goes with the surface layer.** `DisassemblyData.look(depth, surface_gone, giant)` gives
+`mix` / `color` / `glow` / `metallic`, and `mix` is exactly `surface_gone`, how much of the map
+has been taken away (`_disassembly_surface_gone`). On a world with a crust the map *is* the crust,
+so it goes exactly as fast as the crust does. In
+`planet_polar_blur.gdshader` it is eaten away in patches, a threshold on a noise field, so the
+excavation spreads and joins rather than tinting the world. Once the layer is gone, none of the
+map is left, and none of it is carried down. Below it is incandescent silicate that cools into
+iron as the core comes up. That material takes its structure from noise on the body itself
+(object space, so it turns with the planet): crusted plates with glowing seams between them,
+and grain in the metal. Without that it would read as a billiard ball.
+
+This replaced keeping the map as the exposed material's relief. That design had a half-eaten
+Earth show its continents in the molten mantle and a stripped Mercury its craters in the iron.
+`verify_disassembly_visual` reads the shader's strip branch and fails if it touches the map's
+texels for anything but fading them out. The suite's dummy renderer draws nothing, so the
+source is what can be checked.
+
+**A giant keeps its map, shrinks, and then turns to metal** (`_has_crust` false). Its map is its
+cloud tops, and under them is more gas and then fluid all the way down: there is no surface to
+breach and nothing molten to show. So while the envelope goes (and an ice giant's mantle under
+it) the map stays exactly as it was and the planet only gets smaller. Jupiter is 0.79 of its
+radius with half its envelope gone and 0.15 with all of it. The core is the first thing under
+the clouds that is not cloud. Its first `CORE_BREACH` (a tenth) takes the map away in the same
+spreading patches, and what is left is bare metal, cold, never magma. Nothing above the core needs
+checking for that: layers come off strictly outside in (`_next_layer`), so a core with anything
+taken out of it has nothing over it.
+
+Game works the whole look out (`_disassembly_look`) and hands it to `Planet.set_disassembly()`,
+so the layer rules live in Game and the planet node only paints what it is given.
+
+**Every planet is on the shader**, including Uranus, the one with no map. `_apply_polar_blur`
+gives a plain-coloured body a single white texel, which times its colour is exactly the colour
+it had. It used to leave such a body on its `StandardMaterial3D`, where no strip parameter could
+reach it, so Uranus shrank as it was taken apart without ever stopping looking like itself. All
+four `strip_*` uniforms are zero on an untouched world, which is every world in a run that never
+does this. `Planet.set_disassembly()` works in both directions, or a reloaded save would show the
 last world the node happened to be told about.
+
+**Focused on the body, the shrink does not show.** The camera pivot is the body's child and
+inherits its scale, so the camera moves in as the planet shrinks and the planet fills the screen
+as before. Its moons, rings and orbital structures are children too, and shrink and draw in
+with it. The size change reads against everything else in the system, and from another body.
 
 **The planet panel rebuilds its composition list on the fraction, not just on the selection.**
 What a body is made of used to be static per body, which is exactly the assumption disassembly

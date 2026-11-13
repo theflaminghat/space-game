@@ -87,45 +87,59 @@ static func layer_label(layer: String) -> String:
 
 # ── What a half-eaten world looks like ────────────────────────────────────────
 #
-# A planet being taken apart should not look like a planet. The crust is the only part anybody
-# ever sees from orbit, and once it is gone what is under it is hot silicate and then iron —
-# neither of which looks anything like a surface.
+# A planet being taken apart should not look like a planet. Its surface map IS its outermost
+# layer — the crust, or a giant's cloud tops — and it goes with that layer: eaten away in patches
+# as the layer comes off, and gone entirely once it has. What is under it is hot silicate and then
+# iron, neither of which looks anything like a surface, and nothing of the map is carried down
+# into them. The shader gives them a structure of their own (planet_polar_blur.gdshader).
 #
-# Driven off ONE number, `depth`: how far through the layers the excavation has reached, 0 at an
-# untouched world and 1 at the last of the core. Game works it out from the layer being removed
-# and how much of that layer is left (see _disassembly_depth), so the look follows the same
-# ledger the simulation does rather than a second idea of progress.
+# Driven off two numbers Game works out from the removal ledger, so the look follows the same
+# account the simulation keeps rather than a second idea of progress:
 #
-# No new art. The surface map stays in play as the body's STRUCTURE — its own light and dark is
-# what the molten and metal passes are modulated by — so a half-eaten Mars still reads as Mars
-# with its crust off, rather than as a billiard ball. See planet_polar_blur.gdshader.
+#   depth         how far through the layers that make up what you SEE the excavation has
+#                 reached, 0 untouched to 1 at the last of the core (Game._disassembly_depth)
+#   surface_gone  how much of the map has been taken away, 0 to 1 (Game._disassembly_surface_gone)
+#
+# A GIANT is different, and simpler. Its map is its cloud tops, and under them is more of the same
+# gas, and then fluid, all the way down: there is no surface to breach and nothing molten to show.
+# So it keeps its map and only gets smaller while its envelope goes, and when the core is reached
+# the clouds give way to bare metal (over the first CORE_BREACH of the core, so the change spreads
+# in patches rather than flipping in one frame).
 
 ## Hot silicate: what is under a crust.
 const MOLTEN_COLOR: Color = Color(0.98, 0.42, 0.10)
 ## Iron-nickel: what is under that.
 const METAL_COLOR: Color = Color(0.60, 0.63, 0.70)
 
-## Depth at which the surface map has been entirely replaced by what is beneath it.
-const LOOK_BREACH: float = 0.45
-## Depth over which molten gives way to metal.
+## Share of a giant's core over which its clouds give way to the metal under them.
+const CORE_BREACH: float = 0.10
+
+## Depth over which molten gives way to metal.  A rocky world's look has three layers (its air is
+## not one, see Game._look_layers), so this runs from half-way down its mantle to early in its
+## core; a giant's two put it across the top of the core.
 const LOOK_CORE_IN: float = 0.50
-const LOOK_CORE_FULL: float = 0.95
+const LOOK_CORE_FULL: float = 0.80
 
 
-## How the body is shaded at this excavation depth.
+## How the body is shaded.
 ##
-##   mix       how much of the surface map is replaced by the exposed material
+##   mix       how much of the surface map has been taken away — exactly `surface_gone`
 ##   color     the exposed material's own colour
 ##   glow      self-light: a breached mantle is incandescent, a core is not
 ##   metallic  iron reads as metal and silicate does not
-static func look(depth: float) -> Dictionary:
+##
+## `giant`: what is exposed is the core and nothing else — metal, cold, from the first patch.
+static func look(depth: float, surface_gone: float, giant: bool = false) -> Dictionary:
 	var d: float = clampf(depth, 0.0, 1.0)
+	var s: float = clampf(surface_gone, 0.0, 1.0)
+	if giant:
+		return {"mix": s, "color": METAL_COLOR, "glow": 0.0, "metallic": 0.90}
 	var to_core: float = smoothstep(LOOK_CORE_IN, LOOK_CORE_FULL, d)
 	return {
-		"mix": smoothstep(0.0, LOOK_BREACH, d),
+		"mix": s,
 		"color": MOLTEN_COLOR.lerp(METAL_COLOR, to_core),
-		# Brightest just after the crust goes, and cooling as the iron comes up.
-		"glow": 0.45 * smoothstep(0.0, LOOK_BREACH, d) * (1.0 - to_core),
+		# Brightest as the surface goes, and cooling as the iron comes up.
+		"glow": 0.45 * s * (1.0 - to_core),
 		"metallic": 0.90 * to_core,
 	}
 
