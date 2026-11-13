@@ -2266,6 +2266,33 @@ and silent where every OptionButton closes and clicks. `verify_cargo_picker.gd` 
 real mouse and key events pushed into the popup; a programmatic `select()` would not have shown
 either fault.
 
+### Opening the Infrastructure tab
+
+It froze the game for about two seconds, and it was two things.
+
+**Symbols the UI font does not have.** Godot's built-in font (Open Sans) has no arrows,
+triangles, ⚙ or ✕, and with nothing else to try, every piece of text containing one made Godot
+ask the operating system which installed font had it — afresh each time, about five milliseconds
+a label, some thirty times plain text. The tab has a "↑" on every upgrade button and a "▶" and
+"⚙" on every card. `UIPalette.font()` gives the **engine's** font the two fonts that search was
+landing on anyway (DejaVu Sans, and Noto Sans Symbols2 for ⛓) as fixed fallbacks, which are
+consulted before the search is reached. It has to be the engine's font, in place: a control lays
+its text out once as it enters the tree, *before* its theme reaches it, with the engine's font, so
+a fixed copy handed to the theme sped up the second layout and left the first, which was the slow
+one. The search stays on as the last resort, so an uncovered character is still drawn — slowly —
+and `verify_ui_font.gd` sweeps every string literal for characters outside ASCII to make sure
+none takes that path.
+
+**Building what nobody has opened.** The list built every level of every building — about 3 200
+controls — for a tab that opens with every card folded. A card's levels are now built the first
+time it is opened (`BuildPanel._fill_card`), from the latest entries `apply_counts` has handed the
+family, so a card opened an hour later is current. `apply_counts` used to decide a rebuild was due
+by counting rows against the catalogue; with cards unopened that never matches, and would have
+rebuilt the list on every refresh, so it compares the catalogue's **shape** — every level's name and
+availability — instead.
+
+Together: 1.9 s to about 35 ms.
+
 ### Colonies have an economy, and can be shipped to
 
 Interstellar colonies could not be traded with at all: the star map's Trade button was greyed

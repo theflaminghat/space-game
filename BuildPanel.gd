@@ -21,10 +21,18 @@ var _cost_items: Array = []
 ## demolish, or upgrade can patch counts and button states in place instead of tearing down and
 ## recreating the whole list (which was the frame-stutter on every build).
 ## Each: { count, build[], demolish[], upgrade[], available, min_count }.
+##
+## Only for cards that have been OPENED: a card's levels are built the first time it is expanded
+## (see _fill_card), so a level whose card nobody has opened has no row here.
 var _rows: Dictionary = {}
-## Per-FAMILY header widgets, keyed by base name, holding the total standing across all levels
-## and the shared construction badge.  Each: { total: Label, badge: Label }.
+## Per-FAMILY card state, keyed by base name: the header's total and construction badge, the body
+## the levels go into, the latest catalogue entries for those levels, and whether they have been
+## built yet.  Each: { total, badge, detail, tiers, built }.
 var _families: Dictionary = {}
+## The catalogue's shape when the list was last built — every level's name and whether it is
+## available — so apply_counts knows when patching is not enough.  It used to tell by the number
+## of rows matching the catalogue, which a card that has not been opened no longer has.
+var _shape: Array = []
 
 ## Batch sizes offered for build / demolish / upgrade.  Catalogue entries are single buildings,
 ## so infrastructure is raised by the hundred and one-at-a-time clicking is not a real option.
@@ -86,22 +94,28 @@ func refresh_supply(factors: Dictionary) -> void:
 
 
 func apply_counts(catalog: Array) -> void:
-	if catalog.size() != _rows.size():
+	# A level added, gone, or newly available lays the list out differently: rebuild.
+	if _catalog_shape(catalog) != _shape:
 		_populate(catalog)
 		return
 	var have_all: Dictionary = {}
 	var fam_total: Dictionary = {}    # base name → standing across every level
 	var fam_queued: Dictionary = {}   # base name → under construction across every level
+	var fam_tiers: Dictionary = {}    # base name → this pass's entries, for a card opened later
 	for building: Dictionary in catalog:
 		var bname: String = str(building["name"])
-		if not _rows.has(bname):
-			_populate(catalog)
-			return
-		var r: Dictionary = _rows[bname]
-		if bool(building.get("available", true)) != bool(r["available"]):
-			_populate(catalog)   # cost/requirement layout differs — structure changed
-			return
 		var count: int = int(building.get("count", 0))
+		var base: String = str(building.get("base_name", bname))
+		if not fam_tiers.has(base):
+			fam_tiers[base] = []
+		(fam_tiers[base] as Array).append(building)
+		fam_total[base]  = int(fam_total.get(base, 0)) + count
+		fam_queued[base] = int(fam_queued.get(base, 0)) + int(building.get("in_progress", 0))
+		for k: String in (building.get("have", {}) as Dictionary):
+			have_all[k] = building["have"][k]
+		if not _rows.has(bname):
+			continue      # its card has not been opened: there is nothing built to patch
+		var r: Dictionary = _rows[bname]
 		(r["count"] as Label).text = str(count)
 		# The slider's ceiling is the standing count, so building or demolishing moves it.
 		var asl: HSlider = r.get("active_slider", null)
@@ -137,14 +151,13 @@ func apply_counts(catalog: Array) -> void:
 		var cap_lbl: Label = r.get("cap_label", null)
 		if cap > 0 and cap_lbl != null:
 			cap_lbl.text = _cap_text(cap, room, count)
-		for k: String in (building.get("have", {}) as Dictionary):
-			have_all[k] = building["have"][k]
-		# Roll this level up into its family's header figures.
-		var base: String = str(building.get("base_name", bname))
-		fam_total[base]  = int(fam_total.get(base, 0)) + count
-		fam_queued[base] = int(fam_queued.get(base, 0)) + int(building.get("in_progress", 0))
 	for base: String in _families:
 		var f: Dictionary = _families[base]
+		if fam_tiers.has(base):
+			var fresh: Array = fam_tiers[base]
+			fresh.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+				return int(a.get("level", 1)) < int(b.get("level", 1)))
+			f["tiers"] = fresh
 		(f["total"] as Label).text = str(int(fam_total.get(base, 0)))
 		var badge: Label = f["badge"]
 		var q: int = int(fam_queued.get(base, 0))
@@ -203,10 +216,18 @@ func _apply_supply(bar: Control, lbl: Label, act: int, count: int, supply: float
 		lbl.modulate = UIPalette.VALUE
 		lbl.tooltip_text = ""
 
+## Every level's name and availability, in catalogue order: what decides the list's layout.
+static func _catalog_shape(catalog: Array) -> Array:
+	var out: Array = []
+	for b: Dictionary in catalog:
+		out.append("%s|%s" % [str(b["name"]), str(bool(b.get("available", true)))])
+	return out
+
 func _populate(catalog: Array) -> void:
 	_cost_items.clear()
 	_rows.clear()
 	_families.clear()
+	_shape = _catalog_shape(catalog)
 	for child in build_list.get_children():
 		child.queue_free()
 
@@ -300,7 +321,9 @@ func _add_building_card(base_name: String, tiers: Array) -> void:
 	header.add_child(total_label)
 	card.add_child(header)
 
-	# Body: one block per level, collapsed by default.
+	# Body: one block per level, collapsed by default — and EMPTY until the card is first opened.
+	# Building every level of every card up front was about 3 200 controls for a list that opens
+	# with all of them folded away, and it was most of what opening this tab cost.
 	var body := MarginContainer.new()
 	body.add_theme_constant_override("margin_left", 16)
 	body.add_theme_constant_override("margin_bottom", 6)
@@ -308,20 +331,33 @@ func _add_building_card(base_name: String, tiers: Array) -> void:
 	var detail := VBoxContainer.new()
 	detail.add_theme_constant_override("separation", 2)
 	body.add_child(detail)
+	card.add_child(body)
+
+	toggle.pressed.connect(func() -> void:
+		if not body.visible:
+			_fill_card(base_name)
+		body.visible = not body.visible
+		toggle.text = ("▼  " if body.visible else "▶  ") + base_name)
+
+	_families[base_name] = {"total": total_label, "badge": badge, "detail": detail,
+		"tiers": tiers, "built": false}
+	build_list.add_child(card)
+
+## Build a card's levels, the first time it is opened, from the latest catalogue entries
+## apply_counts has handed the family — so they come up current, not as the list was built.
+func _fill_card(base_name: String) -> void:
+	var f: Dictionary = _families.get(base_name, {})
+	if f.is_empty() or bool(f["built"]):
+		return
+	f["built"] = true
+	var detail: VBoxContainer = f["detail"]
+	var tiers: Array = f["tiers"]
 	for i in range(tiers.size()):
 		if i > 0:
 			var sep := HSeparator.new()
 			sep.modulate = Color(1.0, 1.0, 1.0, 0.12)
 			detail.add_child(sep)
 		_add_tier_block(detail, tiers[i] as Dictionary, tiers.size() > 1)
-	card.add_child(body)
-
-	toggle.pressed.connect(func() -> void:
-		body.visible = not body.visible
-		toggle.text = ("▼  " if body.visible else "▶  ") + base_name)
-
-	_families[base_name] = {"total": total_label, "badge": badge}
-	build_list.add_child(card)
 
 ## One level inside a family card: its heading and count, what it produces, what it costs, and
 ## the controls to build, demolish, or retrofit it.

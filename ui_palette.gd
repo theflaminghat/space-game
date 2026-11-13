@@ -293,7 +293,49 @@ static func theme() -> Theme:
 			var own := line.duplicate() as StyleBoxLine
 			own.color = RULE
 			t.set_stylebox("separator", type, own)
+	t.default_font = font()
 	return t
+
+
+## The fonts the symbols come from, in order, when the UI font does not have them.
+##
+## Today's picks, named outright: every arrow, triangle, star, tick and cross the menus use comes
+## from DejaVu Sans, and the one chain glyph from Noto Sans Symbols2 — which is exactly what the
+## per-text system search was choosing, so nothing looks different.  The Windows and macOS names
+## after them are there for a port; the game exports to Linux only.
+const SYMBOL_FONTS: Array = [
+	["DejaVu Sans", "Segoe UI Symbol", "Apple Symbols"],
+	["Noto Sans Symbols2", "Noto Sans Symbols 2", "Symbola", "Segoe UI Symbol", "Apple Symbols"],
+]
+
+## The UI font: Godot's own (Open Sans), given the symbol fonts above as FIXED fallbacks.
+##
+## Without them, opening the Infrastructure tab froze the game for two seconds.  Open Sans has no
+## arrows, triangles, ⚙ or ✕, and for every piece of text containing one, Godot asked the
+## operating system which installed font had it — afresh each time, at about five milliseconds a
+## label.  A building level carries three "↑" upgrade buttons and every card a "▶" toggle and a
+## "⚙" badge, so a tab of a hundred-odd levels spent nearly all of its two seconds asking the same
+## question.  Named fallbacks are consulted before that search is ever reached, and a symbol drawn
+## from one costs what plain text does.
+##
+## Done to the ENGINE's font, in place, not to a copy handed to the theme.  A control lays its
+## text out once as it enters the tree, before its theme reaches it, and that pass uses the
+## engine's font — so a themed copy fixed the second layout and left the first, which was the slow
+## one.  Everything without a theme (a Label3D) gets the same fallbacks the menus do.
+##
+## The system search itself is left ON, as the last resort: a character in neither Open Sans nor
+## a fallback is still found, only slowly.  tests/verify_ui_font.gd checks every symbol in the
+## source is covered, so that the slow path is one nothing in the game takes.
+static func font() -> Font:
+	var f: Font = ThemeDB.fallback_font
+	if f.fallbacks.is_empty():
+		var chain: Array[Font] = []
+		for names: Array in SYMBOL_FONTS:
+			var sym := SystemFont.new()
+			sym.font_names = PackedStringArray(names)
+			chain.append(sym)
+		f.fallbacks = chain
+	return f
 
 
 ## A recoloured copy of one of the default theme's boxes, keeping everything that positions it.
