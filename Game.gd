@@ -2535,7 +2535,8 @@ func _respawn_launch_craft() -> void:
 		var end_abs: int = _to_abs_day(int(launch.get("end_year", year)),
 			int(launch.get("end_month", 0)), int(launch.get("end_day", 0)))
 		var total: float = maxf(1.0, float(end_abs - start_abs))
-		var flown: float = clampf(float(today_abs - start_abs), 0.0, total)
+		# Negative for a launch that has not departed yet: it goes back on its pad to wait.
+		var flown: float = minf(float(today_abs - start_abs), total)
 
 		var lid: int = int(launch.get("id", 0))
 		var payload: int = int(launch.get("payload", 0))
@@ -6933,6 +6934,9 @@ func _compute_launch_display_data() -> Array:
 				int(launch["end_year"]), int(launch["end_month"]), int(launch["end_day"])
 			)
 			entry["days_remaining"] = max(0, end_abs - today_abs)
+			var start_abs := _to_abs_day(int(launch.get("start_year", year)),
+				int(launch.get("start_month", month)), int(launch.get("start_day", day)))
+			entry["days_to_departure"] = max(0, start_abs - today_abs)
 		result.append(entry)
 	return result
 
@@ -7069,6 +7073,11 @@ func _on_launch_requested(params: Dictionary) -> void:
 
 	# Spawn a craft for every launch, including local orbit insertions where the
 	# target is the origin planet itself (it just settles straight into orbit).
+	#
+	# A launch booked for a later date is spawned NOW but waits on its pad: its flown days start
+	# at minus the offset (see Satellite.begin_transfer).  It used to depart the moment the button
+	# was pressed and fly its duration from today, arriving the whole offset early — so planning
+	# a launch for a better window did nothing but bill for the window.
 	if target_name != "":
 		var origin_planet := get_node_or_null("WorldRoot/Planets/" + origin_name) as Planet
 		var target_planet := get_node_or_null("WorldRoot/Planets/" + target_name) as Planet
@@ -7081,15 +7090,17 @@ func _on_launch_requested(params: Dictionary) -> void:
 				# The spawner leads the slot by the flight time itself; this is only the
 				# fallback for a swarm renderer that is not up yet.
 				_spawn_swarm_satellite(origin_planet, origin_planet.global_position,
-					launch["id"], float(duration), reserved)
+					launch["id"], float(duration), reserved, -float(start_offset))
 			elif structure != "":
 				# The berth is reserved counting what is already there and what is still in
 				# flight, so two carriers in the air do not aim at the same spot.  This launch is
 				# already in active_launches, hence the -1.
 				_spawn_structure_carrier(origin_planet, target_planet, structure, launch["id"],
-					float(duration), maxi(0, _reserved_structure_slot(target_name, structure) - 1))
+					float(duration), maxi(0, _reserved_structure_slot(target_name, structure) - 1),
+					-float(start_offset))
 			else:
-				_spawn_satellite(origin_planet, target_planet, arrival, launch["id"], float(duration))
+				_spawn_satellite(origin_planet, target_planet, arrival, launch["id"], float(duration),
+					-float(start_offset))
 
 ## Best (lowest) launch cost & duration multipliers a planet's infrastructure
 ## grants (e.g. a Space Elevator).  Returns {"cost": float, "duration": float};

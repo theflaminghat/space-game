@@ -12,6 +12,8 @@ extends Node3D
 ##   ORBIT    – ("orbit" arrival) settles into a tilted parking orbit around the
 ##              target and follows it indefinitely.
 ##   LANDING  – ("land" arrival) spirals down to the surface, then frees itself.
+##   WAITING  – a launch booked for a later date sits on its origin until the day comes, then
+##              enters whichever of the above it was booked for.
 
 signal arrived(mode: String)
 
@@ -44,7 +46,7 @@ const PATH_COLOR := Color(0.62, 0.85, 1.00, 0.70)
 ## this clock rather than every frame.
 const PATH_REBUILD_SEC: float = 0.2
 
-enum State { TRANSFER, ORBIT, LANDING, DONE }
+enum State { TRANSFER, ORBIT, LANDING, DONE, WAITING }
 
 # ── Public config (set by spawner before begin_transfer) ─────────────────────────
 var arrival_mode: String = "orbit"
@@ -99,6 +101,8 @@ var _flight_days:  float = DEFAULT_FLIGHT_DAYS
 var _elapsed_days: float = 0.0
 var _state:        int   = State.TRANSFER
 var _started:      bool  = false   # false until begin_transfer() is called
+## The phase a WAITING craft enters on its departure day.
+var _after_wait:   int   = State.TRANSFER
 
 # ── Orbit / landing phase ────────────────────────────────────────────────────────
 var _orbit_angle:       float = 0.0
@@ -129,15 +133,24 @@ func _ready() -> void:
 ## elapsed_days starts the craft part-way along, for a flight restored from a save: the whole
 ## arc is still the plan, and the craft sits at the fraction of it the calendar says has been
 ## flown, so it arrives on the day the launch record says it does.
+##
+## NEGATIVE elapsed_days is a launch booked for later: minus the days until it departs.  The
+## craft waits on its origin until then, and everything below is struck for the departure day —
+## from where the origin WILL be, at where the target will be on arrival — so the plan shown
+## while it waits is the one it will fly.  It used to depart the moment the button was pressed
+## and arrive the planned number of days early.
 func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 		flight_days: float = DEFAULT_FLIGHT_DAYS, elapsed_days: float = 0.0) -> void:
 	orbit_center = center
 	_origin      = origin
 	_target      = target
 	_flight_days = maxf(flight_days, 1.0)
+	_elapsed_days = minf(elapsed_days, _flight_days)
+	var wait: float = maxf(0.0, -_elapsed_days)
 
 	_sun_pos = center.global_position
-	var rel: Vector3 = origin.global_position - _sun_pos
+	var depart: Vector3 = origin.position_in_days(wait) if wait > 0.0 else origin.global_position
+	var rel: Vector3 = depart - _sun_pos
 	_depart_radius = rel.length()
 	_depart_angle  = atan2(rel.x, rel.z)
 
@@ -146,20 +159,22 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 	_tilt_sin    = sin(_orbit_tilt)
 	_tilt_cos    = cos(_orbit_tilt)
 
-	_elapsed_days = clampf(elapsed_days, 0.0, _flight_days)
 	_started      = true
-	_local        = origin == target
+	# A swarm carrier is handed its origin as its target too (the target is unused there), and
+	# is not a local insertion: it flies a lane-entry arc, which does not move once struck.
+	_local        = origin == target and arrival_mode != "swarm"
 
 	# Swarm deployment: fly straight to the reserved slot, then vanish (the collector
 	# appears there).  Handled before the origin==target shortcut below.
 	_is_swarm  = arrival_mode == "swarm"
-	_start_pos = origin.global_position
-	var p0: float = _elapsed_days / _flight_days
+	_start_pos = depart
+	var p0: float = maxf(0.0, _elapsed_days) / _flight_days
 
 	# ── The arc, struck once ──
 	# Aimed at where the destination will be when the craft gets there, which for a Keplerian
 	# orbit is exact, so nothing has to be steered afterwards.  A restored flight has only its
-	# REMAINING days to lead by, which is why this reads the clock rather than flight_days.
+	# REMAINING days to lead by, which is why this reads the clock rather than flight_days — and
+	# a booked one has those plus the wait.
 	var lead: float = _flight_days - _elapsed_days
 	var arrive: Vector3 = swarm_target_pos if _is_swarm else target.position_in_days(lead)
 	_arrive_rel    = arrive - _sun_pos
@@ -192,23 +207,33 @@ func begin_transfer(center: Node3D, origin: Planet, target: Planet,
 	_orbit_dir         = ins.x
 	_orbit_entry_angle = ins.y
 
-	if _is_swarm:
-		_state = State.TRANSFER
-		_set_craft_pos(_lane_point(p0))
-		return
-
+	_state = State.TRANSFER
 	# Local orbit insertion: the target *is* the origin planet, so there's no
 	# interplanetary cruise — settle straight into a parking orbit so the craft is
 	# visible orbiting from the moment it launches.
-	if _local:
+	if _local and not _is_swarm:
 		_orbit_dir   = 1.0
 		_orbit_angle = 0.0
 		_state       = State.ORBIT
-		_set_craft_pos(_orbit_point(_park_radius))
-		return
+	if wait > 0.0:
+		_after_wait = _state
+		_state      = State.WAITING
+	_place(p0)
 
-	_state = State.TRANSFER
-	_set_craft_pos(_arc_point(p0))
+## Put the dot where the current phase says it is.
+func _place(p: float) -> void:
+	match _state:
+		State.WAITING:
+			if _origin != null and is_instance_valid(_origin):
+				_set_craft_pos(_origin.global_position)
+		State.ORBIT:
+			_set_craft_pos(_orbit_point(_park_radius))
+		_:
+			_set_craft_pos(_lane_point(p) if _is_swarm else _arc_point(p))
+
+## Days until a booked launch departs; 0 once it has.
+func days_to_departure() -> float:
+	return maxf(0.0, -_elapsed_days) if _state == State.WAITING else 0.0
 
 func _process(delta: float) -> void:
 	if not _started:
@@ -229,6 +254,7 @@ func _process(delta: float) -> void:
 	var delta_days: float = delta / spd
 
 	match _state:
+		State.WAITING:  _process_wait(delta_days)
 		State.TRANSFER: _process_transfer(delta_days)
 		State.ORBIT:    _process_orbit(delta_days)
 		State.LANDING:  _process_landing(delta_days)
@@ -241,6 +267,19 @@ func _process(delta: float) -> void:
 		if _path_accum >= PATH_REBUILD_SEC:
 			_path_accum = 0.0
 			_rebuild_path()
+
+# ── Phase: waiting ───────────────────────────────────────────────────────────────
+
+## On the pad until the booked day.  The countdown runs on the same game-day clock the flight
+## will, so the craft leaves exactly when the launch record says it does — and from exactly the
+## point the arc was struck from, because that point was the origin's own prediction for today.
+func _process_wait(delta_days: float) -> void:
+	_elapsed_days += delta_days
+	if _elapsed_days < 0.0:
+		_place(0.0)
+		return
+	_state = _after_wait
+	_place(_elapsed_days / _flight_days)   # carry the part of the day already flown
 
 # ── Phase: transfer ──────────────────────────────────────────────────────────────
 

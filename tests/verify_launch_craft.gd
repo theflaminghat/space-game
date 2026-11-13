@@ -473,5 +473,88 @@ func _run() -> void:
 		check(off < park2 * 1.15, "and the craft is on Mars: %.3f off a %.3f parking orbit"
 			% [off, park2])
 
+	# ── 12. A launch booked for a later date waits for it ─────────────────────
+	# The calendar's start date reached the launch record and nothing else: the craft left the
+	# moment the button was pressed and flew its duration from today, so it arrived the whole
+	# offset early and planning for a better window only changed the bill.
+	g.active_launches.clear()
+	g._clear_launch_craft()
+	g.launch_panel.show()
+	_stock_earth(g, fuel_id)
+	var booked := params.duplicate()
+	booked["start_offset"] = 60
+	booked["duration"] = 90
+	g._on_launch_requested(booked)
+	check(g.active_launches.size() == 1, "the booking is taken")
+	if not g.active_launches.is_empty():
+		var bl: Dictionary = g.active_launches[0]
+		var bsat: Node = _craft_of(g, int(bl["id"]))
+		check(bsat != null, "with a craft, so its plan can be looked at before it flies")
+		if bsat != null:
+			check(absf(float(bsat.days_to_departure()) - 60.0) < 0.01,
+				"which is on its pad for 60 days: %.2f" % float(bsat.days_to_departure()))
+			var earth_b: Node3D = g.get_node("WorldRoot/Planets/earth")
+			check(bsat.craft_position().distance_to(earth_b.global_position) < 1.0e-3,
+				"sitting on Earth meanwhile")
+			# Its plan is the one for the departure day: from where Earth WILL be, not where it is.
+			var bplan: PackedVector3Array = bsat.path_points(32)
+			var leave_at: Vector3 = earth_b.position_in_days(60.0)
+			check(bplan[0].distance_to(leave_at) < 0.05,
+				"the plan leaves from where Earth will be in 60 days: %.4f off"
+					% bplan[0].distance_to(leave_at))
+			check(bplan[0].distance_to(earth_b.global_position) > 1.0,
+				"which is not where it is today: %.3f" % bplan[0].distance_to(earth_b.global_position))
+			var mars_b: Node3D = g.get_node("WorldRoot/Planets/mars")
+			var reach_b: float = bplan[bplan.size() - 1].distance_to(mars_b.position_in_days(150.0))
+			check(absf(reach_b - float(bsat.get("_park_radius"))) < 0.02,
+				"and arrives where Mars will be in 60 + 90 days: %.3f" % reach_b)
+		g.refresh_launch_panel()
+		for _i in range(2): await process_frame
+		var brow: String = ""
+		for r: Button in g.launch_panel._rows:
+			brow = (r.get_node("Row/Status") as Label).text
+		check(brow.begins_with("departs in"), "the list says when it leaves: '%s'" % brow)
+
+		# A save written while it waits brings it back waiting, not on its way.
+		g.save_game("user://saves/launch_booked.json")
+		g.load_game("user://saves/launch_booked.json")
+		for _i in range(3): await process_frame
+		var back_b: Node = _craft_of(g, int(bl["id"]))
+		check(back_b != null and absf(float(back_b.days_to_departure()) - 60.0) < 1.01,
+			"a reload keeps it on its pad: %s" % (str(back_b.days_to_departure()) if back_b else "no craft"))
+
+	# End to end, on the craft's own clock: twenty days on the pad, thirty in flight, and it is on
+	# Mars when the fifty are up — not twenty days early, and not where Mars was at booking.
+	g.active_launches.clear()
+	g._clear_launch_craft()
+	var earth_e: Node3D = g.get_node("WorldRoot/Planets/earth")
+	var mars_e: Node3D = g.get_node("WorldRoot/Planets/mars")
+	g._spawn_satellite(earth_e, mars_e, "orbit", 9300, 30.0, -20.0)
+	var w: Node = _craft_of(g, 9300)
+	check(w != null, "a craft booked twenty days out")
+	if w != null:
+		var on_pad: bool = true
+		var left_on: float = -1.0
+		var guard2: int = 0
+		while float(w.get("_elapsed_days")) < 30.0 and guard2 < 60000:
+			guard2 += 1
+			ss.paused = false
+			ss.ui_paused = false
+			paused = false
+			await process_frame
+			var el: float = float(w.get("_elapsed_days"))
+			if el < 0.0:
+				on_pad = on_pad and w.craft_position().distance_to(earth_e.global_position) < 1.0e-3
+			elif left_on < 0.0:
+				left_on = el
+		ss.paused = true
+		check(on_pad, "it stayed on Earth for every frame of the wait")
+		check(left_on >= 0.0 and left_on < 1.0, "and left on the day: %.3f days past it" % left_on)
+		var off_e: float = w.craft_position().distance_to(mars_e.global_position)
+		var park_e: float = float(w.get("_park_radius"))
+		print("booked flight: left %.3f days late, finished %.3f from Mars (parking %.3f)"
+			% [left_on, off_e, park_e])
+		check(off_e < park_e * 1.15, "and arrived on Mars: %.3f off a %.3f parking orbit" % [off_e, park_e])
+
 	print("FAILS: %d" % fails)
 	quit()

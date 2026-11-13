@@ -702,6 +702,16 @@ or a carrier handing over to what it carried), and when a run is replaced. What 
 behind is in the roster and on the planet: a delivered structure, a colony, a hold unloaded into a
 stockpile. The vehicle is not.
 
+**A launch booked for a later date waits for it.** The calendar's start date used to reach the
+launch record and nothing else: the craft left the moment the button was pressed and flew its
+duration from today, arriving the whole offset early, so booking a better window changed only
+the bill. The craft is now spawned at booking with a *negative* `elapsed_days` — minus the days to
+departure — and sits on its origin in a `WAITING` phase until the day comes. Everything about the
+arc is struck for the departure day: it leaves from `origin.position_in_days(wait)`, which is
+exactly where the origin will be when the countdown hits zero, and leads the target by the wait
+plus the flight. So a booked launch can be clicked for its plan while it waits, and that plan is
+the one it flies. What it costs is still charged at booking.
+
 **A load puts the craft back in the air.** Nothing was respawned before, so a reloaded game showed
 empty space where a dozen missions were in transit. The save records the schedule, not the sky:
 where the origin *was* on the departure date is not in it, so the arc is re-struck from where that

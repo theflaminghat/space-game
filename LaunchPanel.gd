@@ -1211,6 +1211,10 @@ func _fill_launch_row(row: Button, launch: Dictionary) -> void:
 	if launch["status"] == "completed":
 		status.text = "Done"
 		status.modulate = Color.GREEN
+	elif int(launch.get("days_to_departure", 0)) > 0:
+		# Booked for a later window and still on the pad.
+		status.text = "departs in " + _format_days(int(launch["days_to_departure"]))
+		status.modulate = UIPalette.DIM
 	else:
 		var days_left: int = launch.get("days_remaining", 0)
 		status.text = _format_days(days_left) + " left"
