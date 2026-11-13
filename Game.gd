@@ -8578,6 +8578,20 @@ func front_map_cells() -> Array:
 	return out
 
 
+## Our own galaxy regions as the star map wants them, in the front's shape: [[Sol-relative
+## position, share], …] for every tile we hold any of.
+##
+## The share is the galaxy map's own ("frac" in galaxy_region_grid): the statistical region and
+## whatever colonies and clusters stand in the tile besides, so the two maps paint the same tiles.
+func held_region_map_cells() -> Array:
+	var out: Array = []
+	for rg: Dictionary in galaxy_region_grid():
+		var f: float = float(rg["frac"])
+		if f > 0.0:
+			out.append([rg["center"], f])
+	return out
+
+
 ## What the player knows about the front, for the star map and the readout.
 func front_state() -> Dictionary:
 	if not front_active() or not front_seen:
@@ -8764,6 +8778,7 @@ func refresh_star_map() -> void:
 		obs_range = maxf(obs_range, maxf(cd * 2.0, cd + float(scopes) * COLONY_TELESCOPE_REACH_LY))
 	StarMapPanel.set_observation_range(obs_range)
 	sidebar.star_map.set_front(front_map_cells())
+	sidebar.star_map.set_held_regions(held_region_map_cells())
 	sidebar.star_map.set_colony_intel(_player_colony_intel())
 	sidebar.star_map.set_interstellar_unlocked(ResearchTree.is_unlocked("relativistic_navigation"))
 

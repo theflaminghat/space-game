@@ -205,23 +205,23 @@ func _run() -> void:
 	var deep_zoom: float = sm._zoom
 	sm.queue_redraw()
 	await process_frame
-	check(sm._fr_pts.is_empty(),
-		"at the default neighbourhood zoom the front is out of band: %d" % sm._fr_pts.size())
+	check(sm._front_marks.pts.is_empty(),
+		"at the default neighbourhood zoom the front is out of band: %d" % sm._front_marks.pts.size())
 	sm._zoom = 1.0
 	sm.queue_redraw()
 	await process_frame
-	check(not sm._fr_pts.is_empty(),
-		"pulled back to galactic scale, it is drawn: %d marks" % sm._fr_pts.size())
+	check(not sm._front_marks.pts.is_empty(),
+		"pulled back to galactic scale, it is drawn: %d marks" % sm._front_marks.pts.size())
 	sm.set_layer_shown("front", false)
 	check(not sm.layer_shown("front"), "and it can be turned off")
 	sm.queue_redraw()
 	await process_frame
-	check(sm._fr_pts.is_empty(),
-		"which stops it being drawn, and clears the buffer: %d" % sm._fr_pts.size())
+	check(sm._front_marks.pts.is_empty(),
+		"which stops it being drawn, and clears the buffer: %d" % sm._front_marks.pts.size())
 	sm.set_layer_shown("front", true)
 	sm.queue_redraw()
 	await process_frame
-	check(not sm._fr_pts.is_empty(), "and turning it back on rebuilds it")
+	check(not sm._front_marks.pts.is_empty(), "and turning it back on rebuilds it")
 	sm._zoom = deep_zoom
 	# What is drawn SOLID is exactly what is closed to the swarm, so the map cannot promise a
 	# volume the targeting refuses.
@@ -243,19 +243,19 @@ func _run() -> void:
 		sm.set_front([[(e2 as Array)[0], 1.0]])
 		sm.queue_redraw()
 		await process_frame
-		if not sm._fr_pts.is_empty():
+		if not sm._front_marks.pts.is_empty():
 			vis_pos = (e2 as Array)[0]
 			break
 	check(vis_pos != Vector3.ZERO, "some cell of the front is on screen at galactic zoom")
 	sm.set_front([[vis_pos, 1.0], [vis_pos, 0.1]])
 	sm.queue_redraw()
 	await process_frame
-	check(sm._fr_col.size() == 2,
-		"both marks are built: %d" % sm._fr_col.size())
+	check(sm._front_marks.col.size() == 2,
+		"both marks are built: %d" % sm._front_marks.col.size())
 	var seen_held: bool = false
 	var seen_contested: bool = false
 	var stray: int = 0
-	for c: Color in sm._fr_col:
+	for c: Color in sm._front_marks.col:
 		var rgb := Color(c.r, c.g, c.b)
 		if rgb.is_equal_approx(Color(sm.FRONT_HELD_COLOR.r, sm.FRONT_HELD_COLOR.g,
 				sm.FRONT_HELD_COLOR.b)):

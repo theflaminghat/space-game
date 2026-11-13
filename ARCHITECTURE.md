@@ -1394,8 +1394,8 @@ room left for an exemption to hide in.
 ### The star map's layer filter
 
 Checkboxes in the map's top-right corner decide what is drawn: **Stars** (with a class each for
-Human, Aggressive, Friendly, Unknown and Uninhabited), **Clusters** and **Galaxies**. All on by
-default, so a filter nobody touches changes nothing.
+Human, Aggressive, Friendly, Unknown and Uninhabited), **Clusters**, **Galaxies**, **Our
+regions** and **Rival front**. All on by default, so a filter nobody touches changes nothing.
 
 **Uninhabited is a class like the others**, and it is the one that makes the feature work: the
 four inhabited classes are a few dozen stars against six thousand empty ones, so without it the
@@ -2677,6 +2677,20 @@ star and cluster passes use, with the frame origin on the same movement toleranc
 volume as takeable that the targeting refuses. Contested cells draw dimmer, and only alpha is
 scaled per mark — which is what lets `verify_vn_front` assert every mark carries the rgb of one
 constant or the other.
+
+**Our own regions are drawn the same way, in green.** Before, the front was the only territory on
+the star map: pulled back to galactic scale, the regions humanity had settled showed as nothing,
+though the galaxy map painted them green. So the race could be seen from one side only.
+`held_region_map_cells()` hands over every tile we hold any of, in the front's shape, at the
+galaxy map's own share (`frac`: the statistical region, or the colonies and clusters standing in
+the tile, whichever is more), so the two maps paint the same tiles. Both layers go through
+`_draw_territory()`, so the rule is one rule: solid past `DENIED_SHARE`, fainter below, alpha
+rising with the share and fading with the detail band. Only the colours differ. The held green is
+`STATUS_COL_HUMAN`, the colour our own stars already draw in, and the fainter one is that green
+greyed the way the front's contested colour is its held one greyed. Ours goes down after theirs, so
+a tile the two are splitting shows our mark over their stain. Each layer keeps its marks in its own
+`TerritoryMarks`, so switching one off neither clears nor reuses the other's cache.
+`verify_star_map_regions` covers it.
 
 **An undetected front draws nothing.** `front_map_cells()` returns empty until `front_seen`, so
 the first the player gets is the announcement; the stain appears afterwards. And it is a

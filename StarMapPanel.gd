@@ -2009,8 +2009,15 @@ var _factions: Dictionary = {}       # star name → "aggressive" | "peaceful"
 ## holding, it is ground that has been taken.
 const FRONT_HELD_COLOR: Color = Color(0.86, 0.26, 0.42, 0.85)
 const FRONT_CONTESTED_COLOR: Color = Color(0.70, 0.40, 0.55, 0.45)
+## Our own volume, the same marks in the green our own stars are drawn in: solid where a tile is
+## mostly ours (by the front's own threshold, so the two sides read alike), fainter where
+## settlement has only begun.  The fainter one is the held green greyed the way the front's
+## contested colour is its held one greyed.
+const REGION_HELD_COLOR: Color = Color(STATUS_COL_HUMAN, 0.85)
+const REGION_SETTLING_COLOR: Color = Color(0.46, 0.78, 0.55, 0.45)
 
-var _layers: Dictionary = {"stars": true, "clusters": true, "galaxies": true, "front": true}
+var _layers: Dictionary = {"stars": true, "clusters": true, "galaxies": true, "front": true,
+	"regions": true}
 ## Which kinds of star, by STAR_CLASSES id.  Meaningful only while "stars" is on.
 var _star_classes: Dictionary = {}
 
@@ -2038,12 +2045,21 @@ var _colony_intel: Dictionary = {}   # colonised star → {dyson, telescopes, la
 ## has reached Sol, so an undetected front draws nothing at all — see Game.front_state.
 var _front: Array = []
 var _front_version: int = 0
-# Cached like the stars and the clusters, behind the same camera key: the marks are a pure
-# function of the front, the camera and the frame origin.
-var _fr_pts: PackedVector2Array = PackedVector2Array()
-var _fr_col: PackedColorArray = PackedColorArray()
-var _fr_key: Array = []
-var _fr_ref: Vector3 = Vector3(INF, INF, INF)
+## Our own galaxy regions, in the same shape: [[Vector3 pos, float share], …], the share being
+## what the galaxy map paints green (Game.held_region_map_cells).
+var _held_regions: Array = []
+var _held_regions_version: int = 0
+
+## One territory layer's marks, cached like the stars and the clusters behind the same camera
+## key: a pure function of the cells, the camera and the frame origin.
+class TerritoryMarks:
+	var pts: PackedVector2Array = PackedVector2Array()
+	var col: PackedColorArray = PackedColorArray()
+	var key: Array = []
+	var ref: Vector3 = Vector3(INF, INF, INF)
+
+var _front_marks: TerritoryMarks = TerritoryMarks.new()
+var _region_marks: TerritoryMarks = TerritoryMarks.new()
 
 # ── The star pass, cached ─────────────────────────────────────────────────────
 #
@@ -2353,6 +2369,8 @@ func _build_layer_ui() -> void:
 		"The generated cluster shell — everything too far to resolve star by star.")
 	_layer_boxes["galaxies"] = _layer_box(vb, "Galaxies", "galaxies",
 		"The extragalactic layer, out in the far decades.")
+	_layer_boxes["regions"] = _layer_box(vb, "Our regions", "regions",
+		"Galaxy regions humanity has settled, by how much of each is ours: solid where most of it is, faint where settlement has only begun. The same tiles the galaxy map paints green.")
 	_layer_boxes["front"] = _layer_box(vb, "Rival front", "front",
 		"Volumes taken by somebody else's self-replicating probes. Solid where they hold it outright and your swarm will not fly there; faint where it is still contested and still yours to race for.")
 
@@ -3118,6 +3136,12 @@ func set_alien_intel(intel: Dictionary) -> void:
 func set_front(cells: Array) -> void:
 	_front = cells
 	_front_version += 1
+	queue_redraw()
+
+## Push our own regions, the same way: Sol-relative positions with the share of each that is ours.
+func set_held_regions(cells: Array) -> void:
+	_held_regions = cells
+	_held_regions_version += 1
 	queue_redraw()
 
 
@@ -4221,6 +4245,60 @@ func _persp(p: Vector3, b: Basis) -> float:
 	var d: float = maxf(cam - p.dot(b.z), near)
 	return cam / d
 
+## Territory: one short mark at the centre of every hex cell somebody holds a share of.  The rival
+## front and our own regions both come through here, so the two read the same way and differ only
+## in colour.
+##
+## Solid past FrontData.DENIED_SHARE and faint below it.  For the front that is exactly what is
+## closed to the swarm, so the map cannot paint a volume as takeable that the targeting refuses.
+## Alpha also rises with the share and fades with the detail band.
+func _draw_territory(layer: String, cells: Array, version: int, m: TerritoryMarks,
+		held_col: Color, part_col: Color, b: Basis, center: Vector2, px_per_unit: float) -> void:
+	if not layer_shown(layer) or cells.is_empty():
+		# CLEARED, not merely skipped.  A buffer left full is a stale frame's worth of marks
+		# waiting to be drawn the moment the layer comes back on at a different camera, and the
+		# key would say it was fresh.
+		if not m.pts.is_empty():
+			m.pts = PackedVector2Array()
+			m.col = PackedColorArray()
+			m.key = []
+		return
+	# The frame origin is on the same movement tolerance the stars and clusters use: a static
+	# view is most frames.
+	var key: Array = [_zoom, _yaw, _pitch, size.x, size.y, version]
+	var tol: float = _cluster_pt_tol(px_per_unit)
+	if key != m.key or _ref_pos.distance_squared_to(m.ref) >= tol * tol:
+		m.key = key
+		m.ref = _ref_pos
+		var pts := PackedVector2Array()
+		var col := PackedColorArray()
+		for e in cells:
+			var cell: Array = e
+			var cpos: Vector3 = cell[0]
+			var share: float = clampf(float(cell[1]), 0.0, 1.0)
+			if share <= 0.0:
+				continue
+			# Same early discard the cluster loop uses: _detail_alpha only wants the LENGTH of
+			# the transformed position, which is _display_radius of the plain distance.
+			var fa: float = _detail_alpha(_display_radius(cpos.distance_to(_ref_pos)))
+			if fa <= 0.0:
+				continue
+			var fp: Vector2 = _project(_rel(cpos), b, center, px_per_unit)
+			if fp.x < -STAR_SCREEN_PAD or fp.y < -STAR_SCREEN_PAD \
+					or fp.x > size.x + STAR_SCREEN_PAD or fp.y > size.y + STAR_SCREEN_PAD:
+				continue
+			var fc: Color = held_col if share >= FrontData.DENIED_SHARE else part_col
+			# A mark two pixels wide rather than one, so territory reads as territory at a
+			# glance instead of as a sparse dusting of points.
+			pts.append(fp)
+			pts.append(fp + Vector2(2.0, 0.0))
+			col.append(Color(fc.r, fc.g, fc.b, fc.a * fa * (0.45 + 0.55 * share)))
+		m.pts = pts
+		m.col = col
+	if m.pts.size() >= 2:
+		draw_multiline_colors(m.pts, m.col, 3.0)
+
+
 func _project(p: Vector3, b: Basis, center: Vector2, px_per_unit: float) -> Vector2:
 	return center + Vector2(p.dot(b.x), -p.dot(b.y)) * px_per_unit * _persp(p, b)
 
@@ -4407,58 +4485,15 @@ func _draw() -> void:
 	_refresh_lod_cuts(_ref_pos)
 	# Filtered out entirely rather than drawn and discarded: the sort is the expensive half and
 	# there is nothing to sort for a layer nobody is looking at.
-	# ── The rival front, under everything else ──────────────────────────────────
+	# ── Territory, under everything else: the rival front, then our own regions ──
 	#
-	# Drawn FIRST so it reads as territory the rest of the map sits on top of: a star inside the
+	# Drawn FIRST so it reads as ground the rest of the map sits on top of: a star inside the
 	# front still draws as a star, over the stain that says who holds the volume around it.
-	#
-	# Cached behind the same key the stars and clusters use, with the frame origin on the same
-	# movement tolerance — the marks are a pure function of the front, the camera and where Sol
-	# is, and a static view is most frames.
-	if not layer_shown("front") or _front.is_empty():
-		# CLEARED, not merely skipped.  A buffer left full is a stale frame's worth of marks
-		# waiting to be drawn the moment the layer comes back on at a different camera, and the
-		# key would say it was fresh.
-		if not _fr_pts.is_empty():
-			_fr_pts = PackedVector2Array()
-			_fr_col = PackedColorArray()
-			_fr_key = []
-	else:
-		var fr_key: Array = [_zoom, _yaw, _pitch, size.x, size.y, _front_version]
-		var fr_tol: float = _cluster_pt_tol(px_per_unit)
-		if fr_key != _fr_key or _ref_pos.distance_squared_to(_fr_ref) >= fr_tol * fr_tol:
-			_fr_key = fr_key
-			_fr_ref = _ref_pos
-			_fr_pts = PackedVector2Array()
-			_fr_col = PackedColorArray()
-			for e in _front:
-				var cell: Array = e
-				var cpos: Vector3 = cell[0]
-				var share: float = clampf(float(cell[1]), 0.0, 1.0)
-				if share <= 0.0:
-					continue
-				# Same early discard the cluster loop uses: _detail_alpha only wants the LENGTH
-				# of the transformed position, which is _display_radius of the plain distance.
-				var fa: float = _detail_alpha(_display_radius(cpos.distance_to(_ref_pos)))
-				if fa <= 0.0:
-					continue
-				var fp: Vector2 = _project(_rel(cpos), b, center, px_per_unit)
-				if fp.x < -STAR_SCREEN_PAD or fp.y < -STAR_SCREEN_PAD \
-						or fp.x > size.x + STAR_SCREEN_PAD or fp.y > size.y + STAR_SCREEN_PAD:
-					continue
-				# Solid where it is theirs outright and the swarm will not fly there; faint
-				# where the volume is still contested. The threshold is the same one
-				# FrontData.denies uses, so what is drawn solid is exactly what is closed.
-				var held: bool = share >= FrontData.DENIED_SHARE
-				var fc: Color = FRONT_HELD_COLOR if held else FRONT_CONTESTED_COLOR
-				# A mark two pixels wide rather than one, so a front reads as territory at a
-				# glance instead of as a sparse dusting of points.
-				_fr_pts.append(fp)
-				_fr_pts.append(fp + Vector2(2.0, 0.0))
-				_fr_col.append(Color(fc.r, fc.g, fc.b,
-					fc.a * fa * (0.45 + 0.55 * share)))
-		if _fr_pts.size() >= 2:
-			draw_multiline_colors(_fr_pts, _fr_col, 3.0)
+	# Ours after theirs, so a tile the two are splitting shows our green over their red.
+	_draw_territory("front", _front, _front_version, _front_marks,
+		FRONT_HELD_COLOR, FRONT_CONTESTED_COLOR, b, center, px_per_unit)
+	_draw_territory("regions", _held_regions, _held_regions_version, _region_marks,
+		REGION_HELD_COLOR, REGION_SETTLING_COLOR, b, center, px_per_unit)
 
 	var cl_all: Array = star_clusters() if layer_shown("clusters") else ([] as Array)
 	var glyphs_ok: bool = _zoom >= CLUSTER_GLYPH_MIN_ZOOM
