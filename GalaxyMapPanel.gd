@@ -37,6 +37,18 @@ const COL_HOVER:     Color = Color(1.00, 1.00, 1.00)   # white edge under the cu
 const COL_SOL:       Color = Color(1.00, 1.00, 0.70)
 const COL_CENTRE:    Color = Color(1.00, 0.82, 0.45)
 
+## The fill for a tile the rival front holds `share` of, transparent for none.
+##
+## The STAR MAP'S colours, so the two maps say the same thing the same way, and its threshold:
+## solid where FrontData closes the tile to our probes, faint where it is still contested.
+## Deeper the more of it they hold, on the same curve our own settlement is drawn on.
+static func front_fill(share: float) -> Color:
+	if share <= 0.0:
+		return Color(0, 0, 0, 0)
+	var fc: Color = StarMapPanel.FRONT_HELD_COLOR if FrontData.denies(share) \
+		else StarMapPanel.FRONT_CONTESTED_COLOR
+	return Color(fc.r, fc.g, fc.b, 0.20 + 0.55 * clampf(share, 0.0, 1.0))
+
 var _zoom: float = 1.0
 var _pan: Vector2 = Vector2.ZERO          # view offset in light-years, in the galactic plane
 var _dragging: bool = false
@@ -60,7 +72,7 @@ var _info_title: Label = null
 ## _set_row silently drops it — add the row here as well as writing to it.
 const INFO_ROWS: Array = [
 	"Distance from Sol", "Distance from centre", "Stellar density",
-	"Stars", "Colonisable systems", "Settled systems",
+	"Stars", "Colonisable systems", "Settled systems", "Rival front",
 	# What the statistical aggregate above does not cover.
 	"Simulated colonies", "Open clusters", "Cluster territory", "Home territory",
 	"Inbound craft",
@@ -200,6 +212,7 @@ func _draw() -> void:
 		var a := deg_to_rad(60.0 * float(i))
 		corners.append(Vector2(cos(a), sin(a)) * (r_px * HEX_INSET))
 
+	var any_front: bool = false
 	for rg: Dictionary in game.galaxy_region_grid():
 		var p := _to_screen(_plane(rg["center"] as Vector3, gx, gy), s)
 		if p.x < -cull or p.y < -cull or p.x > size.x + cull or p.y > size.y + cull:
@@ -217,6 +230,12 @@ func _draw() -> void:
 		# Unsettled regions read as the galaxy's stellar density; settled ones go green in
 		# proportion to how much of the region humanity actually holds.
 		draw_colored_polygon(poly, Color(COL_EMPTY.r, COL_EMPTY.g, COL_EMPTY.b, 0.10 + 0.35 * dens))
+		# The rival front, under our own share: the two split one tile between them (the front
+		# cannot take what we reached first), so both can show on it at once.
+		var front: float = float(rg.get("front", 0.0))
+		if front > 0.0:
+			any_front = true
+			draw_colored_polygon(poly, front_fill(front))
 		if frac > 0.0:
 			draw_colored_polygon(poly,
 				Color(COL_SETTLED.r, COL_SETTLED.g, COL_SETTLED.b, 0.20 + 0.55 * frac))
@@ -247,6 +266,21 @@ func _draw() -> void:
 		"%s ly across · click a region · WASD or drag to pan · scroll zoom" % Units.format_si(
 			DEFAULT_VIEW_LY * 2.0 / _zoom, ""),
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UIPalette.DIM)
+	if any_front:
+		_draw_front_legend(Vector2(14, 52))
+
+
+## What the front's two shades mean, while there is any front on screen to explain.
+func _draw_front_legend(at: Vector2) -> void:
+	var x: float = at.x
+	for entry: Array in [[front_fill(1.0), "Rival front: closed to our probes"],
+			[front_fill(FrontData.DENIED_SHARE * 0.5), "contested"]]:
+		draw_rect(Rect2(Vector2(x, at.y), Vector2(10, 10)), entry[0] as Color)
+		x += 14.0
+		var label: String = str(entry[1])
+		draw_string(_font, Vector2(x, at.y + 9.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
+			UIPalette.DIM)
+		x += _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 14.0
 
 
 ## A calibrated bar rounded to a 1/2/5×10ⁿ length, so distances read off the map directly.
@@ -361,6 +395,14 @@ func _refresh_info() -> void:
 	_set_row("Colonisable systems", Units.format_si(float(d.get("colonizable", 0.0)), ""))
 	_set_row("Settled systems", "%s  (%.0f%%)" % [
 		Units.format_si(float(d.get("colonized", 0.0)), ""), frac * 100.0])
+	# Nothing until the front has been seen, the same as on the map: an empty row is not a claim
+	# that nobody is there.
+	var front: float = float(d.get("front", 0.0))
+	if bool(d.get("front_known", false)) and front > 0.0:
+		_set_row("Rival front", "%d%%  · %s" % [int(round(front * 100.0)),
+			"closed to our probes" if FrontData.denies(front) else "contested"])
+	else:
+		_set_row("Rival front", "—")
 	# Everything in this tile that the region aggregate does not itself cover.
 	var det: int = int(d.get("detailed_colonies", 0))
 	_set_row("Simulated colonies", "%d" % det if det > 0 else "—")

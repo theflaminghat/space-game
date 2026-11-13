@@ -66,6 +66,7 @@ material: do not regenerate them, or the thing they test is gone.
 | `verify_salvo.gd` | A salvo is one track on the map carrying its count, and lands as one event reporting that count truthfully; separate launches and weapons stay separate, and stacked labels stay legible |
 | `verify_timeline_focus.gd` | A "Signature detected" card carries its star, invites a click, and takes the player to that star on the map — landing it on screen, clear of Sol |
 | `verify_vn.gd` | Von Neumann probes propagate outward through the stars instead of saturating the bubble Earth's telescopes can resolve |
+| `verify_galaxy_map_front.gd` | The rival front shows on the galaxy map's hexes once its signature has reached Sol, in the star map's held and contested colours, with its share in the tile's info row; nothing before it is seen or in a run without one |
 | `verify_sandbox.gd` | The generated sandbox save: full Dyson swarm, every star-capable structure present and research-open, and it settles instead of sliding |
 | `verify_swarm_cost.gd` | A sandbox slice costs a few new-game slices; the swarm count, the Sun's ratings and other worlds' rebuilds work per kind and do not grow with the Sun's roster; the count is right with the cache clean, dirty, or under a roster changed without telling it |
 | `verify_determinism.gd` | Reloading a save cannot re-roll a catastrophe: the rolls, and the death toll through the real event path, are identical across a differently-played replay |

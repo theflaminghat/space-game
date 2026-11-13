@@ -8092,8 +8092,11 @@ func galaxy_region_grid() -> Array:
 	# and the collector pauses it caused were the periodic stutter.
 	# Callers treat the result as read-only.
 	_refresh_tile_presence()
+	# The rival front, by the star map's rule: nothing until its signature has reached Sol.
+	var front_shown: bool = front_active() and front_seen
 	for c: Dictionary in _region_grid_cache:
 		var id: String = str(c["id"])
+		c["front"] = front_share(id) if front_shown else 0.0
 		var reg: Dictionary = _regions.get(id, {})
 		var f: float = 0.0 if reg.is_empty() else clampf(
 			float(reg["colonized"]) / maxf(float(reg["colonizable"]), 1.0), 0.0, 1.0)
@@ -8196,6 +8199,9 @@ func galaxy_region_info(id: String) -> Dictionary:
 		"frac": clampf(colonized / maxf(colonizable, 1.0), 0.0, 1.0),
 		"population": pop,
 		"capacity": colonizable * COLONY_HABITAT_K,
+		# What the rival front holds of the tile, once the player knows there is one.
+		"front_known": front_active() and front_seen,
+		"front": front_share(id) if front_active() and front_seen else 0.0,
 	}
 
 ## How many places humanity holds other than Earth: colony worlds in this system, colony worlds

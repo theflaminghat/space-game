@@ -2685,6 +2685,16 @@ and galaxies it is only in band once the map is pulled back. At the default neig
 it is correctly culled, which the test asserts in both directions so the behaviour is recorded
 rather than discovered.
 
+**The galaxy map shows it too, on its own hexes.** The front spreads over the region grid, and the
+galaxy map *is* the region grid, so there it needs no projection. Each tile carries a `front` share
+in `galaxy_region_grid()`, patched in place on every read like the settled fraction, and
+`galaxy_region_info()` gives the share to the tile's info row. The same rules apply as on the star
+map: nothing until `front_seen`, the star map's two colours (`GalaxyMapPanel.front_fill()` borrows
+them, so the maps cannot disagree), and solid exactly where `FrontData.denies()` closes the tile. It
+draws under our own green because the two split one tile between them, and the legend appears
+only while there is something on the map for it to explain. Before this the galaxy map drew a
+tile the front held outright the same as an empty one. `verify_galaxy_map_front` covers it.
+
 ### Clusters are not stars
 
 A cluster is a Voronoi territory of the home tile holding thousands of stars, too far to resolve
