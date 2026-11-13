@@ -143,6 +143,43 @@ func _run() -> void:
 	g._mark_prod_dirty()
 	check(g._swarm_power() > before, "the grid now carries its power")
 
+	# ── Demolishing one takes its panel out of the sky, even with the clock stopped ──
+	# The renderer re-read the count only once it was past its pause guard, so an array
+	# demolished while paused — which is when anybody is in the build panel — stayed drawn until
+	# time ran again.  Driven through the renderer's own _process with a whole poll interval of
+	# delta: the harness runs thousands of frames a second, and its real deltas would not reach
+	# the throttle.
+	var ss: Node = root.get_node("SolarSystem")
+	var poll: float = float(planets.SWARM_POLL_SEC) + 0.01
+	g.planet_buildings["sun"] = _arrays(g, 3)
+	g.solar_satellites_deployed = 0
+	ss.paused = false
+	planets._process(poll)
+	check(planets._swarm_mm.visible_instance_count == 3, "three arrays, three panels drawn: %d"
+		% planets._swarm_mm.visible_instance_count)
+	ss.paused = true
+	g._on_demolish_requested("sun", g.SWARM_BUILDING, 1)
+	check(g.swarm_panels() == 2, "demolishing one leaves two: %d" % g.swarm_panels())
+	planets._process(poll)
+	check(planets._swarm_mm.visible_instance_count == 2,
+		"and the sky shows two while paused: %d" % planets._swarm_mm.visible_instance_count)
+	# The same with the solar system frozen (a run past the orbit-resolving speed, paused to look).
+	ss.solar_system_active = false
+	g._on_demolish_requested("sun", g.SWARM_BUILDING, 1)
+	planets._process(poll)
+	check(planets._swarm_mm.visible_instance_count == 1,
+		"and while frozen: %d" % planets._swarm_mm.visible_instance_count)
+	ss.solar_system_active = true
+
+	# And the other way: an array added while paused is drawn without waiting for the clock.
+	# (Where it is drawn cannot be checked here: the headless renderer keeps no MultiMesh
+	# transforms, so every instance reads back as the origin.)
+	(g.planet_buildings["sun"] as Array).append(g.SWARM_BUILDING)
+	planets._process(poll)
+	check(planets._swarm_mm.visible_instance_count == 2, "an array added while paused is drawn: %d"
+		% planets._swarm_mm.visible_instance_count)
+	ss.paused = false
+
 	# ── It is listed with the other generators ──
 	# Under Power in the build panel, as drawn: the array makes energy, so a player looking for
 	# the swarm looks there.  It used to be filed under Support beside the Sunshade.  Checked on

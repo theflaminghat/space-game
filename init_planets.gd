@@ -133,20 +133,28 @@ func _build_sunlight() -> void:
 # ── Per-frame orbital motion ───────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
-	if not SolarSystem.solar_system_active:
-		return
-	if SolarSystem.ui_paused or SolarSystem.paused:
-		return
-	if SolarSystem.seconds_per_day <= 0.0:
+	# Re-read the panel count on a throttle (cheap, but not every frame) — and BEFORE the guards
+	# below, so it happens whether or not anything is moving.  It used to sit after them, which
+	# meant a paused game never re-read it: demolish an array with the clock stopped, which is
+	# when anybody is in the build panel, and its panel stayed in the sky until time ran again.
+	# Planet._update_infra already refreshes its lanes' counts this way, for the same reason.
+	_swarm_poll_accum += delta
+	var recounted: bool = false
+	if _swarm_poll_accum >= SWARM_POLL_SEC:
+		_swarm_poll_accum = 0.0
+		recounted = _refresh_swarm_count()
+
+	if not SolarSystem.solar_system_active \
+			or SolarSystem.ui_paused or SolarSystem.paused \
+			or SolarSystem.seconds_per_day <= 0.0:
+		# Nothing turns while stopped, but a panel that has just been revealed has never been
+		# placed and would sit at the swarm's centre until it was.
+		if recounted:
+			_update_swarm_transforms()
 		return
 
 	var delta_days: float = delta / SolarSystem.seconds_per_day
 
-	# Re-read the deployed-collector count on a throttle (cheap, but not every frame).
-	_swarm_poll_accum += delta
-	if _swarm_poll_accum >= SWARM_POLL_SEC:
-		_swarm_poll_accum = 0.0
-		_refresh_swarm_count()
 	# Advance the whole lane by one shared angle (not each visible panel separately, which
 	# desynchronised panels revealed at different times and wrecked the even spacing).
 	for lane in range(_lane_angle.size()):
@@ -363,11 +371,15 @@ func _sun_visual_mult() -> float:
 	# it was built at (so it doesn't collapse into an overlapping knot around the white dwarf).
 	return maxf(1.0, lerpf(float(lo[2]), float(hi[2]), st))
 
-## Show one collector per Solar Satellite the player has deployed to the Sun.
-func _refresh_swarm_count() -> void:
+## Show one collector per panel in the swarm, launched or built.  True when the count changed.
+func _refresh_swarm_count() -> bool:
 	if _swarm_mm == null:
-		return
-	_swarm_mm.visible_instance_count = clampi(_deployed_satellite_count(), 0, _swarm_max)
+		return false
+	var n: int = clampi(_deployed_satellite_count(), 0, _swarm_max)
+	if n == _swarm_mm.visible_instance_count:
+		return false
+	_swarm_mm.visible_instance_count = n
+	return true
 
 ## Total collector slots across all lanes (queried by Game for the swarm cap).
 func get_swarm_max() -> int:
