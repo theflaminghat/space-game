@@ -107,7 +107,9 @@ static func build() -> Dictionary:
 		"resources":          _global_resources(),
 		"active_launches":    [],
 		"next_launch_id":     1,
-		"solar_satellites_deployed": SWARM_COLLECTORS,
+		# The swarm is full, but only what the built arrays leave is launched: every array the
+		# loadout stands up is a panel in the sky, so demolishing one takes one down.
+		"solar_satellites_deployed": SWARM_COLLECTORS - _built_swarm_panels(),
 		"colonized_planets":  _colonized_planets(),
 		"colonized_year":     _per_world_int(1945),
 		"split_thresholds":   _per_world_int(750_000),
@@ -194,6 +196,18 @@ static func _sun_loadout() -> Dictionary:
 			continue
 		out[nm] = SUN_STELLAR_ENGINEERING if _is_stellar_lever(nm) else SUN_PER_LANE
 	return out
+
+
+## Swarm panels the Sun's loadout stands up as built arrays, every tier of them.
+static func _built_swarm_panels() -> int:
+	var per: Dictionary = {}
+	for b: Dictionary in BuildingData.all():
+		per[str(b["name"])] = int(b.get("swarm_panels", 0))
+	var sun: Dictionary = _sun_loadout()
+	var n: int = 0
+	for nm: String in sun:
+		n += int(sun[nm]) * int(per.get(nm, 0))
+	return n
 
 
 ## Whether a structure acts on the star itself rather than merely hanging beside it.  Matches on

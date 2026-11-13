@@ -290,21 +290,35 @@ func _check_thermal_labor_alerts() -> void:
 		_labor_alerted = false
 
 ## The name of the building that IS a swarm panel, so the two routes to a collector — launch one
-## or assemble one in place — land in the same lane and the same cap.
+## or assemble one in place — land in the same lane and the same cap.  Its BASE name: the tiers
+## above it are panels too, and are recognised by the marker below rather than by name.
 const SWARM_BUILDING: String = "Swarm Collector Array"
 
+## How many swarm panels one standing `building_name` is: its definition's `swarm_panels`
+## marker, which every tier of the array carries and nothing else does.
+func _swarm_panels_of(building_name: String) -> int:
+	return int((_bdef_cache.get(building_name, {}) as Dictionary).get("swarm_panels", 0))
+
 ## Swarm panels assembled in solar orbit rather than flown there.  planet_buildings holds one
-## entry per structure, repeats and all, so this is a count of entries rather than a lookup.
+## entry per structure, repeats and all, so this sums over entries.
+##
+## By the MARKER, not the name.  It counted entries named exactly "Swarm Collector Array", so an
+## array upgraded to II left the swarm — its panel out of the sky and its power off the grid —
+## and one standing at II or III had never been in it.
 func _swarm_built() -> int:
-	return (planet_buildings.get("sun", []) as Array).count(SWARM_BUILDING)
+	var n: int = 0
+	for b in (planet_buildings.get("sun", []) as Array):
+		n += _swarm_panels_of(str(b))
+	return n
 
 ## Swarm panels queued for construction but not yet standing.  Counted against the cap so the
-## player cannot queue ten thousand arrays into a swarm with room for four.
+## player cannot queue ten thousand arrays into a swarm with room for four.  A retrofit is not
+## one: it enlarges an array that is already a panel, so it adds nothing to the count.
 func _swarm_queued() -> int:
 	var n: int = 0
 	for job: Dictionary in (build_queue.get("sun", []) as Array):
-		if str(job.get("building", "")) == SWARM_BUILDING:
-			n += 1
+		if not job.has("upgrade_from"):
+			n += _swarm_panels_of(str(job.get("building", "")))
 	return n
 
 ## Every panel in the swarm, however it got there: flown out as a Solar Satellite or built in
@@ -6575,7 +6589,7 @@ func try_build(planet_name: String, building_name: String) -> bool:
 	# The swarm is bounded by lane geometry, not by what the player can pay for, and the build
 	# queue has no notion of a cap — so it is enforced here, against everything already spoken
 	# for: panels standing, satellites in flight, and arrays already queued.
-	if str(building.get("base_name", building_name)) == SWARM_BUILDING and swarm_room() <= 0:
+	if int(building.get("swarm_panels", 0)) > 0 and swarm_room() <= 0:
 		return false
 	# A structure there can only be one of.  The build panel greys its buttons out, but
 	# automation rules and the dev console call try_build directly, so the cap is enforced here
@@ -10925,6 +10939,15 @@ func load_game(path: String = "") -> void:
 		if not _earth.has("Biomass Burner"):
 			_earth.append("Biomass Burner")
 			planet_buildings["earth"] = _earth
+
+	# Launched panels never outnumber the slots the built arrays leave: the invariant the launch
+	# path keeps on every arrival.  A save written past it came back over-full, and since the sky
+	# draws at most the cap, the surplus was panels nobody could take down — demolishing a built
+	# array removed one from a pile the swarm never showed.  The sandbox wrote exactly that: a
+	# full swarm of launched panels plus a lane of every array tier on top.  Built arrays keep
+	# their slots because they are the ones the player can manage.
+	solar_satellites_deployed = clampi(solar_satellites_deployed, 0,
+		maxi(0, _swarm_max() - _swarm_built()))
 
 	# Now that the Sun's roster is real, the shades can follow it.  This used to run two hundred
 	# lines earlier, against whatever roster happened to be in memory from before the load.

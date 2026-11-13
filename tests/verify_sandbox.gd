@@ -33,8 +33,42 @@ func _run() -> void:
 	check(g._swarm_max() == int(SB.SWARM_COLLECTORS),
 		"SandboxSave.SWARM_COLLECTORS still matches the swarm cap (%d vs %d)" % [
 			int(SB.SWARM_COLLECTORS), g._swarm_max()])
-	check(g.solar_satellites_deployed == g._swarm_max(),
-		"the swarm loads full: %d of %d" % [g.solar_satellites_deployed, g._swarm_max()])
+	check(g.swarm_panels() == g._swarm_max(),
+		"the swarm loads full: %d of %d" % [g.swarm_panels(), g._swarm_max()])
+	# ...and not OVER-full.  This used to check the launched count alone, and it was the cap:
+	# the save then stood a lane of every array tier on top, so the built arrays were surplus a
+	# full sky never showed, and demolishing one took nothing out of it.
+	check(g.solar_satellites_deployed + g._swarm_built() == g._swarm_max(),
+		"launched and built panels together fill it exactly: %d + %d of %d" % [
+			g.solar_satellites_deployed, g._swarm_built(), g._swarm_max()])
+	check(g._swarm_built() > 0, "some of it is built arrays, which can be demolished: %d"
+		% g._swarm_built())
+	# And the FILE says so, not just the game after loading it: load_game trims an over-full swarm
+	# on its own, which would hide a generator that went back to writing one.
+	var raw: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(SB.SAVE_PATH))
+	var file_built: int = 0
+	var sun_counts: Dictionary = (raw.get("planet_buildings", {}) as Dictionary).get("sun", {})
+	for nm: String in sun_counts:
+		file_built += int(sun_counts[nm]) * g._swarm_panels_of(nm)
+	check(int(raw.get("solar_satellites_deployed", -1)) + file_built == g._swarm_max(),
+		"the sandbox file itself is exactly full: %d launched + %d built of %d" % [
+			int(raw.get("solar_satellites_deployed", -1)), file_built, g._swarm_max()])
+
+	# Which is the whole point: in the sandbox, demolishing an array takes a panel out of the sky —
+	# at every tier, and with the game paused, as a loaded save starts.
+	var sky: Node = g.get_node("WorldRoot/Planets")
+	sky._process(float(sky.SWARM_POLL_SEC) + 0.01)
+	var drawn0: int = sky._swarm_mm.visible_instance_count
+	check(drawn0 == g._swarm_max(), "the sky starts full: %d" % drawn0)
+	var gone: int = 0
+	for tier: String in ["Swarm Collector Array", "Swarm Collector Array II", "Swarm Collector Array III"]:
+		g._on_demolish_requested("sun", tier, 1)
+		gone += 1
+		sky._process(float(sky.SWARM_POLL_SEC) + 0.01)
+		check(g.swarm_panels() == g._swarm_max() - gone,
+			"demolishing a %s leaves %d panels: %d" % [tier, g._swarm_max() - gone, g.swarm_panels()])
+		check(sky._swarm_mm.visible_instance_count == drawn0 - gone,
+			"and the sky shows %d: %d" % [drawn0 - gone, sky._swarm_mm.visible_instance_count])
 
 	# The lane geometry is written out twice — Game computes the capacity, init_planets.gd draws
 	# the lanes — and the two constants are kept in sync by hand.  If they drift, Game hands out

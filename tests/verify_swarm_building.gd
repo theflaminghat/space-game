@@ -180,6 +180,46 @@ func _run() -> void:
 		% planets._swarm_mm.visible_instance_count)
 	ss.paused = false
 
+	# ── Every tier of the array is a panel; a retrofit is not a new one ──
+	# The count matched the base NAME, so an upgraded array left the swarm and one built at II or
+	# III was never in it.
+	var t2: String = g.SWARM_BUILDING + " II"
+	var t3: String = g.SWARM_BUILDING + " III"
+	check(not g._find_building_def(t2).is_empty() and not g._find_building_def(t3).is_empty(),
+		"the array has tiers II and III")
+	g.solar_satellites_deployed = 0
+	g.planet_buildings["sun"] = [g.SWARM_BUILDING, t2, t3]
+	g.build_queue["sun"] = []
+	check(g._swarm_built() == 3, "an array is a panel at every tier: %d" % g._swarm_built())
+	check(g.swarm_panels() == 3, "and the swarm counts all three: %d" % g.swarm_panels())
+	var room0: int = g.swarm_room()
+	g.build_queue["sun"] = [{"building": t2, "upgrade_from": g.SWARM_BUILDING,
+		"work": 1.0, "progress": 0.0}]
+	check(g.swarm_room() == room0, "a queued retrofit takes no slot: %d vs %d" % [g.swarm_room(), room0])
+	g.build_queue["sun"] = [{"building": t2, "work": 1.0, "progress": 0.0}]
+	check(g.swarm_room() == room0 - 1, "a queued tier-II array does: %d vs %d" % [g.swarm_room(), room0 - 1])
+	g.build_queue["sun"] = []
+
+	# ── A save written over-full comes back exactly full ──
+	# Launched panels may not outnumber the slots built arrays leave.  The launch path keeps that
+	# on every arrival, but a save could still break it: the sandbox wrote a full swarm of launched
+	# panels with arrays on top, and a player who upgraded arrays under the name-only count could
+	# have launched into slots that only looked free.  Over-full, the surplus is invisible, and
+	# demolishing a built array takes nothing out of the sky.
+	g.planet_buildings["sun"] = _arrays(g, 3)
+	g.solar_satellites_deployed = g._swarm_max()
+	g.save_game("user://saves/swarm_overfull.json")
+	g.load_game("user://saves/swarm_overfull.json")
+	check(g.solar_satellites_deployed == g._swarm_max() - 3,
+		"the launched count gives way to the built arrays: %d of %d" % [
+			g.solar_satellites_deployed, g._swarm_max() - 3])
+	check(g.swarm_panels() == g._swarm_max(), "the swarm is still full: %d" % g.swarm_panels())
+	g._on_demolish_requested("sun", g.SWARM_BUILDING, 1)
+	check(g.swarm_panels() == g._swarm_max() - 1, "and demolishing an array now shows: %d"
+		% g.swarm_panels())
+	g.solar_satellites_deployed = 0
+	g.planet_buildings["sun"] = []
+
 	# ── It is listed with the other generators ──
 	# Under Power in the build panel, as drawn: the array makes energy, so a player looking for
 	# the swarm looks there.  It used to be filed under Support beside the Sunshade.  Checked on
