@@ -22,9 +22,13 @@ var option: OptionButton = null
 var _held: Dictionary = {}
 var _popup: PopupPanel = null
 var _tree: Tree = null
-## What the button label last showed: the selected key, or EMPTY when there is nothing to pick.
-var _shown: String = "\u0000"
 const EMPTY: String = "\u0001"
+## Neither a key nor EMPTY, so the first frame always writes the label.  Not "\u0000": Godot will
+## not hold a NUL in a string, and swapped it for U+FFFD with a warning every time this loaded.
+const UNSHOWN: String = "\u0002"
+## What the button label last showed: the selected key, EMPTY when there is nothing to pick, or
+## UNSHOWN before the first frame.
+var _shown: String = UNSHOWN
 
 
 func _init(opt: OptionButton = null) -> void:
