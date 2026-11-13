@@ -67,6 +67,7 @@ material: do not regenerate them, or the thing they test is gone.
 | `verify_timeline_focus.gd` | A "Signature detected" card carries its star, invites a click, and takes the player to that star on the map — landing it on screen, clear of Sol |
 | `verify_vn.gd` | Von Neumann probes propagate outward through the stars instead of saturating the bubble Earth's telescopes can resolve |
 | `verify_sandbox.gd` | The generated sandbox save: full Dyson swarm, every star-capable structure present and research-open, and it settles instead of sliding |
+| `verify_swarm_cost.gd` | A sandbox slice costs a few new-game slices; the swarm count, the Sun's ratings and other worlds' rebuilds work per kind and do not grow with the Sun's roster; the count is right with the cache clean, dirty, or under a roster changed without telling it |
 | `verify_determinism.gd` | Reloading a save cannot re-roll a catastrophe: the rolls, and the death toll through the real event path, are identical across a differently-played replay |
 | `audit_saveload.gd` | Save → wipe → load round trip across every mutated field |
 | `audit_schema.gd` | The save file and `SaveSchema.FIELDS` agree both ways; every plain field survives a round trip; a nearly empty save still loads |

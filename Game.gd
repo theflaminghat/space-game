@@ -305,10 +305,15 @@ func _swarm_panels_of(building_name: String) -> int:
 ## By the MARKER, not the name.  It counted entries named exactly "Swarm Collector Array", so an
 ## array upgraded to II left the swarm — its panel out of the sky and its power off the grid —
 ## and one standing at II or III had never been in it.
+##
+## Per KIND, off the roster tally, not per entry.  _swarm_power() reaches this about a dozen times
+## a frame (every compute and production read goes through _combine_production), and a full swarm
+## is a few thousand entries on the Sun: walking them was 2.5 ms a call and most of a frame.
 func _swarm_built() -> int:
 	var n: int = 0
-	for b in (planet_buildings.get("sun", []) as Array):
-		n += _swarm_panels_of(str(b))
+	var tally: Dictionary = _planet_tally("sun")
+	for b: String in tally:
+		n += int(tally[b]) * _swarm_panels_of(b)
 	return n
 
 ## Swarm panels queued for construction but not yet standing.  Counted against the cap so the
@@ -3433,8 +3438,13 @@ const _PLANET_BASE_STORAGE: Dictionary = {
 ## Taken from the production cache when that is warm, because it already built exactly this and
 ## the two must agree.  Otherwise counted here — which is what the first call of a run does,
 ## before anything has been summed.
+##
+## Warm means clean AND counted from the list the world holds now (_rec_is_roster).  The swarm's
+## panel count, which every frame reads several times over, comes from here, so a stale answer
+## is a wrong grid and a wrong sky rather than a slow one.
 func _planet_tally(planet_name: String) -> Dictionary:
-	if not _prod_dirty and _cached_planet_counts.has(planet_name):
+	if not _prod_dirty and _cached_planet_counts.has(planet_name) \
+			and _rec_is_roster(planet_name, _prod_planet.get(planet_name, {})):
 		return _cached_planet_counts[planet_name]
 	var tally: Dictionary = {}
 	for b_name in planet_buildings.get(planet_name, []):
@@ -3591,7 +3601,7 @@ func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionar
 			var ed: Dictionary = st["e_fuel_dirty"]
 			ed[b_name] = float(ed.get(b_name, 0.0)) + e
 	return {
-		"tally": tally, "roster_n": roster.size(), "solar_factor": solar_factor,
+		"tally": tally, "roster": roster, "roster_n": roster.size(), "solar_factor": solar_factor,
 		"st": st, "mc": pmc, "farm": pfarm, "hab": phab, "ranch": pranch,
 		"compute": compute, "minerals": minerals, "energy": energy, "radiator": radiator,
 		"beam_send": beam_send, "beam_recv": beam_recv, "upkeep": upkeep,
@@ -3599,13 +3609,27 @@ func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionar
 	}
 
 
+## Whether a stored record was taken from the roster `planet_name` holds NOW: the same list, at
+## the same length.  The backstops for a change nobody announced with _mark_prod_dirty.
+##
+## LENGTH catches an entry appended or removed in place: a tally whose counts no longer add up to
+## the roster it was taken from belongs to one that has since changed.  IDENTITY catches a roster
+## replaced wholesale, which can keep its length — load_game does it to every world and then
+## reads the swarm count three hundred lines before it marks anything dirty, so a save loaded
+## over a running game took the old run's Sun.
+func _rec_is_roster(planet_name: String, rec: Dictionary) -> bool:
+	if rec.is_empty():
+		return false
+	var roster: Variant = planet_buildings.get(planet_name)
+	return roster is Array and is_same(rec.get("roster"), roster) \
+		and int(rec["roster_n"]) == (roster as Array).size()
+
+
 ## Whether a world's stored contribution can still be trusted.
 func _planet_rec_fresh(planet_name: String, rec: Dictionary, solar_factor: float) -> bool:
 	if rec.is_empty() or _prod_dirty_all or _prod_dirty_set.has(planet_name):
 		return false
-	# The length backstop — see _planet_contribution.  A tally whose counts no longer add up to
-	# the roster it was taken from belongs to a roster that has since changed.
-	if int(rec["roster_n"]) != (planet_buildings.get(planet_name, []) as Array).size():
+	if not _rec_is_roster(planet_name, rec):
 		return false
 	# And the solar collectors are rated against a factor that moves on its own.
 	var sf: float = float(rec["solar_factor"])
@@ -3700,10 +3724,8 @@ func _recompute_production_cache() -> void:
 				off_live += pe
 	_live_fossil_energy = live
 	_off_world_energy = off_energy + off_live
-	# Dyson swarm: collectors beam power to the grid, less per lane the farther out it sits.
 	_bld_compute  = compute
 	_bld_minerals = minerals
-	_bld_energy   = energy + _swarm_power()
 	_bld_radiator = radiator
 	_bld_beam_send = beam_send
 	_bld_beam_recv = beam_recv
@@ -3711,6 +3733,11 @@ func _recompute_production_cache() -> void:
 	# this sweep already built rather than by walking every roster a second time.
 	_cached_storage_caps = _compute_storage_caps(counts)
 	_prod_dirty = false
+	# Dyson swarm: collectors beam power to the grid, less per lane the farther out it sits.
+	# After the flag is cleared, because it counts panels off the Sun's tally, which
+	# _planet_tally only trusts once the cache is clean — before, every rebuild counted a roster
+	# of thousands by hand, whichever world it was rebuilding for.
+	_bld_energy   = energy + _swarm_power()
 	# The shade fraction is roster-derived too, but it must come AFTER the flag is cleared: it
 	# counts what is switched on, and active_count() rebuilds this very cache while it is dirty.
 	_sync_star_shades()
@@ -4764,11 +4791,10 @@ func star_husbandry_demand_w() -> float:
 
 
 ## Sum one rated figure across everything switched on at the Sun, each tier at its own rating.
-## Tallying per kind first keeps this cheap when the roster runs to thousands of structures.
+## Per kind, off the cached tally: the lifters and the mixers each ask every frame, and counting a
+## roster of thousands afresh each time was most of a millisecond apiece.
 func _sun_structure_total(key: String) -> float:
-	var tally: Dictionary = {}
-	for bname in planet_buildings.get("sun", []):
-		tally[bname] = int(tally.get(bname, 0)) + 1
+	var tally: Dictionary = _planet_tally("sun")
 	var total: float = 0.0
 	for bname: String in tally:
 		var rating: float = float(_find_building_def(bname).get(key, 0.0))

@@ -421,13 +421,31 @@ is the world count, which is what "re-sum only the one that moved" means.
 optimisation; the rosters are mutated in sixteen places and a scheme where forgetting one gave a
 wrong number rather than a slower rebuild would not be worth having. Two backstops enforce that:
 
-- **Roster length.** A tally's counts must add up to the length of the list they came from — an
-  O(kinds) check. A mutation that never announced itself is caught on the next rebuild.
+- **Roster length and identity.** A record keeps the list it was counted from and that list's
+  length, and is trusted only while the world still holds that same list at that length — O(1)
+  (`_rec_is_roster()`). An append or removal that never announced itself changes the length; a
+  roster replaced wholesale changes the list, length or no. `load_game` does the second to every
+  world and reads the swarm count long before it marks anything dirty.
 - **The solar factor** (luminosity × insolation) is stored with each record and compared against
   the live one to `PROD_SOLAR_TOL`. Collectors are rated against the light that reaches them, and
   that moves for reasons that are not any world's roster: the Sun brightens on its own, and star
   shades dim every world at once while being a roster change on `"sun"` alone. A century of
   brightening is inside the tolerance and costs nothing; 200 Myr, or a shade, re-rates everything.
+
+**A sum over a roster goes through `_planet_tally()`, never through the roster.** It hands back
+the cache's per-kind counts when the cache is clean and counts the list itself when it is dirty,
+so it is right either way and cheap whenever it can be. Clean means the backstops below pass too:
+a stale tally is a wrong grid and a wrong sky, not a slow frame. The 1945 sandbox ran at 27 fps from the
+moment it was unpaused because three things on the Sun did not use it. The swarm is built
+arrays there, and the Sun holds 4 072 structures, so `_swarm_built()` walking them entry by
+entry cost 2.5 ms. `_swarm_power()` needs that count and `_combine_production()` needs the
+power, and every read of compute or production goes through `_combine_production()`: about a
+dozen walks a frame, 30 ms of a 37 ms frame. The star lifters and core mixers
+(`_sun_structure_total()`) built their own tallies a frame each, another 1.8 ms. The rebuild
+also counted the Sun once more on every rebuild, whichever world had changed, because it read
+the swarm's power before clearing `_prod_dirty`, and that flag is what `_planet_tally()` checks.
+Its game slice is now 2.8 ms against a new game's 0.8, and the frame went from 37 ms to 7.
+`verify_swarm_cost` grows the Sun tenfold and checks that none of the three costs move.
 
 `_cached_planet_stats` and `_cached_planet_counts` publish the cache's **own** dictionaries, not
 copies. Every reader is read-only today and `verify_prod_cache` says so, so a future writer finds
@@ -2788,6 +2806,12 @@ These are not style preferences; each was a bug.
 	save puts one back for every flight still in transit. An `"orbit"` arrival used to park and
 	stay, so every mission ever flown left a dot circling its target, and the dictionary that
 	tracked them was written and never read.
+
+17. **Nothing per frame walks a roster entry by entry.** A developed world holds thousands of
+	structures and tens of kinds, so anything a frame asks about a roster asks `_planet_tally()`
+	and works per kind. A count taken by walking the list looks harmless where it is written
+	and is not: `_swarm_built()` was one loop, reached a dozen times a frame through
+	`_combine_production()`, and it was most of the sandbox's frame.
 
 ---
 
