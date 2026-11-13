@@ -955,10 +955,18 @@ four `strip_*` uniforms are zero on an untouched world, which is every world in 
 does this. `Planet.set_disassembly()` works in both directions, or a reloaded save would show the
 last world the node happened to be told about.
 
+**Its moons and rings are not being taken apart.** The body is shrunk by scaling its node, and
+they are its children, so a moon used to get smaller and draw in as its planet was eaten, and
+Saturn's rings shrank with Saturn. `_hold_satellites()` gives them the inverse of the shrink: the
+rings in their scale, and each moon in its scale and in its orbit, which `_update_moons()` divides
+by `_shrink` every frame. Moons and rings built after a save has already shrunk the body come up
+the same way, and moon orbits are laid out from `_intact_scale`. The orbital structures are left to
+follow the body down, since they hold station in lanes over its surface.
+
 **Focused on the body, the shrink does not show.** The camera pivot is the body's child and
 inherits its scale, so the camera moves in as the planet shrinks and the planet fills the screen
-as before. Its moons, rings and orbital structures are children too, and shrink and draw in
-with it. The size change reads against everything else in the system, and from another body.
+as before, with its moons and rings now standing further out and larger around it. The size change
+reads against everything else in the system, and from another body.
 
 **The planet panel rebuilds its composition list on the fraction, not just on the selection.**
 What a body is made of used to be static per body, which is exactly the assumption disassembly

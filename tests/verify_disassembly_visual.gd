@@ -232,6 +232,58 @@ func _run() -> void:
 			"and down to its core it is metal, not Uranus: mix %s" % str(umat.get_shader_parameter("strip_mix")))
 		un.set_disassembly(1.0, DD.look(0.0, 0.0, true))
 
+	# ── Its moons and rings are not being taken apart ──
+	# They are the body's children, so its scale used to reach them: a moon got smaller and drew in
+	# as its planet was eaten, and Saturn's rings shrank with Saturn.
+	var sat = planets.get_node_or_null("saturn")
+	check(sat != null and sat._moons.size() > 0 and sat._rings != null, "Saturn has its moons and rings")
+	if sat != null and sat._moons.size() > 0 and sat._rings != null:
+		var moon_at: Array = []        # [offset from Saturn, size] per moon
+		for m in sat._moons:
+			var mn: Node3D = m["node"]
+			moon_at.append([mn.global_position - sat.global_position, mn.global_basis.get_scale().x])
+		var ring_size: float = (sat._rings as Node3D).global_basis.get_scale().x
+		var body_size: float = sat.global_basis.get_scale().x
+		sat.set_disassembly(0.125, DD.look(0.5, 0.0, true))
+		check(absf(sat.global_basis.get_scale().x - body_size * 0.5) < 1.0e-5,
+			"Saturn itself is half its size: %s of %s" % [str(sat.global_basis.get_scale().x), str(body_size)])
+		check(absf((sat._rings as Node3D).global_basis.get_scale().x - ring_size) < 1.0e-5,
+			"its rings are the size they were: %s vs %s" % [
+				str((sat._rings as Node3D).global_basis.get_scale().x), str(ring_size)])
+		var moved: Array = []
+		for i in range(sat._moons.size()):
+			var mn: Node3D = sat._moons[i]["node"]
+			var off: Vector3 = mn.global_position - sat.global_position
+			if not off.is_equal_approx(moon_at[i][0]) or absf(mn.global_basis.get_scale().x - float(moon_at[i][1])) > 1.0e-5:
+				moved.append("%s at %s, size %s" % [mn.name, str(off), str(mn.global_basis.get_scale().x)])
+		check(moved.is_empty(), "and its moons the size and in the place they were: %s" % str(moved))
+		# A frame of orbit later they are still on the orbits they had.
+		sat._update_moons(0.0)
+		var m0: Node3D = sat._moons[0]["node"]
+		check((m0.global_position - sat.global_position).is_equal_approx(moon_at[0][0]),
+			"and stay on them as they go round: %s vs %s" % [
+				str(m0.global_position - sat.global_position), str(moon_at[0][0])])
+		# Built while it is small, as a save loading it part eaten builds them: the same moons.
+		var old_moons: Array = sat._moons.duplicate()
+		sat._moons.clear()
+		for m in old_moons:
+			(m["node"] as Node).free()
+		sat._create_moons()
+		var off_orbit: Array = []
+		for i in range(sat._moons.size()):
+			var mn: Node3D = sat._moons[i]["node"]
+			var r_now: float = (mn.global_position - sat.global_position).length()
+			var r_was: float = (moon_at[i][0] as Vector3).length()
+			if absf(r_now - r_was) > 1.0e-3 * r_was or absf(mn.global_basis.get_scale().x - float(moon_at[i][1])) > 1.0e-5:
+				off_orbit.append("%s: orbit %s vs %s, size %s vs %s" % [mn.name, str(r_now), str(r_was),
+					str(mn.global_basis.get_scale().x), str(moon_at[i][1])])
+		check(sat._moons.size() == moon_at.size() and off_orbit.is_empty(),
+			"moons built while it is small come up as they would on the whole planet: %s" % str(off_orbit))
+		sat.set_disassembly(1.0, DD.look(0.0, 0.0, true))
+		check(absf((sat._rings as Node3D).global_basis.get_scale().x - ring_size) < 1.0e-5
+			and absf((sat._moons[0]["node"] as Node3D).global_basis.get_scale().x - float(moon_at[0][1])) < 1.0e-5,
+			"and whole again, nothing has changed size")
+
 	# ── Nothing of the map is carried below the surface ──
 	# What the exposed material looks like is the shader's business, and the dummy renderer the
 	# suite runs on draws nothing, so this reads the source: the strip branch may use the map

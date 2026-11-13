@@ -29,6 +29,10 @@ var _intact_scale: Vector3 = Vector3.ONE
 ## Last pushed state, so a body that has not moved is not re-set every frame.
 var _strip_remaining: float = 1.0
 var _strip_look: Dictionary = {}
+## The body's size against its intact size while it is being taken apart, 1 otherwise.  The node
+## itself is scaled, which carries its moons and rings with it as children, so they are given the
+## inverse of this to stay the size and the distance they were (_hold_satellites).
+var _shrink: float = 1.0
 
 ## Cosmetic moons orbiting this body in its local (scaled) frame, so they track and
 ## size with the planet automatically.  Each entry: { node, radius, speed, angle, incl }.
@@ -601,12 +605,32 @@ func set_disassembly(remaining: float, look: Dictionary) -> void:
 	scale = _intact_scale * f
 	if mesh != null:
 		_body_visual_radius = mesh.get_aabb().size.x * 0.5 * scale.x
+	if f != _shrink:
+		_shrink = f
+		_hold_satellites()
 	var mat := material_override as ShaderMaterial
 	if mat != null:
 		mat.set_shader_parameter("strip_mix", float(look["mix"]))
 		mat.set_shader_parameter("strip_color", look["color"] as Color)
 		mat.set_shader_parameter("strip_glow", float(look["glow"]))
 		mat.set_shader_parameter("strip_metallic", float(look["metallic"]))
+
+
+## Keep the moons and the rings as they were while the body under them shrinks.
+##
+## They are the node's children, so its scale reaches them: a moon used to get smaller and orbit
+## closer as its planet was eaten, and Saturn's rings drew in with Saturn — none of which was being
+## taken apart.  Each gets the inverse of the shrink: the rings in their scale (they sit on the
+## centre), a moon in its scale and its orbit, which _update_moons divides by _shrink every frame.
+## The orbital structures are left to follow the body: they hold station in lanes over its surface.
+func _hold_satellites() -> void:
+	var inv: float = 1.0 / maxf(_shrink, 0.0001)
+	if _rings != null:
+		_rings.scale = Vector3.ONE * inv
+	for m in _moons:
+		var sz: float = float(m["size"]) * inv
+		(m["node"] as Node3D).scale = Vector3(sz, sz, sz)
+	_update_moons(0.0)
 
 
 ## Close enough not to push again: this is asked on every tick of a disassembly.
@@ -863,7 +887,9 @@ func _create_moons() -> void:
 	# Outside this body's own band, which is wider around a small body than a large one because
 	# the structures are capped in world size: the Sun's lanes end at 1.35 scale units and
 	# Earth's at 2.83.
-	var moon_inner: float = infra_band_outer(scale.x) + MOON_CLEARANCE
+	# Off the INTACT size: a save that has the body part eaten shrinks it before its first frame,
+	# which is when these are built, and the moons would come up on orbits it never had.
+	var moon_inner: float = infra_band_outer(_intact_scale.x) + MOON_CLEARANCE
 	for i in range(count):
 		# OUTSIDE the infrastructure band, which the innermost moon used to fly through: it
 		# orbited at 1.3 +- 0.1 scale units with a radius of its own, against lanes running
@@ -906,11 +932,14 @@ func _create_moons() -> void:
 		_moons.append({
 			"node":   moon,
 			"radius": radius,
+			"size":   msize,
 			"speed":  rng.randf_range(0.5, 1.3) * (1.0 if i % 2 == 0 else -1.0),
 			"angle":  rng.randf_range(0.0, TAU),
 			"incl":   rng.randf_range(-0.35, 0.35),
 		})
-	_update_moons(0.0)
+	# Through _hold_satellites rather than straight to _update_moons: a save can put the body part
+	# eaten before its moons exist, and they must come into being at their own size.
+	_hold_satellites()
 
 ## Advance each moon along its tilted circular orbit in the planet's local frame.
 ## `delta` here is GAME time, not wall-clock: the caller has already scaled it by the speed
@@ -919,7 +948,9 @@ func _update_moons(delta: float) -> void:
 	for m in _moons:
 		var a: float = float(m["angle"]) + float(m["speed"]) * delta
 		m["angle"] = a
-		var r: float = float(m["radius"])
+		# In the planet's local frame, which shrinks with it while it is taken apart: divided back
+		# out, so the moon keeps the orbit it had (see _hold_satellites).
+		var r: float = float(m["radius"]) / _shrink
 		var incl: float = float(m["incl"])
 		var z: float = r * sin(a)
 		(m["node"] as Node3D).position = Vector3(
@@ -1620,4 +1651,6 @@ func _create_rings() -> void:
 	_rings.mesh        = am
 	_rings.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_rings.rotation    = Vector3(deg_to_rad(float(spec["tilt_deg"])), 0.0, 0.0)
+	# Its own size whatever the body has come to, if a save made it smaller first.
+	_rings.scale       = Vector3.ONE / maxf(_shrink, 0.0001)
 	add_child(_rings)
