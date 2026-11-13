@@ -41,8 +41,9 @@ func _run() -> void:
 	check(g.solar_satellites_deployed + g._swarm_built() == g._swarm_max(),
 		"launched and built panels together fill it exactly: %d + %d of %d" % [
 			g.solar_satellites_deployed, g._swarm_built(), g._swarm_max()])
-	check(g._swarm_built() > 0, "some of it is built arrays, which can be demolished: %d"
-		% g._swarm_built())
+	check(g.solar_satellites_deployed == 0 and g._swarm_built() == g._swarm_max(),
+		"all of it is built arrays, which can be demolished: %d built, %d launched" % [
+			g._swarm_built(), g.solar_satellites_deployed])
 	# And the FILE says so, not just the game after loading it: load_game trims an over-full swarm
 	# on its own, which would hide a generator that went back to writing one.
 	var raw: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(SB.SAVE_PATH))
@@ -104,8 +105,9 @@ func _run() -> void:
 		if req != "" and not rt.is_unlocked(req):
 			locked.append(nm)
 		# planet.gd will not draw more of a type than INFRA_MAX_PER_LANE, so asking for more
-		# would cost materials for structures the player can never see.
-		if n > load("res://planet.gd").INFRA_MAX_PER_LANE:
+		# would cost materials for structures the player can never see.  Swarm arrays are not
+		# drawn in a planet lane at all: the swarm renderer draws them, up to the swarm's own cap.
+		if n > load("res://planet.gd").INFRA_MAX_PER_LANE and g._swarm_panels_of(nm) == 0:
 			undrawn.append("%s x%d" % [nm, n])
 	check(missing.is_empty(), "every star-capable structure is on the Sun: missing %s" % str(missing))
 	check(locked.is_empty(), "and its research is open: still locked %s" % str(locked))
@@ -138,6 +140,22 @@ func _run() -> void:
 	print("sun: %d kinds, %d structures" % [
 		(g._cached_planet_counts.get("sun", {}) as Dictionary).size(),
 		(g.planet_buildings.get("sun", []) as Array).size()])
+
+	# ── Last, because it takes the swarm the checks above lean on ──
+	# Tearing every array down takes the whole swarm with it — every lane, not the outer few.
+	# Demolished as the build panel does it, a hundred at a time per tier until none are left.
+	for tier: String in ["Swarm Collector Array", "Swarm Collector Array II", "Swarm Collector Array III"]:
+		var guard: int = 0
+		while g._count_building("sun", tier) > 0 and guard < 100:
+			g._on_demolish_requested("sun", tier, 100)
+			guard += 1
+		check(g._count_building("sun", tier) == 0, "every %s is gone: %d left"
+			% [tier, g._count_building("sun", tier)])
+	var sky2: Node = g.get_node("WorldRoot/Planets")
+	sky2._process(float(sky2.SWARM_POLL_SEC) + 0.01)
+	check(g.swarm_panels() == 0, "and with them the swarm: %d panels" % g.swarm_panels())
+	check(sky2._swarm_mm.visible_instance_count == 0,
+		"and the sky is empty: %d drawn" % sky2._swarm_mm.visible_instance_count)
 
 	print("FAILS: %d" % fails)
 	quit()

@@ -107,9 +107,10 @@ static func build() -> Dictionary:
 		"resources":          _global_resources(),
 		"active_launches":    [],
 		"next_launch_id":     1,
-		# The swarm is full, but only what the built arrays leave is launched: every array the
-		# loadout stands up is a panel in the sky, so demolishing one takes one down.
-		"solar_satellites_deployed": SWARM_COLLECTORS - _built_swarm_panels(),
+		# Nothing launched: the loadout builds the whole swarm as arrays (see _swarm_loadout), so
+		# what is left here is zero.  Still written as the remainder so the file stays exactly
+		# full if the loadout ever stops covering the cap on its own.
+		"solar_satellites_deployed": maxi(0, SWARM_COLLECTORS - _built_swarm_panels()),
 		"colonized_planets":  _colonized_planets(),
 		"colonized_year":     _per_world_int(1945),
 		"split_thresholds":   _per_world_int(750_000),
@@ -194,7 +195,38 @@ static func _sun_loadout() -> Dictionary:
 			if int(b.get("level", 1)) == 1:
 				out[nm] = cap
 			continue
+		if int(b.get("swarm_panels", 0)) > 0:
+			continue                 # the swarm is sized separately, below
 		out[nm] = SUN_STELLAR_ENGINEERING if _is_stellar_lever(nm) else SUN_PER_LANE
+	out.merge(_swarm_loadout())
+	return out
+
+
+## The Dyson swarm, all of it BUILT: every tier of the collector array present, and the base tier
+## filling whatever the upper ones leave of the cap.
+##
+## It used to be launched.  The sandbox set the deployed-satellite count to the whole cap and stood
+## a lane of each array tier on top; then, once that was trimmed to fit, it was still mostly
+## launched panels with a few hundred arrays in the outer lanes.  A launched panel has no row in
+## the build panel and cannot be demolished, so tearing down every array in the sandbox took out
+## only those outer lanes and left the rest of the swarm standing with nothing to remove it by.
+static func _swarm_loadout() -> Dictionary:
+	var out: Dictionary = {}
+	var base_name: String = ""
+	var base_per: int = 1
+	var taken: int = 0
+	for b: Dictionary in BuildingData.all():
+		var per: int = int(b.get("swarm_panels", 0))
+		if per <= 0 or not (b.get("allowed_types", []) as Array).has("star"):
+			continue
+		if int(b.get("level", 1)) == 1:
+			base_name = str(b["name"])
+			base_per = per
+		else:
+			out[str(b["name"])] = SUN_PER_LANE
+			taken += SUN_PER_LANE * per
+	if base_name != "":
+		out[base_name] = maxi(0, (SWARM_COLLECTORS - taken) / maxi(1, base_per))
 	return out
 
 
