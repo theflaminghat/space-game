@@ -232,16 +232,25 @@ func _run() -> void:
 			"and down to its core it is metal, not Uranus: mix %s" % str(umat.get_shader_parameter("strip_mix")))
 		un.set_disassembly(1.0, DD.look(0.0, 0.0, true))
 
-	# ── Its moons and rings are not being taken apart ──
+	# ── Its moons, rings and orbital structures are not being taken apart ──
 	# They are the body's children, so its scale used to reach them: a moon got smaller and drew in
-	# as its planet was eaten, and Saturn's rings shrank with Saturn.
+	# as its planet was eaten, Saturn's rings shrank with Saturn, and its infrastructure lanes closed
+	# in on the surface with their hardware shrinking in them.
 	var sat = planets.get_node_or_null("saturn")
-	check(sat != null and sat._moons.size() > 0 and sat._rings != null, "Saturn has its moons and rings")
-	if sat != null and sat._moons.size() > 0 and sat._rings != null:
+	check(sat != null and sat._moons.size() > 0 and sat._rings != null and sat._infra.size() > 0,
+		"Saturn has its moons, rings and lanes")
+	if sat != null and sat._moons.size() > 0 and sat._rings != null and sat._infra.size() > 0:
 		var moon_at: Array = []        # [offset from Saturn, size] per moon
 		for m in sat._moons:
 			var mn: Node3D = m["node"]
 			moon_at.append([mn.global_position - sat.global_position, mn.global_basis.get_scale().x])
+		# Per lane: its node's world scale (what a structure's size and its radius are multiplied
+		# by — the dummy renderer keeps no instance transforms, so this is what can be read), the
+		# lane as laid out, and where a craft bound for its first slot is sent.
+		var lane_at: Array = []
+		for lane: Dictionary in sat._infra:
+			lane_at.append([(lane["mmi"] as Node3D).global_basis.get_scale().x, float(lane["radius"]),
+				float(lane["mscale"]), sat.infra_slot_world_pos(str(lane["type"]), 0, 1) - sat.global_position])
 		var ring_size: float = (sat._rings as Node3D).global_basis.get_scale().x
 		var body_size: float = sat.global_basis.get_scale().x
 		sat.set_disassembly(0.125, DD.look(0.5, 0.0, true))
@@ -257,6 +266,16 @@ func _run() -> void:
 			if not off.is_equal_approx(moon_at[i][0]) or absf(mn.global_basis.get_scale().x - float(moon_at[i][1])) > 1.0e-5:
 				moved.append("%s at %s, size %s" % [mn.name, str(off), str(mn.global_basis.get_scale().x)])
 		check(moved.is_empty(), "and its moons the size and in the place they were: %s" % str(moved))
+		var lanes_moved: Array = []
+		for i in range(sat._infra.size()):
+			var lane: Dictionary = sat._infra[i]
+			var sc: float = (lane["mmi"] as Node3D).global_basis.get_scale().x
+			var slot: Vector3 = sat.infra_slot_world_pos(str(lane["type"]), 0, 1) - sat.global_position
+			if absf(sc - float(lane_at[i][0])) > 1.0e-5 or not slot.is_equal_approx(lane_at[i][3]):
+				lanes_moved.append("%s: scale %s vs %s, slot %s vs %s" % [lane["type"], str(sc),
+					str(lane_at[i][0]), str(slot), str(lane_at[i][3])])
+		check(lanes_moved.is_empty(), "its orbital lanes the size and the radius they were, and a craft "
+			+ "is sent to where a structure is drawn: %s" % str(lanes_moved))
 		# A frame of orbit later they are still on the orbits they had.
 		sat._update_moons(0.0)
 		var m0: Node3D = sat._moons[0]["node"]
@@ -279,9 +298,26 @@ func _run() -> void:
 					str(mn.global_basis.get_scale().x), str(moon_at[i][1])])
 		check(sat._moons.size() == moon_at.size() and off_orbit.is_empty(),
 			"moons built while it is small come up as they would on the whole planet: %s" % str(off_orbit))
+		for lane: Dictionary in sat._infra:
+			(lane["mmi"] as Node).free()
+		sat._infra.clear()
+		sat._create_infra_lanes()
+		var off_lane: Array = []
+		for i in range(sat._infra.size()):
+			var lane: Dictionary = sat._infra[i]
+			var sc: float = (lane["mmi"] as Node3D).global_basis.get_scale().x
+			if absf(sc - float(lane_at[i][0])) > 1.0e-5 \
+					or not is_equal_approx(float(lane["radius"]), float(lane_at[i][1])) \
+					or not is_equal_approx(float(lane["mscale"]), float(lane_at[i][2])):
+				off_lane.append("%s: scale %s vs %s, radius %s vs %s, model %s vs %s" % [lane["type"],
+					str(sc), str(lane_at[i][0]), str(lane["radius"]), str(lane_at[i][1]),
+					str(lane["mscale"]), str(lane_at[i][2])])
+		check(sat._infra.size() == lane_at.size() and off_lane.is_empty(),
+			"and so do lanes: laid out for the whole planet and held there: %s" % str(off_lane))
 		sat.set_disassembly(1.0, DD.look(0.0, 0.0, true))
 		check(absf((sat._rings as Node3D).global_basis.get_scale().x - ring_size) < 1.0e-5
-			and absf((sat._moons[0]["node"] as Node3D).global_basis.get_scale().x - float(moon_at[0][1])) < 1.0e-5,
+			and absf((sat._moons[0]["node"] as Node3D).global_basis.get_scale().x - float(moon_at[0][1])) < 1.0e-5
+			and absf((sat._infra[0]["mmi"] as Node3D).global_basis.get_scale().x - float(lane_at[0][0])) < 1.0e-5,
 			"and whole again, nothing has changed size")
 
 	# ── Nothing of the map is carried below the surface ──

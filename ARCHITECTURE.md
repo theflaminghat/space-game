@@ -955,13 +955,19 @@ four `strip_*` uniforms are zero on an untouched world, which is every world in 
 does this. `Planet.set_disassembly()` works in both directions, or a reloaded save would show the
 last world the node happened to be told about.
 
-**Its moons and rings are not being taken apart.** The body is shrunk by scaling its node, and
-they are its children, so a moon used to get smaller and draw in as its planet was eaten, and
-Saturn's rings shrank with Saturn. `_hold_satellites()` gives them the inverse of the shrink: the
-rings in their scale, and each moon in its scale and in its orbit, which `_update_moons()` divides
-by `_shrink` every frame. Moons and rings built after a save has already shrunk the body come up
-the same way, and moon orbits are laid out from `_intact_scale`. The orbital structures are left to
-follow the body down, since they hold station in lanes over its surface.
+**Its moons, rings and orbital structures are not being taken apart.** The body is shrunk by
+scaling its node, and they are its children, so a moon used to get smaller and draw in as its
+planet was eaten, Saturn's rings shrank with Saturn, and every infrastructure lane closed in on the
+surface with its hardware shrinking in it. `_hold_satellites()` gives them the inverse of the
+shrink: the rings and each lane's `MultiMeshInstance3D` in their scale, which holds their radius
+too since they sit on the centre, and each moon in its scale and in its orbit, which
+`_update_moons()` divides by `_shrink` every frame. Anything built after a save has already shrunk
+the body comes up the same way: moon orbits are laid out from `_intact_scale`, and the lanes from
+the body's scale over `_shrink`, which is the whole body's (and the star's own, which moves with its
+age and is never shrunk). `infra_slot_world_pos()` goes through the lane's node, so a craft bound
+for a slot flies to where the structure is drawn. The band stands further and further off the
+remnant as it goes, which is what holding station over a world being taken out from under it looks
+like.
 
 **Focused on the body, the shrink does not show.** The camera pivot is the body's child and
 inherits its scale, so the camera moves in as the planet shrinks and the planet fills the screen

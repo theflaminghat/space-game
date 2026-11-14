@@ -30,8 +30,8 @@ var _intact_scale: Vector3 = Vector3.ONE
 var _strip_remaining: float = 1.0
 var _strip_look: Dictionary = {}
 ## The body's size against its intact size while it is being taken apart, 1 otherwise.  The node
-## itself is scaled, which carries its moons and rings with it as children, so they are given the
-## inverse of this to stay the size and the distance they were (_hold_satellites).
+## itself is scaled, which carries its moons, rings and orbital lanes with it as children, so they
+## are given the inverse of this to stay the size and the distance they were (_hold_satellites).
 var _shrink: float = 1.0
 
 ## Cosmetic moons orbiting this body in its local (scaled) frame, so they track and
@@ -616,17 +616,21 @@ func set_disassembly(remaining: float, look: Dictionary) -> void:
 		mat.set_shader_parameter("strip_metallic", float(look["metallic"]))
 
 
-## Keep the moons and the rings as they were while the body under them shrinks.
+## Keep the moons, the rings and the orbital structures as they were while the body under them
+## shrinks.
 ##
 ## They are the node's children, so its scale reaches them: a moon used to get smaller and orbit
-## closer as its planet was eaten, and Saturn's rings drew in with Saturn — none of which was being
-## taken apart.  Each gets the inverse of the shrink: the rings in their scale (they sit on the
-## centre), a moon in its scale and its orbit, which _update_moons divides by _shrink every frame.
-## The orbital structures are left to follow the body: they hold station in lanes over its surface.
+## closer as its planet was eaten, Saturn's rings drew in with Saturn, and every lane of orbital
+## hardware closed in on the surface and shrank — none of which was being taken apart.  Each gets
+## the inverse of the shrink: the rings and the lanes in their scale (both sit on the centre, so
+## that alone holds their radius too), a moon in its scale and its orbit, which _update_moons
+## divides by _shrink every frame.
 func _hold_satellites() -> void:
 	var inv: float = 1.0 / maxf(_shrink, 0.0001)
 	if _rings != null:
 		_rings.scale = Vector3.ONE * inv
+	for lane: Dictionary in _infra:
+		(lane["mmi"] as Node3D).scale = Vector3.ONE * inv
 	for m in _moons:
 		var sz: float = float(m["size"]) * inv
 		(m["node"] as Node3D).scale = Vector3(sz, sz, sz)
@@ -1186,6 +1190,11 @@ func _create_infra_lanes() -> void:
 	# the habitats crewing them — is ordinary orbital infrastructure and is drawn here.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(str(name) + "_infra")
+	# The lanes are laid out for the body as it is whole, and held there (_hold_satellites), so a
+	# save that loads a world part eaten builds the band it had rather than one fitted to the
+	# remnant.  The star's own scale moves with its age and is never shrunk, so this is its scale.
+	var inv: float = 1.0 / maxf(_shrink, 0.0001)
+	var body_scale: float = scale.x * inv
 	for spec: Dictionary in INFRA_LANES:
 		# Ground infrastructure gets no lane on a body it can actually stand on.
 		if bool(spec.get("ground", false)) and type == Type.ROCKY:
@@ -1200,18 +1209,19 @@ func _create_infra_lanes() -> void:
 		mmi.multimesh = mm
 		mmi.material_override = _infra_material(str(spec.get("texture", "")))
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var ext: float = infra_lane_radius(int(spec["order"]), scale.x) + 0.5
+		var ext: float = infra_lane_radius(int(spec["order"]), body_scale) + 0.5
 		mmi.custom_aabb = AABB(Vector3(-ext, -ext, -ext), Vector3(ext * 2.0, ext * 2.0, ext * 2.0))
+		mmi.scale = Vector3.ONE * inv
 		add_child(mmi)
 		_infra.append({
 			"mm":     mm,
 			"mmi":    mmi,
 			"type":   str(spec["type"]),
-			"radius": infra_lane_radius(int(spec["order"]), scale.x),
+			"radius": infra_lane_radius(int(spec["order"]), body_scale),
 			# Normalised model scale, in the body's own units: the lanes are children of the
 			# scaled body, so an instance basis of this size draws a structure INFRA_SIZE_FRAC
 			# of the body across, on every body, with nothing to cancel.
-			"mscale": infra_model_scale(str(spec["mesh"]), scale.x),
+			"mscale": infra_model_scale(str(spec["mesh"]), body_scale),
 			"phase":  rng.randf() * TAU,
 			"motion": rng.randf_range(0.15, 0.5) * (1.0 if rng.randf() < 0.5 else -1.0),
 			# Orbital planes spread over the WHOLE sphere, by the golden angle so consecutive
@@ -1370,7 +1380,10 @@ func infra_slot_world_pos(type_name: String, index: int, total: int) -> Vector3:
 		var incl: float = float(lane["incl"])
 		var th: float = float(lane["phase"]) + TAU * float(clampi(index, 0, n - 1)) / float(n)
 		var z: float = r * sin(th)
-		return to_global(Vector3(r * cos(th), z * sin(incl), z * cos(incl)))
+		# Through the lane's own node, which is held at the body's whole size while it is being
+		# taken apart: the slot is where the structure is drawn, not where the remnant's scale
+		# would put it.
+		return (lane["mmi"] as Node3D).to_global(Vector3(r * cos(th), z * sin(incl), z * cos(incl)))
 	return global_position
 
 
