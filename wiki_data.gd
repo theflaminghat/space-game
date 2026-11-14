@@ -280,8 +280,8 @@ static func _building_stats(b: Dictionary, game: Node) -> Array:
 	if e > 0.0:
 		var line: String = "Generates %s" % Units.format_si(e, "W")
 		if bool(b.get("solar", false)):
-			line += " × the Sun's luminosity (now %.2f L☉)" % SolarSystem.sun_luminosity_lsun(
-				int(game.year) if game else 1945)
+			line += " × the Sun's luminosity (now %.2f L☉), at 1 AU; elsewhere ÷ the distance from the Sun in AU, squared" \
+				% SolarSystem.sun_luminosity_lsun(int(game.year) if game else 1945)
 		out.append(line)
 		out.append("Generation anywhere but Earth reaches the grid only through the %s." % _link(
 			"Mechanics", "transmission", "power-beam network"))

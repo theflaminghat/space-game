@@ -3512,6 +3512,20 @@ func _compute_storage_caps(counts: Dictionary = {}) -> Dictionary:
 ## list they came from, which is an O(kinds) check rather than an O(structures) one, so a
 ## mutation that never said it had happened is caught on the next rebuild instead of silently
 ## reusing a record for a roster that has moved on.
+## Sunlight at a world as a fraction of what reaches Earth: the inverse square of its distance
+## from the Sun.  A Solar Farm is rated at 1 AU, so this is what it collects anywhere else —
+## Mercury 6.7×, Mars 0.43×, the belt 0.13×, Jupiter 0.037×, Neptune a nine-hundredth.
+##
+## A moon is lit as its planet is.  A body with no orbit on record (the Sun itself, a name a test
+## made up) is lit as Earth, which is what every collector was before distance counted.
+func _insolation_at(body: String) -> float:
+	var host: String = _moon_parent(body) if _is_moon(body) else body
+	var a: float = float((PlanetData.PLANETS.get(host, {}) as Dictionary).get("semi_major_axis_au", 0.0))
+	if a <= 0.0:
+		return 1.0
+	var a_earth: float = float(PlanetData.PLANETS["earth"]["semi_major_axis_au"])
+	return (a_earth / a) * (a_earth / a)
+
 func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionary:
 	var pmc: float = 0.0
 	var pfarm: float = 0.0
@@ -3536,6 +3550,10 @@ func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionar
 	for bn in roster:
 		tally[bn] = int(tally.get(bn, 0)) + 1
 	var act_map: Dictionary = active_buildings.get(planet_name, {})
+	# The light at THIS world, which solar_factor (the Sun's output and the shades) leaves out.
+	# It is fixed per world — the orbits do not move — so the cache's freshness test on
+	# solar_factor alone still catches everything that changes it.
+	var insol: float = _insolation_at(planet_name)
 	# Everything below is roster-derived, so it is summed HERE (once per roster change)
 	# rather than by re-walking thousands of buildings on every single frame.
 	var st: Dictionary = {
@@ -3584,7 +3602,7 @@ func _planet_contribution(planet_name: String, solar_factor: float) -> Dictionar
 		# stand between the star and the planets, so a shaded world's collectors see exactly
 		# what the sails let past — both are in solar_factor.
 		if bool(bdef.get("solar", false)):
-			e *= solar_factor
+			e *= solar_factor * insol
 		if burn.is_empty():
 			energy += e
 			st["e_total"] = float(st["e_total"]) + e

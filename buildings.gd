@@ -21,11 +21,20 @@ class_name BuildingData
 ## each structure consumes the specific crafted goods it is really made of
 ## (produced by the manufacturing recipes in recipes.gd) plus an energy cost.
 ##
-## Power-plant balance: every plant's total material cost is proportional to its
-## energy output at a constant ~2.0e-6 g/W, built from abundant crust-derived
-## materials (Concrete, Steel, Ceramic) — copper is avoided in power plants because
-## at 0.02 % of the crust it would bottleneck construction.  Mine output (below) is
-## sized so a few mines can feed that bill of materials in reasonable game-time.
+## Power-plant balance: build cost is traded against fuel.  The plants used to cost the same
+## ~2.0e-6 g per watt to build, which left the Solar Farm — no fuel, no CO₂, no research —
+## better than every one of them.  Now the fewer grams a plant burns, the more it costs to
+## stand up, per watt of its level-1 bill:
+##     Biomass Burner  0.2 W/g   the floor under the grid, never the cheap choice
+##     Solar Farm      0.4 W/g   at 1 AU, falling with the square of the distance from the Sun
+##     Nuclear Plant   0.8 W/g   a kilogram-scale fuel load, and the weapons risk
+##     Coal / Oil      1.2 W/g   quick to raise, and they burn several times their own mass a day
+##     Natural Gas     1.5 W/g
+##     Fusion Reactor  1.6 W/g   the endgame; its fuel exists only on moons and gas giants
+## All of it from abundant crust-derived materials (Concrete, Steel, Ceramic) — copper is
+## avoided in power plants because at 0.02 % of the crust it would bottleneck construction.
+## Mine output (below) is sized so a few mines can feed that bill of materials in reasonable
+## game-time.
 ##
 ## Gating note: try_build only requires that you *hold* a material, so a building
 ## whose material's recipe you haven't unlocked is never impossible — it simply
@@ -324,16 +333,16 @@ const CATEGORY_COLORS: Dictionary = {
 ## Encyclopedia text, by base name: what the structure is and any behaviour its stats don't show.
 ## Numbers live in BUILDINGS (the encyclopedia prints them from there), so none are repeated here.
 const DESCRIPTIONS: Dictionary = {
-	"Biomass Burner": "Power station fired on wood and crop residue. It regrows its own feedstock, so it burns nothing from inventory. The last one on a world cannot be demolished, and an asteroid impact, nuclear exchange or relativistic strike always leaves one standing, so a world's grid never falls to zero.",
-	"Coal Plant": "Pulverised-coal steam station. Burns coal from its world's inventory; when supply falls short, output and CO₂ emissions fall in proportion, and only the plants burning that fuel are affected.",
+	"Biomass Burner": "Power station fired on wood and crop residue. It regrows its own feedstock, so it burns nothing from inventory. The last one on a world cannot be demolished, and an asteroid impact, nuclear exchange or relativistic strike always leaves one standing, so a world's grid never falls to zero. That is what it is for: it is the dearest power there is to build.",
+	"Coal Plant": "Pulverised-coal steam station. Cheap and quick to build for its output, and it burns several times its own mass in coal every day. Burns coal from its world's inventory; when supply falls short, output and CO₂ emissions fall in proportion, and only the plants burning that fuel are affected.",
 	"Natural Gas Burner": "Combined-cycle gas turbine. Emits about half the CO₂ of a coal station per watt generated. Burns natural gas (CH₄) from its world's inventory.",
 	"Oil Plant": "Oil-fired steam station. Burns refined fuel oil, not crude: crude must first pass through Oil Refining. Crude oil is scarce in Earth's crust, so mining alone cannot sustain a large oil fleet.",
 	"Matter Depot": "Steel silos and concrete bunkers. Raises the civilisation-wide matter storage cap. Ground only.",
 	"Orbital Construction Station": "Docks, gantries and a foundry flying free. The only manufacturing capacity that needs no ground under it, and the difference between a stellar build site that raises a megastructure in a human lifetime and one that takes an age. Solar orbit starts with nothing but its baseline industry, and the first station cannot be built where there is no industry, so it is flown out prefabricated from a world that has some.",
-	"Battery Bank": "Grid-scale electrochemical storage. Raises the civilisation-wide energy storage cap.",
+	"Battery Bank": "Racks of sodium-ion cells. Raises the civilisation-wide energy storage cap, holding twice what a Flywheel Array does per tonne. Built from cells, so it needs a Battery Production line.",
 	"Flywheel Array": "Rotors spun in vacuum housings, storing energy kinetically. Raises the energy storage cap; can stand on gas giants.",
 	"Pumped Hydro Storage": "Water pumped uphill behind a dam. The only grid-scale energy store of 1945. Needs terrain and gravity, so rocky bodies only.",
-	"Solar Farm": "Utility-scale photovoltaic plant. Burns nothing and emits nothing. Output is proportional to the Sun's current luminosity: it rises as Sol brightens, peaks on the giant branches and falls to almost nothing once only a white dwarf remains.",
+	"Solar Farm": "Utility-scale photovoltaic plant. Burns nothing and emits nothing. Output is proportional to the Sun's current luminosity: it rises as Sol brightens, peaks on the giant branches and falls to almost nothing once only a white dwarf remains. It also falls with the square of the distance from the Sun: a farm on Mars collects under half what one on Earth does, one in the belt an eighth and one over Jupiter a twenty-seventh.",
 	"Mine": "Surface excavation. Yield is divided across the crust of the body it stands on, following the Extraction tab's allocation if one is set and crustal abundance otherwise. Mines on a moon deliver to their parent planet's inventory. Requires only concrete and no research, so mining can always be expanded.",
 	"Atmospheric Condenser": "Refrigerated intake towers that liquefy and fractionate the air. Yield is divided across the atmosphere of the body it stands on, following the Extraction allocation for any atmospheric compound it names and atmospheric abundance otherwise. The only source of volatiles the crust does not hold, and the only extraction possible on a gas giant. A body with no atmosphere yields nothing.",
 	"Workshop": "Assembly halls and machine tools. Adds factory capacity to its world: the manufacturing work that recipes and construction draw on each day.",
@@ -349,7 +358,7 @@ const DESCRIPTIONS: Dictionary = {
 	"Orbital Habitat": "Spun cylinder holding its own air, gravity and farmland. Houses people independently of the body it orbits and adds farm capacity. The only habitation that can be built in solar orbit. Draws power from the energy reserve every day.",
 	"Colony Dome": "Pressurised surface habitation. No world but Earth has a biosphere, so a colony's population ceiling is the habitat built for it; on a colony in the Sol system that ceiling is further scaled by how much power the world's own grid generates. Every colony ship lands with one. Draws power from the energy reserve every day.",
 	"Bunker": "Deep, hardened, stocked shelter network. In an asteroid impact or nuclear exchange on its world, at least this many people survive. Bunkers are the only structures that come through those events standing.",
-	"Fusion Reactor": "Superconducting tokamak plant. Burns helium-3, which cannot be manufactured: it is condensed from gas-giant atmospheres or mined from moon regolith. Emits no CO₂.",
+	"Fusion Reactor": "Superconducting tokamak plant. Burns helium-3, which cannot be manufactured: it is condensed from gas-giant atmospheres or mined from moon regolith. Emits no CO₂, and runs whatever the Sun is doing.",
 	"Automated Factory": "Lights-out robotic plant; the densest source of factory capacity.",
 	"Orbital Laser": "Directed-energy array. With one standing on any world, the star map can fire light-speed pulses at other star systems, and inbound asteroids, relativistic missiles and berserker swarms can be destroyed on approach at the cost of one shot from the energy reserve. Laser strikes against human worlds cannot be intercepted.",
 	"Orbital Compute Core": "Server modules flown in orbit, each cooled by its own radiators straight to the cold of space. The densest compute a civilisation can put up; enough of them rival the population's own thinking. Built in orbit, so it stands over any world, out in the belt or in solar orbit.",
@@ -403,18 +412,19 @@ const BUILDINGS := [
 	# it regrows its own feedstock, which keeps it a fuel-free floor under the grid so
 	# its "min_count": 1 can still guarantee power never collapses.
 	# Energy costs stay under the base energy storage cap (1e5) so these are
-	# buildable from the start without first raising the cap with Battery Banks; the
-	# real investment is the (uncapped) Concrete/Steel/Cu bill of materials.
-	# Material cost is balanced to energy output across ALL power plants at a constant
-	# ~2.0e-6 g per watt, and uses only abundant crust-derived materials (Concrete,
-	# Steel) — no copper, which at 0.02% of the crust would bottleneck construction.
-	# 132 GW × 2.0e-6 = 264 000 g total.
+	# buildable from the start without first raising the cap with storage; the
+	# real investment is the (uncapped) Concrete/Steel bill of materials.
+	# What that bill is per watt is set by the fuel (see "Power-plant balance" at the top):
+	# a fossil station is cheap to raise and burns several times its own mass a day.
+	# Biomass Burner — twice the old 2.0e-6 g/W.  It is the plant that can never be lost,
+	# and that is all it is for: at 0.2 W/g it is the dearest power there is to build, so
+	# nobody puts one up as a cheap fuel-free coal plant.
 	{"name": "Biomass Burner",
 		"levels": 1,
 		"category": "power",
 		"min_count": 1,
 		"allowed_types": ["rocky"],
-		"cost": {"Concrete": 160_000, "Steel": 104_000, "energy": 40_000},
+		"cost": {"Concrete": 320_000, "Steel": 208_000, "energy": 40_000},
 		"production": {"energy": 1.32e11},   # 132 GW
 		"co2_per_energy": 38.0},
 	# Coal is ~0.05 % of Earth's crust, so a handful of mines can just about feed the
@@ -422,7 +432,7 @@ const BUILDINGS := [
 	{"name": "Coal Plant",
 		"category": "power",
 		"allowed_types": ["rocky"],
-		"cost": {"Concrete": 160_000, "Steel": 104_000, "energy": 50_000},
+		"cost": {"Concrete": 53_000, "Steel": 35_000, "energy": 50_000},
 		"production": {"energy": 1.32e11},   # 132 GW fleet → 660 MW unit
 		# 660 MW at ~38 % thermal efficiency on 24 MJ/kg coal = 72 kg/s = 6.25e9 g/day.
 		# Authored per BUILDING in real grams/day (skips the units + MASS_SCALE transforms).
@@ -436,7 +446,7 @@ const BUILDINGS := [
 	{"name": "Natural Gas Burner",
 		"category": "power",
 		"allowed_types": ["rocky"],
-		"cost": {"Concrete": 120_000, "Steel": 88_000, "energy": 45_000},
+		"cost": {"Concrete": 40_000, "Steel": 29_000, "energy": 45_000},
 		"production": {"energy": 1.32e11},   # 132 GW fleet → 500 MW unit
 		"consumption": {"CH4": 1.31e9},
 		"co2_per_energy": 24.0},
@@ -446,7 +456,7 @@ const BUILDINGS := [
 	{"name": "Oil Plant",
 		"category": "power",
 		"allowed_types": ["rocky"],
-		"cost": {"Concrete": 160_000, "Steel": 104_000, "energy": 50_000},
+		"cost": {"Concrete": 53_000, "Steel": 35_000, "energy": 50_000},
 		"production": {"energy": 1.32e11},   # 132 GW fleet → 440 MW unit
 		# 440 MW at ~40 % efficiency on 42 MJ/kg fuel oil = 26 kg/s = 2.26e9 g/day.
 		"consumption": {"FuelOil": 2.26e9},
@@ -471,13 +481,17 @@ const BUILDINGS := [
 	# costs stay under the base energy cap (1e5) where they're meant to be reachable
 	# from the start; later ones assume you've already raised the cap with earlier ones.
 
-	# Battery Bank — grid-scale electrochemical battery banks.  The baseline store.
+	# Battery Bank — racks of sodium-ion cells on the ground.  It used to be steel and copper
+	# and the worst store per tonne there was, beaten by the flywheels unlocked beside it.  It
+	# is built from cells now — the Battery Production line — which is what lets it hold twice
+	# what a flywheel does per tonne: the first dense store, half an Orbital Battery, and
+	# gated by the research that makes the cells.
 	{"name": "Battery Bank",
 		"category": "storage",
 		"allowed_types": ["rocky", "belt"],
-		"cost": {"Steel": 10_000, "Cu": 8_000, "energy": 15_000},
+		"cost": {"Battery": 6_000, "Steel": 4_000, "Cu": 2_000, "energy": 15_000},
 		"production": {},
-		"storage": {"energy": 1_000_000.0}},
+		"storage": {"energy": 2_000_000.0}},
 
 	# Flywheel Array — kinetic storage in vacuum-spun rotors.  Cheap, copper-light,
 	# works anywhere; modest capacity.
@@ -499,9 +513,10 @@ const BUILDINGS := [
 		"storage": {"energy": 5_000_000.0}},
 
 	# Solar Farm — utility-scale photovoltaic plant, 50 GW.  The early, clean,
-	# fuel-free option: weaker than a fossil station but emits nothing, so several
-	# farms replace one 132 GW burner.  Cost scales with the new output (a real
-	# multi-GW array) so it stays a genuine investment rather than free power.
+	# fuel-free option: three times a coal station's bill per watt, and nothing to burn
+	# afterwards.  Rated at 1 AU: Game._insolation_at scales it by the inverse square of
+	# its world's distance from the Sun, so it is worth most close in and next to nothing
+	# past the belt, where the colonies run on reactors.
 	{"name": "Solar Farm",
 		"category": "power",
 		"allowed_types": ["rocky", "gas_giant", "belt"],
@@ -510,7 +525,8 @@ const BUILDINGS := [
 		# Output follows the Sun.  A panel is not a generator, it is a collector, so its yield
 		# rises with the ageing main sequence, spikes absurdly on the red-giant branch, and goes
 		# effectively dark once nothing is left but a white dwarf.  Everything that makes power
-		# in this game runs out eventually; this is how the solar fleet does it.
+		# in this game runs out eventually; this is how the solar fleet does it.  Distance
+		# dims it as well: a farm over Jupiter collects a twenty-seventh of one on Earth.
 		"solar": true},
 
 	# Mine — surface excavator on a concrete pad.  Concrete is coal-free and needs
@@ -551,16 +567,17 @@ const BUILDINGS := [
 		"mc_capacity": 15_000.0},
 
 	# ── Tier 1 (research-gated) ───────────────────────────────────────────────
-	# Nuclear Plant — multi-unit PWR complex, 300 GW.  The first power source that
-	# beats a fossil station: denser and cleaner, the workhorse upgrade once
-	# nuclear_power is researched.
+	# Nuclear Plant — multi-unit PWR complex, 300 GW.  Dearer to build than a fossil
+	# station (0.8 W/g against coal's 1.2) and a hundred thousand times lighter to fuel, with
+	# no CO₂: the workhorse once nuclear_power is researched, and the power of every colony
+	# too far out for sunlight.
 	# Burns ENRICHED uranium, not ore — the Uranium Enrichment cascade has to run first.
 	# A 1 GW PWR loads ~27 t of fresh fuel a year, so ~75 kg/day per reactor.  Authored per
 	# BUILDING in real grams/day, like the other fuelled plants.
 	{"name": "Nuclear Plant",
 		"category": "power",
 		"allowed_types": ["rocky", "belt"],
-		"cost": {"Concrete": 400_000, "Steel": 180_000, "Ceramic": 20_000, "energy": 80_000},
+		"cost": {"Concrete": 200_000, "Steel": 90_000, "Ceramic": 10_000, "energy": 80_000},
 		"production": {"energy": 3.0e11},   # 300 GW fleet → 1 GW reactor
 		"consumption": {"EnrichedU": 7.5e4}},
 
@@ -667,11 +684,12 @@ const BUILDINGS := [
 
 	# ── Tier 3 ────────────────────────────────────────────────────────────────
 	# Fusion Reactor — superconducting tokamak farm + ceramic blanket.  1.5 TW —
-	# the endgame power source, an order of magnitude past any fossil or fission plant.
+	# the endgame power source: the cheapest per watt to build (1.6 W/g), no weapons risk and
+	# no CO₂, and it runs whatever the Sun is doing.  What it costs is helium-3.
 	{"name": "Fusion Reactor",
 		"category": "power",
 		"allowed_types": ["rocky", "belt"],
-		"cost": {"Steel": 2_300_000, "Ceramic": 650_000, "Superconductor": 50_000, "energy": 200_000},
+		"cost": {"Steel": 575_000, "Ceramic": 162_500, "Superconductor": 12_500, "energy": 200_000},
 		"production": {"energy": 1.5e12},   # 1.5 TW fleet -> 1.5 GW plant
 		# D-He3 releases ~3.4e11 J per gram; at ~40 % conversion a 1.5 GW plant burns
 		# 1.1e-2 g/s = ~950 g/day.  Fusion is astonishingly fuel-light -- but the fuel only
@@ -1082,7 +1100,7 @@ const BUILDINGS := [
 		"storage": {"energy": 50_000_000.0}},
 
 	# Superconducting Storage Ring (SMES) — current circulating forever in a chilled
-	# superconducting loop.  The densest energy store: 50× a Battery Bank, but gated by
+	# superconducting loop.  The densest energy store: 25× a Battery Bank, but gated by
 	# superconducting research and built from costly superconductor.
 	{"name": "Superconducting Storage Ring",
 		"category": "storage",

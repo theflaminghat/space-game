@@ -250,6 +250,30 @@ cost more and do the same.
 **Research gates building availability** through `unlocks.gd`
 (`BUILDING_UNLOCK_REQUIREMENTS`), not through the building entry.
 
+### Power: build cost against fuel
+
+Every plant used to cost the same ~2.0e-6 g per watt to build, so the Solar Farm, which needs no
+research and burns nothing, was strictly better than every plant that burns something, and the
+fuel-free Biomass Burner was strictly better than coal and oil. Now the less a plant burns, the
+more it costs to stand up, per watt of its level-1 bill: Biomass Burner 0.2 W/g, Solar Farm 0.4,
+Nuclear Plant 0.8, Coal and Oil 1.2, Natural Gas 1.5, Fusion Reactor 1.6. A coal station is the
+quick way to power and burns several times its own mass a day. A reactor is dearer and burns
+almost nothing. The Biomass Burner is the floor under the grid (the last one cannot be
+demolished, and disasters always leave one) and is priced so that it is never the cheap choice.
+
+The Solar Farm is rated at 1 AU. `Game._insolation_at` scales it by the inverse square of its
+world's distance from the Sun, with a moon lit as its planet: Mercury 6.7×, Mars 0.43×, the belt
+0.13×, Jupiter 0.037×. It is applied inside `_planet_contribution` next to `solar_factor` (the
+Sun's output and the shades). It is fixed per world because the orbits do not move, so the cache's
+freshness test on `solar_factor` alone still sees every change. Earth is exactly 1, so a 1945
+grid is untouched, and colonies past the belt run on the reactors they land with.
+
+The Battery Bank is built from sodium-ion cells (`Battery Production`) and opens with the research
+that makes them (`high_energy_density_power`). That puts it between the stores of the start and
+the orbital ones: twice a Flywheel Array per tonne, half an Orbital Battery.
+`verify_power_balance` pins the build-cost order, the falloff measured off the grid, and the
+bank's cells and research.
+
 ### Policies: the page is the specification
 
 `politics_data.gd` holds the twelve policies and every formula they feed — `science_mult`,

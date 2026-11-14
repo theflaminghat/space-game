@@ -63,7 +63,8 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	"Shkadov Mirror":        "stellar_propulsion",
 	"Space Elevator":  "nanostructured_materials",
 	"Matter Depot":    "",
-	"Battery Bank":    "",
+	# Built from sodium-ion cells, so it opens with the research that makes them.
+	"Battery Bank":    "high_energy_density_power",
 	"Flywheel Array":  "",
 	"Pumped Hydro Storage": "",
 	"Orbital Vault":   "automated_logistics",

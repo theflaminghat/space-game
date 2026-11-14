@@ -9,9 +9,10 @@ extends SceneTree
 ## What is left to choose on is output per tonne of the bill, and on that several buildings had
 ## nothing going for them: the Orbital Compute Core computed less per tonne than the Data Center
 ## a tier before it, the Radio Telescope Array less than the Observatory unlocked with it, the
-## Space Telescope less than both, the Orbital Battery less than a starting Flywheel Array, the
-## Factory no more than the Workshop it needs chips to beat, the Orbital Construction Station
-## half the Automated Factory, and the Orbital Habitat a hundredth of a Colony Dome.  A
+## Space Telescope less than both, the Battery Bank and the Orbital Battery less than a starting
+## Flywheel Array, the Factory no more than the Workshop it needs chips to beat, the Orbital
+## Construction Station half the Automated Factory, and the Orbital Habitat a hundredth of a
+## Colony Dome.  A
 ## dominated building is worse than none: it spends a row of the build list on a decision that
 ## has already been made elsewhere.
 ##
@@ -43,12 +44,14 @@ const LADDERS: Array = [
 	["Orbital Compute Core",   "Data Center",           "compute",        2.0],
 	["Radio Telescope Array",  "Observatory",           "detection",      1.5],
 	["Space Telescope",        "Radio Telescope Array", "detection",      1.5],
-	["Orbital Battery",        "Flywheel Array",        "storage_energy", 2.0],
+	["Battery Bank",           "Flywheel Array",        "storage_energy", 1.5],
+	["Orbital Battery",        "Battery Bank",          "storage_energy", 1.5],
 	["Factory",                "Workshop",              "mc_capacity",    1.5],
 	["Orbital Construction Station", "Automated Factory", "mc_capacity",  1.5],
 ]
 ## [building, the rung above it, output]
 const CEILINGS: Array = [
+	["Battery Bank",    "Orbital Battery",              "storage_energy"],
 	["Orbital Battery", "Superconducting Storage Ring", "storage_energy"],
 ]
 
