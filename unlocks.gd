@@ -31,7 +31,8 @@ const BUILDING_UNLOCK_REQUIREMENTS := {
 	# A spun cylinder needs the same habitation engineering as a surface dome.
 	"Orbital Habitat": "space_habitation_systems",
 	"Fusion Reactor":  "fusion_engineering",
-	"AI Research Hub": "machine_learning_systems",
+	# The hub it replaced was unlocked here, so a save that could build one can build this.
+	"Orbital Compute Core": "machine_learning_systems",
 	"Orbital Laser":   "space_power_infrastructure",
 	"Thermal Radiator": "space_power_infrastructure",
 	# Beaming power is the other half of building a swarm -- the same node that unlocks the

@@ -1122,8 +1122,8 @@ const CHIP_RESEARCH: Array = ["microprocessors", "adiabatic_logic", "reversible_
 ##
 ## There is deliberately NO global multiplier from the grade on top of that.  There used to be,
 ## and once the chips became items that gate the tiers it counted the same progression twice: an
-## AI Research Hub III already produces 3.5² the compute of a level-1 hub, and that hub cannot be
-## built without the reversible chips, so reversible logic is already worth 12x on that line.
+## Orbital Compute Core III already produces 3.5² the compute of a level-1 core, and that core
+## cannot be built without the reversible chips, so reversible logic is already worth 12x on that line.
 ## Doubling it again from the research alone would also have paid out before a single better chip
 ## had been fabricated, which is the opposite of the point.
 
@@ -10908,6 +10908,47 @@ func save_game(path: String = "") -> bool:
 	print("Saved to %s" % path)
 	return true
 
+## Every building a loaded save names, under the name it has now (BuildingData.RENAMES): the
+## rosters, what is under construction, and how many of each are switched on.
+##
+## Not only the rosters.  A structure renamed in the roster and left under its old name in the
+## other two comes back wrong both ways: one queued under the old name completes as a building
+## the catalogue does not know, and one the player had switched off comes back switched ON,
+## because active_buildings is keyed by name and a name with no entry counts as all of it on.
+##
+## The switched-on counts go first, while the rosters still say which name each structure was
+## saved under: where an old name and a new one meet, what is on is each one's own count — or all
+## of it, for a name with no entry — added together.
+func _rename_saved_buildings() -> void:
+	for pname: String in active_buildings:
+		var was: Dictionary = active_buildings[pname]
+		var roster: Array = planet_buildings.get(pname, [])
+		var now: Dictionary = {}
+		for b: String in was:
+			var nb: String = BuildingData.renamed_building(b)
+			if now.has(nb):
+				continue
+			var names: Dictionary = {}
+			for m: String in was:
+				if BuildingData.renamed_building(m) == nb:
+					names[m] = true
+			for m in roster:
+				if BuildingData.renamed_building(str(m)) == nb:
+					names[str(m)] = true
+			var on: int = 0
+			for m: String in names:
+				on += int(was[m]) if was.has(m) else roster.count(m)
+			now[nb] = on
+		active_buildings[pname] = now
+	for pname: String in planet_buildings:
+		var roster: Array = planet_buildings[pname]
+		for i in range(roster.size()):
+			roster[i] = BuildingData.renamed_building(str(roster[i]))
+	for pname: String in build_queue:
+		for job_v in (build_queue[pname] as Array):
+			if job_v is Dictionary and (job_v as Dictionary).has("building"):
+				job_v["building"] = BuildingData.renamed_building(str(job_v["building"]))
+
 func load_game(path: String = "") -> void:
 	if path == "":
 		path = GameSession.current_save_path
@@ -10974,24 +11015,14 @@ func load_game(path: String = "") -> void:
 
 	if data.has("planet_buildings") and data["planet_buildings"] is Dictionary:
 		planet_buildings = _buildings_from_counts(data["planet_buildings"])
-		# Migrate renamed buildings so older saves keep their structures.
-		const _RENAMES := {
-			"Compute Core":  "Data Center",
-			"Biomass Grid":  "Biomass Burner",   # 1945 grids → real power plants
-			"Biomass Plant": "Biomass Burner",
-			"Coal Grid":     "Coal Plant",
-			"Oil Grid":      "Oil Plant",
-			"Storage Depot": "Matter Depot",     # storage split into matter + energy
-			"Orbital Cache": "Orbital Vault",
-		}
+		# Migrate renamed buildings so older saves keep their structures — and what is queued
+		# and switched off under the old name with them (_rename_saved_buildings).
+		_rename_saved_buildings()
 		# Retired "Orbital Array" infrastructure → deployed Solar Satellites.  Each old
 		# array was 24 swarm collectors, so carry that forward, then drop the buildings.
 		var _migrated_arrays: int = 0
 		for _pname: String in planet_buildings:
 			var _list: Array = planet_buildings[_pname]
-			for _i in range(_list.size()):
-				if _RENAMES.has(_list[_i]):
-					_list[_i] = _RENAMES[_list[_i]]
 			while _list.has("Orbital Array"):
 				_list.erase("Orbital Array")
 				_migrated_arrays += 1
@@ -11327,6 +11358,11 @@ func load_game(path: String = "") -> void:
 
 	if data.has("automation_rules") and data["automation_rules"] is Array:
 		_automation_rules = (data["automation_rules"] as Array).duplicate(true)
+		# A rule keeping N of a renamed building would otherwise look for it for ever, and
+		# build nothing.
+		for _rule_v in _automation_rules:
+			if _rule_v is Dictionary and (_rule_v as Dictionary).has("building"):
+				_rule_v["building"] = BuildingData.renamed_building(str(_rule_v["building"]))
 	else:
 		_automation_rules = []
 	if sidebar and sidebar.automation_panel:

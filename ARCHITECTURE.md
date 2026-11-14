@@ -178,10 +178,24 @@ must not make them worse.
 `compute = population × COMPUTE_PER_INDIVIDUAL (1e17 FLOP/s) + buildings`, so even a modest world
 thinks at ~10²⁶ FLOP/s. The compute buildings were authored at the scale of one server room — a
 Data Center at 20 FLOP/s — which put them twenty-four orders of magnitude under the people using
-them: ten thousand AI Research Hubs moved civilisation compute by 0.0000000007%. They are now
+them: ten thousand of the densest of them moved civilisation compute by 0.0000000007%. They are now
 authored at the scale everything else is, one entry being the planetary network rather than the
 building, anchored so a determined build-out roughly *matches* the population's own thinking
-(~47% of the total at the sandbox's build) rather than dwarfing it.
+rather than dwarfing it: ninety Orbital Compute Cores against ten billion people is about 0.9×.
+The sandbox goes well past that on purpose. It fills every solar-orbit lane, so its Sun carries 64
+cores of each tier, and machines do about nine tenths of its thinking.
+
+**The densest compute is in orbit.** The Orbital Compute Core replaced the AI Research Hub, a
+warehouse cluster on the ground, at the same compute per tier and behind the same research node
+(`machine_learning_systems`). In vacuum the heat has somewhere to go, so it can be built over any
+world, in the belt and in solar orbit, which the hub never could. It has its own lane, the
+outermost in the band (order 20), with a model from `tools/compute_core.py`: a dark rack block,
+white radiator wings edge-on to the body, and a data dish facing outward. A save written with
+hubs loads with cores one for one and tier for tier through `BuildingData.RENAMES`. Since that
+change the renames reach everything that names a building, not just the rosters
+(`Game._rename_saved_buildings`, plus the automation rules). Those places are the build queue, so
+a hub under construction finishes as a core; `active_buildings`, so a hub the player switched off
+stays off; and the automation rules, so a rule keeping hubs keeps cores.
 
 ### Time and speed
 
@@ -501,7 +515,7 @@ tier simply cannot be built out of the previous generation's electronics. Buildi
 needed chips (a concrete mine) are untouched at every tier.
 
 So the efficiency a better process buys arrives as **the output multiplier of the tier it lets
-you build**: an AI Research Hub III produces 3.5² the compute of a level-1 hub and cannot exist
+you build**: an Orbital Compute Core III produces 3.5² the compute of a level-1 core and cannot exist
 without reversible chips, which makes reversible logic worth ~12× on that line.
 
 There is deliberately **no global multiplier** from the grade on top of that. There was one
@@ -1499,8 +1513,8 @@ size in Blender changes nothing. The instance basis carries that scale and **not
 body's scale any more** — a structure is a fixed fraction of what it orbits, which is what keeps
 it inside a gap that is also a fraction of what it orbits.
 
-**The cap is what buys the inner system its room.** Twenty lanes a structure-and-a-third apart is
-a band 19 steps wide, and around the Sun that band has to fit between the Dyson swarm at 4.39 and
+**The cap is what buys the inner system its room.** Twenty-one lanes a structure-and-a-third apart
+is a band 20 steps wide, and around the Sun that band has to fit between the Dyson swarm at 4.39 and
 Mercury's perihelion at 8.58. Capping the star's hardware rather than everyone's lets the
 fraction be three times what it could otherwise be: Earth's structures are 0.0485 world units
 across rather than 0.0156, and the Sun's are the same 0.060 as Jupiter's.

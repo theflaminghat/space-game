@@ -43,7 +43,7 @@ const PLANET_LOADOUT: Dictionary = {
 	# on this list put together.
 	"Fusion Reactor":             1_900,   # power
 	"Automated Mine":                40,   # raw extraction
-	"AI Research Hub":               10,   # compute / science
+	"Orbital Compute Core":          10,   # compute / science
 	"Colony Dome":                    1,
 	"Space Elevator":                 1,
 	"Biomass Burner":                 1,   # min_count soft-lock guard

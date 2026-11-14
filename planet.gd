@@ -72,8 +72,8 @@ const MOON_TEXTURES := {
 ## tests/verify_lane_clearance.gd holds every body's band clear of every other body's.
 ##
 ## Where the band ENDS is no longer one number: the lanes are a structure-and-a-third apart and
-## the structures are capped in world size, so the Sun's twenty lanes close up into 1.020 .. 1.35
-## while Earth's spread over 1.020 .. 2.83.  The band is widest, in its own body's units, around
+## the structures are capped in world size, so the Sun's twenty-one lanes close up into
+## 1.020 .. 1.37 while Earth's spread over 1.020 .. 2.92.  The band is widest, in its own body's units, around
 ## the smallest bodies — which is what it costs to have hardware that is the same size wherever
 ## it is built and never standing inside its neighbours'.
 ##
@@ -183,6 +183,10 @@ const INFRA_LANES := [
 	# People.
 	{"type": "Orbital Habitat",       "order": 19, "color": Color(0.70, 0.95, 0.65),
 		"mesh": "habitat", "texture": "res://models/orbital_habitat_albedo.png"},
+	# Thinking: the densest compute there is, flown where cooling is free.  Outermost, as the
+	# newest lane: putting it anywhere else moves every lane outside it.
+	{"type": "Orbital Compute Core",  "order": 20, "color": Color(0.45, 0.90, 0.90),
+		"mesh": "compute_core", "texture": "res://models/orbital_compute_core_albedo.png"},
 	# Industry and its stores, flown out to a build site that has no ground.
 	{"type": "Orbital Construction Station", "order": 4, "color": Color(0.85, 0.88, 0.95),
 		"mesh": "station", "texture": "res://models/orbital_construction_station_albedo.png"},
@@ -889,8 +893,8 @@ func _create_moons() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(str(name))
 	# Outside this body's own band, which is wider around a small body than a large one because
-	# the structures are capped in world size: the Sun's lanes end at 1.35 scale units and
-	# Earth's at 2.83.
+	# the structures are capped in world size: the Sun's lanes end at 1.37 scale units and
+	# Earth's at 2.92.
 	# Off the INTACT size: a save that has the body part eaten shrinks it before its first frame,
 	# which is when these are built, and the moons would come up on orbits it never had.
 	var moon_inner: float = infra_band_outer(_intact_scale.x) + MOON_CLEARANCE
@@ -1068,6 +1072,7 @@ func _infra_mesh(kind: String) -> Mesh:
 ## res://models/orbital_shkadov.glb and its two maps are no longer loaded by anything.
 const LANE_MODELS := {
 	"battery": "res://models/orbital_battery.glb",
+	"compute_core": "res://models/orbital_compute_core.glb",
 	"core_mixer": "res://models/orbital_core_mixer.glb",
 	"depot":   "res://models/orbital_depot.glb",
 	"grid":    "res://models/orbital_power_grid.glb",

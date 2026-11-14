@@ -132,7 +132,7 @@ func _run() -> void:
 	var before_h: float = g.forecast_equilibrium_years("asteroid")
 	var arr: Array = g.planet_buildings.get("earth", [])
 	for i in 2000:
-		arr.append("AI Research Hub III")
+		arr.append("Orbital Compute Core III")
 	g.planet_buildings["earth"] = arr
 	g._mark_prod_dirty(); g._recompute_production_cache()
 	for _i in range(4): await process_frame

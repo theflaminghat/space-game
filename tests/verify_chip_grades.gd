@@ -3,8 +3,8 @@ extends SceneTree
 ## Three microchip processes, researched at three depths, each producing ITS OWN ITEM — and the
 ## tiers of anything built from chips require the chip of their generation.
 ##
-## So reaching the next rung costs a production line, not just a research node: an AI Research
-## Hub III cannot be built out of CMOS parts however much silicon is on hand, and researching
+## So reaching the next rung costs a production line, not just a research node: an Orbital
+## Compute Core III cannot be built out of CMOS parts however much silicon is on hand, and researching
 ## reversible logic pays nothing at all until reversible chips are actually being fabricated.
 ##
 ## The ladder is real physics: CMOS throws away of order 1e5 kT per logic transition, adiabatic
@@ -107,9 +107,9 @@ func _run() -> void:
 	check(tiered > 0, "there are higher tiers needing the better chips: %d" % tiered)
 
 	# Spelled out on the line where it matters most.
-	for pair: Array in [["AI Research Hub", "Microchip"],
-			["AI Research Hub II", "AdiabaticChip"],
-			["AI Research Hub III", "ReversibleChip"]]:
+	for pair: Array in [["Orbital Compute Core", "Microchip"],
+			["Orbital Compute Core II", "AdiabaticChip"],
+			["Orbital Compute Core III", "ReversibleChip"]]:
 		var b: Dictionary = g._find_building_def(str(pair[0]))
 		check(not b.is_empty(), "%s exists" % str(pair[0]))
 		check(_chip_cost(b).has(str(pair[1])),
@@ -141,27 +141,27 @@ func _run() -> void:
 	for it_v: Variant in items:
 		inv.erase(str(it_v))
 	root.get_node("ResearchTree").resources["energy"] = 1.0e30
-	check(not g.try_build("earth", "AI Research Hub III"),
+	check(not g.try_build("earth", "Orbital Compute Core III"),
 		"with the research but no reversible chips, the third tier cannot be built")
 
 	# Give it exactly the wrong generation of chip: still refused.
-	var need: Dictionary = (g._find_building_def("AI Research Hub III")["cost"] as Dictionary)
+	var need: Dictionary = (g._find_building_def("Orbital Compute Core III")["cost"] as Dictionary)
 	for k: String in need:
 		if k == "energy":
 			continue
 		g._add_stockpile(k if not items.has(k) else "Microchip",
 			float(need[k]) * 2.0, "earth")
-	check(not g.try_build("earth", "AI Research Hub III"),
+	check(not g.try_build("earth", "Orbital Compute Core III"),
 		"and CMOS chips are not a substitute for them")
 
 	# Now fabricate the right ones.
 	g._add_stockpile("ReversibleChip", float(need.get("ReversibleChip", 0.0)) * 2.0, "earth")
-	check(g.try_build("earth", "AI Research Hub III"),
+	check(g.try_build("earth", "Orbital Compute Core III"),
 		"with reversible chips in stock it builds")
 
 	# ── And the payoff arrives through the tier, not from the grade itself ──
-	var lv1: Dictionary = g._find_building_def("AI Research Hub")
-	var lv3: Dictionary = g._find_building_def("AI Research Hub III")
+	var lv1: Dictionary = g._find_building_def("Orbital Compute Core")
+	var lv3: Dictionary = g._find_building_def("Orbital Compute Core III")
 	var c1: float = float((lv1.get("production", {}) as Dictionary).get("compute", 0.0))
 	var c3: float = float((lv3.get("production", {}) as Dictionary).get("compute", 0.0))
 	check(c1 > 0.0 and c3 > c1 * 10.0,

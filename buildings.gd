@@ -8,13 +8,13 @@ class_name BuildingData
 ## a head, the brain-as-computer estimate), so even a modest world thinks at ~1e26 FLOP/s.  The
 ## compute entries below were authored at the scale of ONE server room — a Data Center at 20
 ## FLOP/s — which put them twenty-four orders of magnitude under the people using them: ten
-## thousand AI Research Hubs moved the civilisation's compute by 0.0000000007%, so the entire
-## category was unbuildable in any sense that mattered.
+## thousand of the densest of them moved the civilisation's compute by 0.0000000007%, so the
+## entire category was unbuildable in any sense that mattered.
 ##
 ## They are now authored at the scale everything else here is: one entry is the planetary
 ## NETWORK, not the building, the same way one swarm panel is 2e10 collectors.  The anchor is
 ## that a determined build-out should roughly MATCH the population's own thinking rather than
-## dwarf it — ninety AI Research Hubs against ten billion people comes out at about 0.9x, so
+## dwarf it — ninety Orbital Compute Cores against ten billion people comes out at about 0.9x, so
 ## machines are a real second source of compute and never a replacement for being numerous.
 ##
 ## Building costs are *bills of materials*: instead of a generic "minerals" lump,
@@ -70,6 +70,35 @@ const LEVEL_SCALAR_KEYS: Array = ["mc_capacity", "farm_capacity", "ranch_capacit
 	"atmo_rate", "radiator_capacity", "detection", "shelter",
 	"beam_send", "beam_recv", "star_lift_power", "shade_fraction", "husbandry_power",
 	"mirror_coverage", "disassembly_rate"]
+
+# ── Renamed and replaced structures ──────────────────────────────────────────
+## Old name → the name a save written before the change should load it as.  Base names only:
+## every tier goes with its base (renamed_building), so "AI Research Hub II" comes back as
+## "Orbital Compute Core II" and keeps the output it was built at.
+const RENAMES: Dictionary = {
+	"Compute Core":  "Data Center",
+	"Biomass Grid":  "Biomass Burner",   # 1945 grids → real power plants
+	"Biomass Plant": "Biomass Burner",
+	"Coal Grid":     "Coal Plant",
+	"Oil Grid":      "Oil Plant",
+	"Storage Depot": "Matter Depot",     # storage split into matter + energy
+	"Orbital Cache": "Orbital Vault",
+	# Replaced by its orbital successor one for one, at the same compute: a save keeps every
+	# FLOP it had, now flying overhead instead of standing on the ground.
+	"AI Research Hub": "Orbital Compute Core",
+}
+
+## What a building an older save names is called now: itself when nothing renamed it.
+static func renamed_building(building_name: String) -> String:
+	if RENAMES.has(building_name):
+		return str(RENAMES[building_name])
+	for suffix: String in LEVEL_SUFFIX:
+		if suffix == "" or not building_name.ends_with(suffix):
+			continue
+		var base: String = building_name.left(building_name.length() - suffix.length())
+		if RENAMES.has(base):
+			return str(RENAMES[base]) + suffix
+	return building_name
 
 # ── Structures there can only be one of ───────────────────────────────────────
 ## "max_count": n caps how many of a structure may stand on ONE BODY — used by the Shkadov
@@ -323,7 +352,7 @@ const DESCRIPTIONS: Dictionary = {
 	"Fusion Reactor": "Superconducting tokamak plant. Burns helium-3, which cannot be manufactured: it is condensed from gas-giant atmospheres or mined from moon regolith. Emits no CO₂.",
 	"Automated Factory": "Lights-out robotic plant; the densest source of factory capacity.",
 	"Orbital Laser": "Directed-energy array. With one standing on any world, the star map can fire light-speed pulses at other star systems, and inbound asteroids, relativistic missiles and berserker swarms can be destroyed on approach at the cost of one shot from the energy reserve. Laser strikes against human worlds cannot be intercepted.",
-	"AI Research Hub": "Warehouse-scale immersion-cooled clusters across the whole world. The densest compute a surface can carry; enough of them rival the population's own thinking.",
+	"Orbital Compute Core": "Server modules flown in orbit, each cooled by its own radiators straight to the cold of space. The densest compute a civilisation can put up; enough of them rival the population's own thinking. Built in orbit, so it stands over any world, out in the belt or in solar orbit.",
 	"Thermal Radiator": "Field of high-emissivity panels that sheds waste heat to space. Raises radiating capacity; power drawn beyond radiating capacity is curtailed.",
 	"Farm": "Open fields. Adds farm capacity; the crop is chosen as a recipe in the Production tab. Requires weather, so rocky bodies only.",
 	"Ranch": "Pens, pasture and handling. Adds ranch capacity, which livestock recipes draw on; the animal is chosen as a recipe.",
@@ -685,11 +714,14 @@ const BUILDINGS := [
 		"cost": {"Superconductor": 200_000, "Steel": 300_000, "Microchip": 50_000, "energy": 500_000},
 		"production": {}},
 
-	# AI Research Hub — warehouse-scale GPU cluster + immersion cooling.  80 c/s.
-	{"name": "AI Research Hub",
+	# Orbital Compute Core — server modules in orbit, radiating their heat to space.  It
+	# replaced the AI Research Hub, a warehouse cluster on the ground, at the same compute:
+	# the densest computing there is sits where cooling is free and there is room to grow.
+	# Aluminium frame rather than steel, because it has to fly; ceramic on the radiators.
+	{"name": "Orbital Compute Core",
 		"category": "science",
-		"allowed_types": ["rocky", "belt"],
-		"cost": {"Microchip": 20_000, "Steel": 12_000, "Cu": 10_000, "Plastic": 5_000, "energy": 250_000},
+		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
+		"cost": {"Microchip": 20_000, "Al": 12_000, "Cu": 10_000, "Ceramic": 5_000, "energy": 250_000},
 		"production": {"compute": 1.0e25}},
 
 	# Thermal Radiator — a field of high-emissivity panels that dumps the civilisation's

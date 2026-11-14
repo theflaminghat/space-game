@@ -1,13 +1,14 @@
 extends SceneTree
 
 ## The lanes that draw a MODELLED mesh instead of a placeholder primitive, and the contract
-## those models have to meet.  Twenty: every lane in INFRA_LANES, with no primitive stand-ins
+## those models have to meet.  Twenty-one: every lane in INFRA_LANES, with no primitive stand-ins
 ## left anywhere in the band.
 ##
-## It was twenty-one.  The Shkadov Mirror had the innermost lane and a model of its own, and has
-## neither now: there is one of it, it stands on the photosphere, and it is built as a plain
-## spherical cap in planet.gd rather than loaded.  Its clearances are in verify_infra_band and
-## its geometry in verify_shkadov.
+## It was twenty-one once before, and then twenty.  The Shkadov Mirror had the innermost lane and
+## a model of its own, and has neither now: there is one of it, it stands on the photosphere, and
+## it is built as a plain spherical cap in planet.gd rather than loaded.  Its clearances are in
+## verify_infra_band and its geometry in verify_shkadov.  The Orbital Compute Core made it
+## twenty-one again, outermost.
 ##
 ## None of these constraints is visible from looking at the model, which is why they are
 ## pinned here rather than left to whoever next opens Blender:
@@ -39,6 +40,14 @@ extends SceneTree
 ## should fail this test rather than quietly pass on a box and a checker.
 
 const MODELS := [
+	{
+		"type": "Orbital Compute Core", "kind": "compute_core",
+		"model": "res://models/orbital_compute_core.glb",
+		"texture": "res://models/orbital_compute_core_albedo.png",
+		# A rack block with its dish outward and its power module inward: it runs along the
+		# radial axis, its radiator wings out to either side of it.
+		"y_is": "long",
+	},
 	{
 		"type": "Orbital Vault", "kind": "depot",
 		"model": "res://models/orbital_depot.glb",

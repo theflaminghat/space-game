@@ -466,7 +466,7 @@ static func _pool_page(c: String, game: Node) -> String:
 				t += _li("Now: %s; produced %s per game-day" % [Units.format_si(float(res.get("science", 0.0)), "FLOP"), Units.format_si(float(game._get_total_production().get("science", 0.0)), "FLOP")])
 		"compute":
 			t += _sub("Rate · FLOP/s")
-			t += _p("Population times each person's compute (the best evolution node's FLOP/s), plus the fixed compute of labs, data centres and AI hubs; multiplied by research-speed research and by policy, and reduced in proportion during a brownout. It is the source of science.")
+			t += _p("Population times each person's compute (the best evolution node's FLOP/s), plus the fixed compute of labs, data centres and orbital compute cores; multiplied by research-speed research and by policy, and reduced in proportion during a brownout. It is the source of science.")
 			if game:
 				t += _li("Now: %s" % Units.format_si(float(game._get_compute_rate()), "FLOP/s"))
 	return t
