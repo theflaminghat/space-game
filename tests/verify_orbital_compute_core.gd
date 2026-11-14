@@ -2,14 +2,14 @@ extends SceneTree
 
 ## The AI Research Hub is gone, and the Orbital Compute Core stands in its place.
 ##
-## The hub was the densest compute a civilisation could build, a warehouse cluster on the ground.
-## Its replacement is the same compute flown in orbit, where cooling is free: buildable over any
-## world, in the belt and in solar orbit, drawn in a lane of its own, and unlocked where the hub
-## was.
+## The hub was meant to be the densest compute a civilisation could build, a warehouse cluster on
+## the ground, and computed less per tonne than the Data Center a tier before it.  Its replacement
+## is four times the hub flown in orbit, where cooling is free: buildable over any world, in the
+## belt and in solar orbit, drawn in a lane of its own, and unlocked where the hub was.
 ##
 ## What has to hold:
 ##   nothing in the catalogue, the unlocks or the sandbox still names the hub
-##   the core is the hub's compute, at every tier, on the hub's research node, and it builds over
+##   the core is four times the hub's compute, at every tier, on the hub's research node, and it builds over
 ##     every kind of body there is — the star included, which the hub never could
 ##   every body and the belt draw a lane for it, and the lane shows what is built
 ##   a save written with hubs loads with cores, one for one and tier for tier: in the rosters, in
@@ -28,8 +28,9 @@ func _initialize() -> void:
 const OLD: String = "AI Research Hub"
 const NEW: String = "Orbital Compute Core"
 const SUFFIXES: Array = ["", " II", " III"]
-## What the hub produced at level 1, which the core takes over.
+## What the hub produced at level 1, and what the core produces in its place.
 const HUB_COMPUTE: float = 1.0e25
+const CORE_COMPUTE: float = 4.0 * HUB_COMPUTE
 
 func _run() -> void:
 	seed(20261113)
@@ -59,9 +60,9 @@ func _run() -> void:
 		check(not d.is_empty(), "%s exists" % nm)
 		if d.is_empty():
 			continue
-		var want: float = HUB_COMPUTE * pow(BD.LEVEL_OUTPUT_MULT, float(i))
+		var want: float = CORE_COMPUTE * pow(BD.LEVEL_OUTPUT_MULT, float(i))
 		var got: float = float((d.get("production", {}) as Dictionary).get("compute", 0.0))
-		check(is_equal_approx(got, want), "%s computes what the hub's tier did: %s vs %s"
+		check(is_equal_approx(got, want), "%s computes four times what the hub's tier did: %s vs %s"
 			% [nm, str(got), str(want)])
 		check(str(d.get("category", "")) == "science", "%s is filed under science" % nm)
 	check(str(UL.BUILDING_UNLOCK_REQUIREMENTS.get(NEW, "?")) == "machine_learning_systems",
@@ -158,14 +159,14 @@ func _run() -> void:
 	var rule: Dictionary = (g._automation_rules[0] as Dictionary) if not g._automation_rules.is_empty() else {}
 	check(str(rule.get("building", "")) == NEW + " III",
 		"a rule keeping hubs keeps cores: %s" % str(rule.get("building", "none")))
-	# The compute came with them.
-	var want_c: float = HUB_COMPUTE * (2.0 + 1.0 * BD.LEVEL_OUTPUT_MULT
+	# Each switched-on hub came back as a switched-on core, computing what a core does.
+	var want_c: float = CORE_COMPUTE * (2.0 + 1.0 * BD.LEVEL_OUTPUT_MULT
 		+ 1.0 * pow(BD.LEVEL_OUTPUT_MULT, 2.0))
 	var got_c: float = 0.0
 	for nm: String in [NEW, NEW + " II", NEW + " III"]:
 		got_c += float((g._find_building_def(nm)["production"] as Dictionary)["compute"]) \
 			* g.active_count("earth", nm)
-	check(is_equal_approx(got_c, want_c), "Earth's switched-on cores compute what its hubs did: %s vs %s"
+	check(is_equal_approx(got_c, want_c), "Earth's switched-on cores compute what that many cores do: %s vs %s"
 		% [Units.format_si(got_c, "FLOP/s"), Units.format_si(want_c, "FLOP/s")])
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 

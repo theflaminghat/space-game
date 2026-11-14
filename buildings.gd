@@ -14,7 +14,7 @@ class_name BuildingData
 ## They are now authored at the scale everything else here is: one entry is the planetary
 ## NETWORK, not the building, the same way one swarm panel is 2e10 collectors.  The anchor is
 ## that a determined build-out should roughly MATCH the population's own thinking rather than
-## dwarf it — ninety Orbital Compute Cores against ten billion people comes out at about 0.9x, so
+## dwarf it — twenty-two Orbital Compute Cores against ten billion people comes out at about 0.9x, so
 ## machines are a real second source of compute and never a replacement for being numerous.
 ##
 ## Building costs are *bills of materials*: instead of a generic "minerals" lump,
@@ -588,14 +588,14 @@ const BUILDINGS := [
 		"allowed_types": ["rocky", "belt"],
 		"cost": {"Steel": 40_000, "Cu": 20_000, "Microchip": 4_000, "energy": 60_000},
 		"production": {},
-		"detection": 16.0},
+		"detection": 50.0},
 	# Space Telescope — an orbiting observatory above the atmosphere's blur and noise.
 	{"name": "Space Telescope",
 		"category": "observation",
 		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 120_000, "Glass": 60_000, "Superconductor": 8_000, "Microchip": 20_000, "energy": 300_000},
 		"production": {},
-		"detection": 60.0},
+		"detection": 400.0},
 
 	# ── Tier 2 ────────────────────────────────────────────────────────────────
 	# Automated Mine — robotic excavators + conveyors (10× basic mine).
@@ -606,14 +606,15 @@ const BUILDINGS := [
 		"cost": {"Steel": 40_000, "Plastic": 4_000, "Microchip": 300, "energy": 25_000},
 		"production": {"minerals": 80_000.0}},   # 10× the basic mine
 
-	# Factory — full production lines + automated tooling.  ~5× a Workshop's output;
-	# the mainstay of an industrialised world's Manufacturing Capacity.
+	# Factory — full production lines + automated tooling.  About twice a Workshop's capacity
+	# per tonne, which is what its chips buy; the mainstay of an industrialised world's
+	# Manufacturing Capacity.
 	{"name": "Factory",
 		"category": "industry",
 		"allowed_types": ["rocky", "gas_giant", "belt"],
 		"cost": {"Steel": 40_000, "Concrete": 30_000, "Microchip": 2_000, "energy": 60_000},
 		"production": {},
-		"mc_capacity": 80_000.0},
+		"mc_capacity": 160_000.0},
 
 	# Data Center — GPU server racks + liquid cooling.  20 c/s.
 	# Dominated by microchips; steel racks, copper interconnect, plastic housings.
@@ -633,7 +634,7 @@ const BUILDINGS := [
 		"cost": {"Steel": 900_000, "Al": 600_000, "Glass": 200_000, "Plastic": 120_000,
 			"Superconductor": 40_000, "energy": 700_000},
 		"production": {},
-		"habitat": 2.0e7,
+		"habitat": 2.0e8,
 		"farm_capacity": 400.0,
 		"consumption": {"energy": 3.0e8}},
 
@@ -702,7 +703,7 @@ const BUILDINGS := [
 		"cost": {"Steel": 260_000, "Al": 90_000, "Microchip": 40_000,
 			"Superconductor": 15_000, "energy": 420_000},
 		"production": {},
-		"mc_capacity": 500_000.0},
+		"mc_capacity": 2_000_000.0},
 
 	# Orbital Laser — a star-scale directed-energy weapon ringing the world it's built on.
 	# It can discharge the whole energy reserve in a single shot; firing it at another
@@ -715,14 +716,15 @@ const BUILDINGS := [
 		"production": {}},
 
 	# Orbital Compute Core — server modules in orbit, radiating their heat to space.  It
-	# replaced the AI Research Hub, a warehouse cluster on the ground, at the same compute:
-	# the densest computing there is sits where cooling is free and there is room to grow.
+	# replaced the AI Research Hub, a warehouse cluster on the ground that computed less per
+	# tonne than the Data Center a tier before it.  The core is four times the hub: the densest
+	# computing there is sits where cooling is free and there is room to grow.
 	# Aluminium frame rather than steel, because it has to fly; ceramic on the radiators.
 	{"name": "Orbital Compute Core",
 		"category": "science",
 		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Microchip": 20_000, "Al": 12_000, "Cu": 10_000, "Ceramic": 5_000, "energy": 250_000},
-		"production": {"compute": 1.0e25}},
+		"production": {"compute": 4.0e25}},
 
 	# Thermal Radiator — a field of high-emissivity panels that dumps the civilisation's
 	# waste heat to space.  "radiator_capacity" (W) adds to how much power the grid can draw
@@ -1070,13 +1072,14 @@ const BUILDINGS := [
 		"production": {},
 		"storage": {"minerals": 10_000_000.0}},
 
-	# Orbital Battery — orbital battery farm; 10× the Battery Bank (energy only).
+	# Orbital Battery — orbital battery farm (energy only).  Four times a Flywheel Array per
+	# tonne and two thirds of the Superconducting Storage Ring: the step between the two.
 	{"name": "Orbital Battery",
 		"category": "storage",
 		"allowed_types": ["rocky", "gas_giant", "star", "belt"],
 		"cost": {"Steel": 80_000, "Al": 40_000, "Battery": 30_000, "energy": 100_000},
 		"production": {},
-		"storage": {"energy": 10_000_000.0}},
+		"storage": {"energy": 50_000_000.0}},
 
 	# Superconducting Storage Ring (SMES) — current circulating forever in a chilled
 	# superconducting loop.  The densest energy store: 50× a Battery Bank, but gated by

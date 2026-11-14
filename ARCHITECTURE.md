@@ -181,14 +181,16 @@ Data Center at 20 FLOP/s — which put them twenty-four orders of magnitude unde
 them: ten thousand of the densest of them moved civilisation compute by 0.0000000007%. They are now
 authored at the scale everything else is, one entry being the planetary network rather than the
 building, anchored so a determined build-out roughly *matches* the population's own thinking
-rather than dwarfing it: ninety Orbital Compute Cores against ten billion people is about 0.9×.
+rather than dwarfing it: twenty-two Orbital Compute Cores against ten billion people is about 0.9×.
 The sandbox goes well past that on purpose. It fills every solar-orbit lane, so its Sun carries 64
-cores of each tier, and machines do about nine tenths of its thinking.
+cores of each tier, and machines do about 98% of its thinking.
 
 **The densest compute is in orbit.** The Orbital Compute Core replaced the AI Research Hub, a
-warehouse cluster on the ground, at the same compute per tier and behind the same research node
-(`machine_learning_systems`). In vacuum the heat has somewhere to go, so it can be built over any
-world, in the belt and in solar orbit, which the hub never could. It has its own lane, the
+warehouse cluster on the ground, behind the same research node (`machine_learning_systems`). The
+hub computed less per tonne than the Data Center a tier before it, so it was never worth building;
+the core is four times the hub, about three times the Data Center per tonne. In vacuum the heat
+has somewhere to go, so it can be built over any world, in the belt and in solar orbit, which the
+hub never could. It has its own lane, the
 outermost in the band (order 20), with a model from `tools/compute_core.py`: a dark rack block,
 white radiator wings edge-on to the body, and a data dish facing outward. A save written with
 hubs loads with cores one for one and tier for tier through `BuildingData.RENAMES`. Since that
@@ -196,6 +198,16 @@ change the renames reach everything that names a building, not just the rosters
 (`Game._rename_saved_buildings`, plus the automation rules). Those places are the build queue, so
 a hub under construction finishes as a core; `active_buildings`, so a hub the player switched off
 stays off; and the automation rules, so a rule keeping hubs keeps cores.
+
+**A later building beats the one it follows per tonne.** Compute, detection, energy storage and
+radiating capacity are civilisation-wide pools and no world caps what stands on it, so where a
+building may stand rarely separates two in the same role; output per gram of the bill does.
+Several ladders once ran backwards on that measure, and `verify_building_ladders` pins them the
+right way round: core over Data Center, Radio Telescope Array over Observatory, Space Telescope
+over the array, Orbital Battery between the Flywheel Array and the Superconducting Storage Ring,
+Factory over Workshop, Orbital Construction Station over Automated Factory. The Orbital Habitat
+may lose to the Colony Dome, which needs ground, but by no more than twenty to one, since over a
+gas giant or in solar orbit it is the only housing there is.
 
 ### Time and speed
 
